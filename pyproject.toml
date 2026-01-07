@@ -1,0 +1,96 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "terno-dbi"
+version = "0.1.0"
+description = "Database Interface Layer - Multi-database connectivity with SQLShield integration"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+keywords = ["database", "sql", "sqlalchemy", "django", "mcp", "ai"]
+authors = [
+    { name = "TernoAI", email = "team@ternoai.com" }
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Django",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+]
+
+dependencies = [
+    "Django>=4.2",
+    "sqlalchemy>=2.0",
+    "sqlshield>=0.0.20",
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+]
+
+[project.optional-dependencies]
+# Database drivers
+postgres = ["psycopg2-binary>=2.9"]
+mysql = ["pymysql>=1.1"]
+bigquery = ["sqlalchemy-bigquery>=1.9", "google-cloud-bigquery>=3.0"]
+snowflake = ["snowflake-sqlalchemy>=1.5"]
+databricks = ["databricks-sql-connector>=2.0"]
+oracle = ["oracledb>=1.4"]
+
+# All database drivers
+all-db = [
+    "psycopg2-binary>=2.9",
+    "pymysql>=1.1",
+    "sqlalchemy-bigquery>=1.9",
+    "google-cloud-bigquery>=3.0",
+    "snowflake-sqlalchemy>=1.5",
+    "databricks-sql-connector>=2.0",
+    "oracledb>=1.4",
+]
+
+# MCP server
+mcp = ["mcp>=1.0"]
+
+# Celery for async tasks
+celery = ["celery>=5.3", "redis>=5.0"]
+
+# Development
+dev = [
+    "pytest>=7.0",
+    "pytest-django>=4.5",
+    "ruff>=0.1",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/ternoai/ternodbi"
+"Repository" = "https://github.com/ternoai/ternodbi"
+"Documentation" = "https://docs.ternoai.com/dbi"
+
+[project.scripts]
+dbi-mcp = "dbi_layer.mcp.server:main"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/dbi_layer"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dbi_layer"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "dbi_server.settings"
+python_files = ["test_*.py", "*_test.py"]
