@@ -7,7 +7,30 @@ to preserve existing data when TernoAI imports from DBI Layer.
 
 from django.db import models
 from django.utils.translation import gettext_lazy as _
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, User
+
+
+
+
+class OrganisationBase(models.Model):
+    """
+    Abstract base class for Organisation.
+    Defines core fields shared across TernoDBI and TernoAI.
+    """
+    name = models.CharField(max_length=255)
+    subdomain = models.CharField(max_length=100, unique=True)
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='organisation')
+    verified = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
+
+    class Meta:
+        abstract = True
+
+    def __str__(self):
+        return f"{self.name} - {self.subdomain}"
+
 
 
 class DataSource(models.Model):
