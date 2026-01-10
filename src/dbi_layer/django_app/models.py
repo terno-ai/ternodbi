@@ -1,8 +1,8 @@
 """
 Django models for DBI Layer.
 
-These models are migrated from TernoAI. They use the same db_table names
-to preserve existing data when TernoAI imports from DBI Layer.
+These provide abstract base classes that TernoAI inherits from.
+TernoAI owns the concrete models and database tables.
 """
 
 from django.db import models
@@ -10,16 +10,24 @@ from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.models import Group, User
 
 
-
+# =============================================================================
+# Abstract Base Classes for Organisation (TernoAI inherits these)
+# =============================================================================
 
 class OrganisationBase(models.Model):
     """
     Abstract base class for Organisation.
-    Defines core fields shared across TernoDBI and TernoAI.
+    
+    TernoAI creates concrete Organisation that inherits from this.
+    This class defines the core fields for multi-tenancy.
     """
     name = models.CharField(max_length=255)
     subdomain = models.CharField(max_length=100, unique=True)
-    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='organisation')
+    owner = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='owned_organisations'
+    )
     verified = models.BooleanField(default=True)
     is_active = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
@@ -31,6 +39,67 @@ class OrganisationBase(models.Model):
     def __str__(self):
         return f"{self.name} - {self.subdomain}"
 
+
+class OrganisationUserBase(models.Model):
+    """
+    Abstract base class for Organisation-User relationship.
+    
+    TernoAI creates concrete OrganisationUser that inherits from this.
+    Child class must define: organisation = ForeignKey(Organisation, ...)
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
+
+    class Meta:
+        abstract = True
+
+    def __str__(self):
+        return f"{self.user.username}"
+
+
+class OrganisationDataSourceBase(models.Model):
+    """
+    Abstract base class for Organisation-DataSource relationship.
+    
+    TernoAI creates concrete OrganisationDataSource that inherits from this.
+    Child class must define:
+        - organisation = ForeignKey(Organisation, ...)
+        - datasource = ForeignKey(DataSource, ...)
+    """
+    # Note: datasource FK must be defined in child class to avoid cross-app reference issues
+    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
+    is_external = models.BooleanField(default=False)
+
+    class Meta:
+        abstract = True
+
+    def __str__(self):
+        return f"OrganisationDataSource {self.id}"
+
+
+class OrganisationGroupBase(models.Model):
+    """
+    Abstract base class for Organisation-Group relationship.
+    
+    TernoAI creates concrete OrganisationGroup that inherits from this.
+    Child class must define: organisation = ForeignKey(Organisation, ...)
+    """
+    group = models.ForeignKey(Group, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
+
+    class Meta:
+        abstract = True
+
+    def __str__(self):
+        return f"{self.group.name}"
+
+
+# =============================================================================
+# Concrete DataSource Models (owned by TernoDBI)
+# =============================================================================
 
 
 class DataSource(models.Model):
@@ -73,6 +142,26 @@ class DataSource(models.Model):
 
     def __str__(self):
         return self.display_name
+
+
+class DatasourceSuggestions(models.Model):
+    """
+    Query suggestions for a datasource.
+    These appear as example prompts when user selects a datasource.
+    """
+    data_source = models.ForeignKey(
+        DataSource, 
+        on_delete=models.CASCADE,
+        related_name='suggestions'
+    )
+    suggestion = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+
+    class Meta:
+        db_table = 'terno_datasourcesuggestions'
+
+    def __str__(self):
+        return f"{self.data_source.display_name}: {self.suggestion[:50]}"
 
 
 class Table(models.Model):
@@ -250,3 +339,98 @@ class TableRowFilter(models.Model):
 
     class Meta:
         db_table = 'terno_tablerowfilter'
+
+
+class ServiceToken(models.Model):
+    """
+    API tokens for authenticating service requests.
+    
+    Two token types:
+    - admin: Full access (create tokens, rename tables, hide columns, etc.)
+    - query: Read-only access (list datasources, tables, execute queries)
+    """
+    
+    class TokenType(models.TextChoices):
+        ADMIN = 'admin', _('Admin Service')
+        QUERY = 'query', _('Query Service')
+    
+    # Token key (stored as hash, prefix shown for identification)
+    key_hash = models.CharField(
+        max_length=128, 
+        unique=True, 
+        db_index=True,
+        help_text="SHA-256 hash of the token key"
+    )
+    key_prefix = models.CharField(
+        max_length=10,
+        help_text="First 8 chars of token for identification"
+    )
+    
+    # Token metadata
+    name = models.CharField(
+        max_length=100,
+        help_text="Friendly name for the token"
+    )
+    token_type = models.CharField(
+        max_length=10,
+        choices=TokenType.choices,
+        default=TokenType.QUERY
+    )
+    
+    # Scope (null = global access to all datasources)
+    datasources = models.ManyToManyField(
+        DataSource,
+        blank=True,
+        related_name='service_tokens',
+        help_text="If empty, token has global access. Otherwise limited to these datasources."
+    )
+    
+    # Audit fields
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_tokens'
+    )
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Token expiry time. Null means never expires."
+    )
+    last_used = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time this token was used"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Set to False to revoke the token"
+    )
+    
+    class Meta:
+        db_table = 'dbi_servicetoken'
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.name} ({self.token_type}) - {self.key_prefix}..."
+    
+    @classmethod
+    def generate_key(cls):
+        """Generate a new random token key."""
+        import secrets
+        return f"dbi_sk_{secrets.token_hex(24)}"
+    
+    @classmethod
+    def hash_key(cls, key):
+        """Hash a token key for storage."""
+        import hashlib
+        return hashlib.sha256(key.encode()).hexdigest()
+    
+    def has_access_to(self, datasource):
+        """Check if token has access to a specific datasource."""
+        # Global access if no datasources specified
+        if not self.datasources.exists():
+            return True
+        return self.datasources.filter(id=datasource.id).exists()
