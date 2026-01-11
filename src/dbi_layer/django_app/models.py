@@ -26,7 +26,7 @@ class OrganisationBase(models.Model):
     owner = models.ForeignKey(
         User, 
         on_delete=models.CASCADE, 
-        related_name='owned_organisations'
+        related_name='organisation'  # Match original TernoAI model
     )
     verified = models.BooleanField(default=True)
     is_active = models.BooleanField(default=False)
@@ -145,23 +145,16 @@ class DataSource(models.Model):
 
 
 class DatasourceSuggestions(models.Model):
-    """
-    Query suggestions for a datasource.
-    These appear as example prompts when user selects a datasource.
-    """
-    data_source = models.ForeignKey(
-        DataSource, 
-        on_delete=models.CASCADE,
-        related_name='suggestions'
-    )
-    suggestion = models.CharField(max_length=255)
-    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    """Query suggestions for a datasource."""
+    data_source = models.ForeignKey(DataSource, on_delete=models.CASCADE)
+    suggestion = models.TextField(blank=True, null=True)
 
     class Meta:
         db_table = 'terno_datasourcesuggestions'
 
     def __str__(self):
-        return f"{self.data_source.display_name}: {self.suggestion[:50]}"
+        return f"{self.data_source.display_name}: {self.suggestion[:50] if self.suggestion else ''}"
+
 
 
 class Table(models.Model):
