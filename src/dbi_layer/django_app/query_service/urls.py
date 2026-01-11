@@ -1,7 +1,8 @@
 """
 Query Service URL Configuration.
 
-All endpoints require a valid service token (admin or query) OR session auth.
+Simple REST API endpoints - no authentication required.
+Consuming apps should add their own auth layer.
 """
 
 from django.urls import path
@@ -15,11 +16,11 @@ urlpatterns = [
     path("info/", views.info, name="info"),
     
     # DataSources
-    path("datasources/", views.get_datasources, name="get_datasources"),
-    path("datasources/<str:ds_id>/", views.get_datasource_name, name="get_datasource_name"),
+    path("datasources/", views.list_datasources, name="list_datasources"),
+    path("datasources/<int:datasource_id>/", views.get_datasource, name="get_datasource"),
     
     # Tables
-    path("datasources/<int:datasource_id>/tables/", views.get_tables, name="get_tables"),
+    path("datasources/<int:datasource_id>/tables/", views.list_tables, name="list_tables"),
     path("datasources/<int:datasource_id>/tables/<int:table_id>/columns/", 
          views.list_columns, name="list_columns"),
     
@@ -27,7 +28,10 @@ urlpatterns = [
     path("datasources/<int:datasource_id>/foreign-keys/", views.list_foreign_keys, name="list_foreign_keys"),
     
     # Query Execution
-    path("datasources/<int:datasource_id>/query/", views.execute_sql, name="execute_sql"),
-    path("datasources/<int:datasource_id>/export/", views.export_sql_result, name="export_sql_result"),
+    path("datasources/<int:datasource_id>/query/", views.execute_query, name="execute_query"),
+    path("datasources/<int:datasource_id>/export/", views.export_query, name="export_query"),
+    
+    # Legacy endpoints (without datasource_id in URL)
+    path("query/", views.execute_query, name="execute_query_legacy"),
+    path("export/", views.export_query, name="export_query_legacy"),
 ]
-

@@ -7,9 +7,9 @@ Include these URLs in your project:
     ]
 
 This provides:
-    /dbi/admin/...   - Admin service (requires admin token)
-    /dbi/query/...   - Query service (requires query/admin token)
-    /dbi/...         - Legacy unauthenticated endpoints (deprecated)
+    /dbi/query/...   - Query service (list datasources, tables, execute queries)
+    /dbi/admin/...   - Admin service (create, update, delete datasources)
+    /dbi/...         - Direct endpoints (health, info, validation)
 """
 
 from django.urls import path, include
@@ -18,12 +18,11 @@ from . import views
 app_name = "dbi_layer"
 
 urlpatterns = [
-    # New authenticated services
+    # Core services
     path("admin/", include("dbi_layer.django_app.admin_service.urls")),
     path("query/", include("dbi_layer.django_app.query_service.urls")),
     
-    # Legacy unauthenticated endpoints (for backward compatibility)
-    # These should be deprecated in favor of /query/ endpoints
+    # Direct endpoints
     path("health/", views.health, name="health"),
     path("info/", views.info, name="info"),
     path("datasources/", views.list_datasources, name="list_datasources"),
