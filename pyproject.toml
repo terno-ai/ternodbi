@@ -31,6 +31,8 @@ dependencies = [
     "sqlshield>=0.0.20",
     "pandas>=2.0",
     "pyarrow>=14.0",
+    "sqlglot>=28.5.0",
+    "mcp>=1.25.0",
 ]
 
 [project.optional-dependencies]
