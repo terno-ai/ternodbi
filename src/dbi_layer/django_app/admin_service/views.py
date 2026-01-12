@@ -90,6 +90,10 @@ def create_datasource(request):
             enabled=True,
         )
         
+        # Auto-sync metadata to discover tables and columns
+        from dbi_layer.services.schema_utils import sync_metadata
+        sync_result = sync_metadata(ds.id)
+        
         return JsonResponse({
             "status": "success",
             "datasource_id": ds.id,
@@ -98,6 +102,10 @@ def create_datasource(request):
                 "name": ds.display_name,
                 "type": ds.type,
                 "enabled": ds.enabled,
+            },
+            "sync_result": {
+                "tables_created": sync_result.get("tables_created", 0),
+                "columns_created": sync_result.get("columns_created", 0),
             }
         }, status=201)
         

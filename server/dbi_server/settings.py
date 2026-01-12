@@ -62,11 +62,33 @@ TEMPLATES = [
 WSGI_APPLICATION = 'dbi_server.wsgi.application'
 
 
-# Database
+# Database - Use same as TernoAI when TERNO_PROJECT_PATH is set
+TERNO_PROJECT_PATH = os.environ.get('TERNO_PROJECT_PATH', '')
+USER_SQLITE_PATH = os.environ.get('USER_SQLITE_PATH', '')
+
+# Try to find TernoAI's database
+DB_PATH = None
+
+if TERNO_PROJECT_PATH:
+    # Use TernoAI project database directly
+    terno_db = Path(TERNO_PROJECT_PATH) / 'db.sqlite3'
+    if terno_db.exists():
+        DB_PATH = terno_db
+
+if DB_PATH is None:
+    # Try to find TernoAI database relative to this project
+    terno_ai_path = Path(__file__).resolve().parent.parent.parent.parent / 'terno-ai' / 'terno' / 'db.sqlite3'
+    if terno_ai_path.exists():
+        DB_PATH = terno_ai_path
+
+if DB_PATH is None:
+    # Use standalone database
+    DB_PATH = BASE_DIR / 'db.sqlite3'
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': DB_PATH,
     }
 }
 
