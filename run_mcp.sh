@@ -10,4 +10,4 @@ source /Users/sandeepgiri/projects/ternodbi/.venv/bin/activate
 
 # Run the MCP server
 # Usage: ./run_mcp.sh admin OR ./run_mcp.sh query
-python -m dbi_layer.mcp $1
+python -m dbi_layer.mcp "$@"
