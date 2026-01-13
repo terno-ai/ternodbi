@@ -139,7 +139,17 @@ def list_tables(request, datasource_id):
         tables = models.Table.objects.filter(data_source=ds)
         columns = models.TableColumn.objects.filter(table__in=tables)
     
-    # Build table_data
+    # Build tables list for SDK/MCP
+    tables_list = []
+    for table in tables:
+        tables_list.append({
+            'id': table.id,
+            'name': table.name,
+            'public_name': table.public_name,
+            'description': table.description or ""
+        })
+
+    # Build legacy table_data (optional, kept for whatever used it before)
     table_data = []
     for table in tables:
         table_columns = columns.filter(table_id=table.id)
@@ -158,6 +168,7 @@ def list_tables(request, datasource_id):
     
     return JsonResponse({
         'status': 'success',
+        'tables': tables_list,
         'table_data': table_data,
         'suggestions': suggestions
     })
@@ -165,9 +176,15 @@ def list_tables(request, datasource_id):
 
 @require_http_methods(["GET"])
 def list_columns(request, datasource_id, table_id):
-    """List columns for a specific table."""
+    """List columns for a specific table (Legacy/Hierarchical)."""
+    return get_table_columns(request, table_id)
+
+
+@require_http_methods(["GET"])
+def get_table_columns(request, table_id):
+    """List columns for a specific table by ID."""
     try:
-        table = models.Table.objects.get(id=table_id, data_source_id=datasource_id)
+        table = models.Table.objects.get(id=table_id)
     except models.Table.DoesNotExist:
         return JsonResponse({
             "status": "error",
@@ -183,6 +200,42 @@ def list_columns(request, datasource_id, table_id):
         "table_id": table_id,
         "table_name": table.name,
         "columns": list(columns)
+    })
+
+
+@require_http_methods(["GET"])
+def get_schema(request, datasource_id):
+    """
+    Get full schema (tables and columns) for a datasource.
+    """
+    try:
+        datasource = models.DataSource.objects.get(id=datasource_id)
+    except models.DataSource.DoesNotExist:
+        return JsonResponse({"error": "Datasource not found"}, status=404)
+        
+    tables = models.Table.objects.filter(data_source=datasource)
+    schema = []
+    
+    for table in tables:
+        columns = models.TableColumn.objects.filter(table=table)
+        schema.append({
+            "table_name": table.name,
+            "public_name": table.public_name,
+            "description": table.description or "",
+            "columns": [
+                {
+                    "name": c.name,
+                    "public_name": c.public_name,
+                    "type": c.data_type
+                }
+                for c in columns
+            ]
+        })
+    
+    return JsonResponse({
+        "datasource": datasource.display_name,
+        "schema": schema,
+        "table_count": len(schema)
     })
 
 
@@ -216,6 +269,45 @@ def list_foreign_keys(request, datasource_id):
         "datasource_id": datasource_id,
         "foreign_keys": fk_data
     })
+
+
+@require_http_methods(["GET"])
+def get_sample_data(request, table_id):
+    """Get sample rows for a table."""
+    try:
+        table = models.Table.objects.get(id=table_id)
+        ds = table.data_source
+    except models.Table.DoesNotExist:
+        return JsonResponse({
+            "status": "error",
+            "error": f"Table {table_id} not found"
+        }, status=404)
+    
+    try:
+        rows = int(request.GET.get("rows", 10))
+        # Hard limit to prevent fetching too much
+        rows = min(rows, 100)
+    except ValueError:
+        rows = 10
+        
+    sql = f"SELECT * FROM {table.name} LIMIT {rows}"
+    
+    # Use existing query execution service
+    # Note: We skip SQLShield translation here because we generate the SQL securely using internal table name
+    try:
+        result = execute_native_sql(ds, sql, page=1, per_page=rows)
+        return JsonResponse({
+            "status": "success",
+            "table_id": table_id,
+            "columns": result.get("columns", []),
+            "data": result.get("data", [])
+        })
+    except Exception as e:
+        logger.exception(f"Sample data error: {e}")
+        return JsonResponse({
+            "status": "error",
+            "error": str(e)
+        }, status=500)
 
 
 # =============================================================================

@@ -29,4 +29,11 @@ urlpatterns = [
     
     # Validation
     path("validate/", views.validate_connection, name="validate_connection"),
+    
+    # Metadata Sync
+    path("datasources/<int:datasource_id>/sync/", views.sync_metadata, name="sync_metadata"),
+    
+    # AI Helpers (Description Generation)
+    path("datasources/<int:datasource_id>/tables/<str:table_name>/info/", views.get_table_info, name="get_table_info"),
+    path("datasources/<int:datasource_id>/tables/info/", views.get_all_tables_info, name="get_all_tables_info"),
 ]

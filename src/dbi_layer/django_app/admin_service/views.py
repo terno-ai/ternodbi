@@ -286,6 +286,9 @@ def update_column(request, column_id):
         if "public_name" in body:
             column.public_name = body["public_name"]
             updated.append("public_name")
+        if "description" in body:
+            column.description = body["description"]
+            updated.append("description")
         
         if updated:
             column.save(update_fields=updated)
@@ -461,3 +464,136 @@ def validate_connection(request):
             "status": "error",
             "error": str(e)
         }, status=500)
+
+
+# =============================================================================
+# Metadata Sync
+# =============================================================================
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def sync_metadata(request, datasource_id):
+    """
+    Trigger metadata synchronization for a datasource.
+    Discover tables, columns, and foreign keys.
+    """
+    try:
+        ds = models.DataSource.objects.get(id=datasource_id)
+    except models.DataSource.DoesNotExist:
+        return JsonResponse({
+            "status": "error",
+            "error": f"DataSource {datasource_id} not found"
+        }, status=404)
+    
+    try:
+        body = json.loads(request.body)
+        overwrite = body.get("overwrite", False)
+    except json.JSONDecodeError:
+        overwrite = False
+    
+    try:
+        from dbi_layer.services.schema_utils import sync_metadata
+        sync_result = sync_metadata(ds.id, overwrite)
+        
+        return JsonResponse({
+            "status": "success",
+            "datasource_id": ds.id,
+            "sync_result": sync_result
+        })
+    except Exception as e:
+        logger.exception(f"Sync metadata error: {e}")
+        return JsonResponse({
+            "status": "error",
+            "error": str(e)
+        }, status=500)
+
+
+# =============================================================================
+# Helper Tools for AI Agents (Description Generation)
+# =============================================================================
+
+@require_http_methods(["GET"])
+def get_table_info(request, datasource_id, table_name):
+    """
+    Get comprehensive info for a table to help AI generate descriptions.
+    Includes: columns, types, sample data (small), existing description.
+    """
+    try:
+        ds = models.DataSource.objects.get(id=datasource_id)
+    except models.DataSource.DoesNotExist:
+        return JsonResponse({"error": f"DataSource {datasource_id} not found"}, status=404)
+        
+    try:
+        table = models.Table.objects.get(data_source=ds, name=table_name)
+    except models.Table.DoesNotExist:
+        return JsonResponse({"error": f"Table {table_name} not found"}, status=404)
+        
+    # Get columns
+    columns = models.TableColumn.objects.filter(table=table).values(
+        'name', 'data_type', 'description'
+    )
+    
+    # Get sample data (small batch)
+    try:
+        from dbi_layer.services.query import execute_native_sql
+        # We use a safe internal query 
+        sql = f"SELECT * FROM {table.name} LIMIT 3" 
+        sample_result = execute_native_sql(ds, sql, page=1, per_page=3)
+        sample_rows = sample_result.get('data', [])
+    except Exception as e:
+        logger.warning(f"Could not fetch sample data for {table_name}: {e}")
+        sample_rows = []
+
+    return JsonResponse({
+        "status": "success",
+        "table": {
+            "name": table.name,
+            "description": table.description,
+            "columns": list(columns),
+            "sample_rows": sample_rows
+        }
+    })
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def get_all_tables_info(request, datasource_id):
+    """
+    Get info for multiple tables for batch description generation.
+    Body: {"table_names": ["users", "orders"]} (Optional, else all)
+    """
+    try:
+        ds = models.DataSource.objects.get(id=datasource_id)
+    except models.DataSource.DoesNotExist:
+        return JsonResponse({"error": f"DataSource {datasource_id} not found"}, status=404)
+    
+    try:
+        body = json.loads(request.body)
+        table_names = body.get("table_names", [])
+    except:
+        table_names = []
+        
+    qs = models.Table.objects.filter(data_source=ds)
+    if table_names:
+        qs = qs.filter(name__in=table_names)
+    
+    # Optimize query
+    qs = qs.prefetch_related('columns')
+    
+    results = []
+    # Limit to avoid timeouts on huge DBs - max 20 tables per batch recommendation
+    # But user might request all. We'll return basic info for all.
+    
+    for table in qs:
+        # We skip sample data for "all tables" to be fast
+        columns = list(table.columns.all().values('name', 'data_type', 'description'))
+        results.append({
+            "name": table.name,
+            "description": table.description,
+            "columns": columns
+        })
+        
+    return JsonResponse({
+        "status": "success",
+        "tables": results
+    })

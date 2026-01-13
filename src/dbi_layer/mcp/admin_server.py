@@ -19,262 +19,16 @@ from typing import Any, Dict, List
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
+from dbi_layer.client import TernoDBIClient
 
-# Setup Django for TernoDBI
-# By default, uses TernoDBI standalone server settings (dbi_server.settings)
-# For TernoAI integration, set:
-#   - TERNO_PROJECT_PATH=/path/to/terno-ai/terno
-#   - DJANGO_SETTINGS_MODULE=mysite.settings
-
-# Add TernoDBI server to path (for standalone mode)
-TERNODBI_SERVER_PATH = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'server')
-if os.path.exists(TERNODBI_SERVER_PATH):
-    sys.path.insert(0, os.path.abspath(TERNODBI_SERVER_PATH))
-
-# Optional: Add custom project path (for TernoAI integration)
-TERNO_PROJECT_PATH = os.environ.get('TERNO_PROJECT_PATH', '')
-if TERNO_PROJECT_PATH and TERNO_PROJECT_PATH not in sys.path:
-    sys.path.insert(0, TERNO_PROJECT_PATH)
-
-# Default to TernoDBI standalone settings
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dbi_server.settings')
-
-import django
-django.setup()
-
-from asgiref.sync import sync_to_async
-from dbi_layer.django_app import models
-from dbi_layer.services.validation import validate_datasource_input
-from dbi_layer.services import schema_utils
-
+# Setup logging
 logger = logging.getLogger(__name__)
 
+# Initialize SDK Client
+# Requires TERNODBI_API_URL to be set, or defaults to what SDK uses (localhost:8000)
+client = TernoDBIClient()
+
 server = Server("ternodbi-admin")
-
-
-# Helper functions to wrap sync Django ORM calls
-@sync_to_async
-def get_datasources():
-    datasources = list(models.DataSource.objects.filter(enabled=True))
-    return [
-        {
-            "id": ds.id,
-            "name": ds.display_name,
-            "type": ds.type,
-            "description": ds.description or ""
-        }
-        for ds in datasources
-    ]
-
-
-@sync_to_async
-def get_tables(datasource_id):
-    tables = list(models.Table.objects.filter(data_source_id=datasource_id))
-    return [
-        {
-            "id": t.id,
-            "name": t.name,
-            "public_name": t.public_name,
-            "description": t.description or ""
-        }
-        for t in tables
-    ]
-
-
-@sync_to_async
-def rename_table(table_id, public_name):
-    table = models.Table.objects.get(id=table_id)
-    old_name = table.public_name
-    table.public_name = public_name
-    table.save()
-    return {
-        "success": True,
-        "table_id": table_id,
-        "old_public_name": old_name,
-        "new_public_name": public_name
-    }
-
-
-@sync_to_async
-def update_table_description(table_id, description):
-    table = models.Table.objects.get(id=table_id)
-    table.description = description
-    table.save()
-    return {
-        "success": True,
-        "table_id": table_id,
-        "description": description
-    }
-
-
-@sync_to_async
-def get_columns(table_id):
-    columns = list(models.TableColumn.objects.filter(table_id=table_id))
-    return [
-        {
-            "id": c.id,
-            "name": c.name,
-            "public_name": c.public_name,
-            "data_type": c.data_type
-        }
-        for c in columns
-    ]
-
-
-@sync_to_async
-def rename_column(column_id, public_name):
-    column = models.TableColumn.objects.get(id=column_id)
-    old_name = column.public_name
-    column.public_name = public_name
-    column.save()
-    return {
-        "success": True,
-        "column_id": column_id,
-        "old_public_name": old_name,
-        "new_public_name": public_name
-    }
-
-
-@sync_to_async
-def get_suggestions(datasource_id):
-    suggestions = list(models.DatasourceSuggestions.objects.filter(data_source_id=datasource_id))
-    return [
-        {
-            "id": s.id,
-            "suggestion": s.suggestion
-        }
-        for s in suggestions
-    ]
-
-
-@sync_to_async
-def add_suggestion(datasource_id, suggestion_text):
-    datasource = models.DataSource.objects.get(id=datasource_id)
-    suggestion = models.DatasourceSuggestions.objects.create(
-        data_source=datasource,
-        suggestion=suggestion_text
-    )
-    return {
-        "success": True,
-        "suggestion_id": suggestion.id,
-        "suggestion": suggestion_text
-    }
-
-
-@sync_to_async
-def delete_suggestion(suggestion_id):
-    suggestion = models.DatasourceSuggestions.objects.get(id=suggestion_id)
-    suggestion.delete()
-    return {
-        "success": True,
-        "deleted_suggestion_id": suggestion_id
-    }
-
-
-@sync_to_async
-def validate_connection_sync(db_type, connection_str, connection_json=None):
-    """Validate a database connection."""
-    error = validate_datasource_input(db_type, connection_str, connection_json)
-    if error:
-        return {"valid": False, "error": error}
-    return {"valid": True, "message": "Connection validated successfully"}
-
-
-@sync_to_async
-def add_datasource_sync(display_name, db_type, connection_str, connection_json=None, description=""):
-    """Create a new datasource and auto-sync metadata."""
-    # Validate connection first
-    error = validate_datasource_input(db_type, connection_str, connection_json)
-    if error:
-        return {"success": False, "error": f"Connection validation failed: {error}"}
-    
-    # Create datasource
-    ds = models.DataSource.objects.create(
-        display_name=display_name,
-        type=db_type.lower(),
-        connection_str=connection_str,
-        connection_json=connection_json,
-        description=description,
-        dialect_name=db_type.lower(),
-        enabled=True,
-    )
-    
-    # Auto-sync metadata to discover tables and columns
-    sync_result = schema_utils.sync_metadata(ds.id)
-    
-    return {
-        "success": True,
-        "datasource_id": ds.id,
-        "datasource": {
-            "id": ds.id,
-            "name": ds.display_name,
-            "type": ds.type,
-            "enabled": ds.enabled,
-        },
-        "sync_result": {
-            "tables_created": sync_result.get("tables_created", 0),
-            "columns_created": sync_result.get("columns_created", 0),
-        }
-    }
-
-
-@sync_to_async
-def delete_datasource_sync(datasource_id):
-    """Delete a datasource and all its metadata."""
-    ds = models.DataSource.objects.get(id=datasource_id)
-    name = ds.display_name
-    ds.delete()
-    return {
-        "success": True,
-        "message": f"Datasource '{name}' and all its metadata have been deleted"
-    }
-
-
-@sync_to_async
-def get_table_info_sync(datasource_id, table_name):
-    """Get detailed table information for description generation."""
-    datasource = models.DataSource.objects.get(id=datasource_id, enabled=True)
-    return schema_utils.get_table_info(datasource, table_name)
-
-
-@sync_to_async
-def get_all_tables_info_sync(datasource_id, table_names=None):
-    """Get info for all tables in a datasource."""
-    return schema_utils.get_datasource_tables_info(datasource_id, table_names)
-
-
-@sync_to_async
-def update_column_description_sync(column_id, description):
-    """Update the description of a column."""
-    column = models.TableColumn.objects.get(id=column_id)
-    column.description = description
-    column.save()
-    return {
-        "success": True,
-        "column_id": column_id,
-        "description": description
-    }
-
-
-@sync_to_async
-def update_column_public_name_sync(column_id, public_name):
-    """Update the public name of a column."""
-    column = models.TableColumn.objects.get(id=column_id)
-    old_name = column.public_name
-    column.public_name = public_name
-    column.save()
-    return {
-        "success": True,
-        "column_id": column_id,
-        "old_public_name": old_name,
-        "new_public_name": public_name
-    }
-
-
-@sync_to_async
-def sync_metadata_sync(datasource_id, overwrite=False):
-    """Sync metadata from database - discover tables and columns."""
-    return schema_utils.sync_metadata(datasource_id, overwrite)
 
 
 @server.list_tools()
@@ -539,24 +293,7 @@ async def list_tools() -> List[Tool]:
                 "required": ["column_id", "description"]
             }
         ),
-        Tool(
-            name="update_column_public_name",
-            description="Update the public display name of a column",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "column_id": {
-                        "type": "integer",
-                        "description": "ID of the column"
-                    },
-                    "public_name": {
-                        "type": "string",
-                        "description": "New public display name for the column"
-                    }
-                },
-                "required": ["column_id", "public_name"]
-            }
-        ),
+
         Tool(
             name="sync_metadata",
             description="Discover and sync tables/columns from the database. Run this after adding a new datasource to load its schema.",
@@ -584,8 +321,11 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
     try:
         result = None
         
+        # NOTE: For some tools missing in SDK, we return error for now until API is updated.
+        # This is expected during transition.
+        
         if name == "list_datasources":
-            datasources = await get_datasources()
+            datasources = client.list_datasources()
             result = {
                 "datasources": datasources,
                 "count": len(datasources)
@@ -593,7 +333,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         
         elif name == "list_tables":
             datasource_id = arguments["datasource_id"]
-            tables = await get_tables(datasource_id)
+            tables = client.list_tables(datasource_id)
             result = {
                 "tables": tables,
                 "count": len(tables)
@@ -602,16 +342,16 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         elif name == "rename_table":
             table_id = arguments["table_id"]
             public_name = arguments["public_name"]
-            result = await rename_table(table_id, public_name)
+            result = client.update_table(table_id, public_name=public_name)
         
         elif name == "update_table_description":
             table_id = arguments["table_id"]
             description = arguments["description"]
-            result = await update_table_description(table_id, description)
+            result = client.update_table(table_id, description=description)
         
         elif name == "list_columns":
             table_id = arguments["table_id"]
-            columns = await get_columns(table_id)
+            columns = client.list_columns(table_id)
             result = {
                 "columns": columns,
                 "count": len(columns)
@@ -620,30 +360,26 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         elif name == "rename_column":
             column_id = arguments["column_id"]
             public_name = arguments["public_name"]
-            result = await rename_column(column_id, public_name)
+            result = client.update_column(column_id, public_name=public_name)
         
         elif name == "list_suggestions":
             datasource_id = arguments["datasource_id"]
-            suggestions = await get_suggestions(datasource_id)
-            result = {
-                "suggestions": suggestions,
-                "count": len(suggestions)
-            }
+            result = client.list_suggestions(datasource_id)
         
         elif name == "add_suggestion":
             datasource_id = arguments["datasource_id"]
             suggestion_text = arguments["suggestion"]
-            result = await add_suggestion(datasource_id, suggestion_text)
+            result = client.add_suggestion(datasource_id, suggestion_text)
         
         elif name == "delete_suggestion":
             suggestion_id = arguments["suggestion_id"]
-            result = await delete_suggestion(suggestion_id)
+            result = client.delete_suggestion(suggestion_id)
         
         elif name == "validate_connection":
             db_type = arguments["type"]
             connection_str = arguments["connection_str"]
             connection_json = arguments.get("connection_json")
-            result = await validate_connection_sync(db_type, connection_str, connection_json)
+            result = client.validate_connection(db_type, connection_str, connection_json)
         
         elif name == "add_datasource":
             display_name = arguments["display_name"]
@@ -651,50 +387,38 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             connection_str = arguments["connection_str"]
             connection_json = arguments.get("connection_json")
             description = arguments.get("description", "")
-            result = await add_datasource_sync(display_name, db_type, connection_str, connection_json, description)
+            result = client.create_datasource(display_name, db_type, connection_str, connection_json, description)
         
         elif name == "delete_datasource":
             datasource_id = arguments["datasource_id"]
-            result = await delete_datasource_sync(datasource_id)
+            result = client.delete_datasource(datasource_id)
         
         elif name == "get_table_info":
             datasource_id = arguments["datasource_id"]
             table_name = arguments["table_name"]
-            result = await get_table_info_sync(datasource_id, table_name)
+            result = client.get_table_info(datasource_id, table_name)
         
         elif name == "get_all_tables_info":
             datasource_id = arguments["datasource_id"]
             table_names = arguments.get("table_names")
-            result = await get_all_tables_info_sync(datasource_id, table_names)
+            result = client.get_all_tables_info(datasource_id, table_names)
         
         elif name == "update_column_description":
             column_id = arguments["column_id"]
             description = arguments["description"]
-            result = await update_column_description_sync(column_id, description)
+            result = client.update_column(column_id, description=description)
         
-        elif name == "update_column_public_name":
-            column_id = arguments["column_id"]
-            public_name = arguments["public_name"]
-            result = await update_column_public_name_sync(column_id, public_name)
         
         elif name == "sync_metadata":
             datasource_id = arguments["datasource_id"]
             overwrite = arguments.get("overwrite", False)
-            result = await sync_metadata_sync(datasource_id, overwrite)
+            result = client.sync_metadata(datasource_id, overwrite=overwrite)
         
         else:
             result = {"error": f"Unknown tool: {name}"}
         
         return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
     
-    except models.DataSource.DoesNotExist:
-        return [TextContent(type="text", text=json.dumps({"error": "Datasource not found"}))]
-    except models.Table.DoesNotExist:
-        return [TextContent(type="text", text=json.dumps({"error": "Table not found"}))]
-    except models.TableColumn.DoesNotExist:
-        return [TextContent(type="text", text=json.dumps({"error": "Column not found"}))]
-    except models.DatasourceSuggestions.DoesNotExist:
-        return [TextContent(type="text", text=json.dumps({"error": "Suggestion not found"}))]
     except Exception as e:
         logger.exception(f"Error in Admin MCP tool {name}: {e}")
         return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
@@ -702,8 +426,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
 
 async def run_server():
     """Run the Admin MCP server."""
-    print("⚙️ Starting TernoDBI Admin MCP Server", file=sys.stderr)
-    
+    print(f"⚙️ Starting TernoDBI Admin MCP Server (API: {client.base_url})", file=sys.stderr)
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
 

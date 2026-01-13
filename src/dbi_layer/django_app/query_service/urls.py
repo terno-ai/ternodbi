@@ -31,6 +31,15 @@ urlpatterns = [
     path("datasources/<int:datasource_id>/query/", views.execute_query, name="execute_query"),
     path("datasources/<int:datasource_id>/export/", views.export_query, name="export_query"),
     
+    # Sample Data
+    path("tables/<int:table_id>/sample/", views.get_sample_data, name="get_sample_data"),
+    
+    # Schema
+    path("datasources/<int:datasource_id>/schema/", views.get_schema, name="get_schema"),
+    
+    # Direct access (Clean ID based)
+    path("tables/<int:table_id>/columns/", views.get_table_columns, name="get_table_columns"),
+
     # Legacy endpoints (without datasource_id in URL)
     path("query/", views.execute_query, name="execute_query_legacy"),
     path("export/", views.export_query, name="export_query_legacy"),
