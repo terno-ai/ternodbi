@@ -14,11 +14,11 @@ import sys
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python -m dbi_layer.mcp <query|admin>")
-        print("")
-        print("Available servers:")
-        print("  query  - Query MCP server (list tables, execute queries, get schema)")
-        print("  admin  - Admin MCP server (rename tables/columns, manage suggestions)")
+        print("Usage: python -m dbi_layer.mcp <query|admin>", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Available servers:", file=sys.stderr)
+        print("  query  - Query MCP server (list tables, execute queries, get schema)", file=sys.stderr)
+        print("  admin  - Admin MCP server (rename tables/columns, manage suggestions)", file=sys.stderr)
         sys.exit(1)
     
     server_type = sys.argv[1].lower()

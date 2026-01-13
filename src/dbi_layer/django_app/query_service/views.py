@@ -17,6 +17,7 @@ from dbi_layer.django_app import conf
 from dbi_layer.services.query import execute_native_sql, export_native_sql_result
 from dbi_layer.services.shield import prepare_mdb, generate_native_sql
 from dbi_layer.services.access import get_admin_config_object
+from dbi_layer.decorators import require_service_auth
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ def info(request):
 # DataSource Endpoints
 # =============================================================================
 
+@require_service_auth()
 @require_http_methods(["GET"])
 def list_datasources(request):
     """
@@ -78,6 +80,7 @@ def list_datasources(request):
     })
 
 
+@require_service_auth()
 @require_http_methods(["GET"])
 def get_datasource(request, datasource_id):
     """
@@ -107,6 +110,7 @@ def get_datasource(request, datasource_id):
 # Table Endpoints
 # =============================================================================
 
+@require_service_auth()
 @require_http_methods(["GET"])
 def list_tables(request, datasource_id):
     """
@@ -174,12 +178,14 @@ def list_tables(request, datasource_id):
     })
 
 
+@require_service_auth()
 @require_http_methods(["GET"])
 def list_columns(request, datasource_id, table_id):
     """List columns for a specific table (Legacy/Hierarchical)."""
     return get_table_columns(request, table_id)
 
 
+@require_service_auth()
 @require_http_methods(["GET"])
 def get_table_columns(request, table_id):
     """List columns for a specific table by ID."""
@@ -203,6 +209,7 @@ def get_table_columns(request, table_id):
     })
 
 
+@require_service_auth()
 @require_http_methods(["GET"])
 def get_schema(request, datasource_id):
     """
@@ -239,6 +246,7 @@ def get_schema(request, datasource_id):
     })
 
 
+@require_service_auth()
 @require_http_methods(["GET"])
 def list_foreign_keys(request, datasource_id):
     """List foreign key relationships for a datasource."""
@@ -271,6 +279,7 @@ def list_foreign_keys(request, datasource_id):
     })
 
 
+@require_service_auth()
 @require_http_methods(["GET"])
 def get_sample_data(request, table_id):
     """Get sample rows for a table."""
@@ -315,6 +324,7 @@ def get_sample_data(request, table_id):
 # =============================================================================
 
 @csrf_exempt
+@require_service_auth()
 @require_http_methods(["POST"])
 def execute_query(request, datasource_id=None):
     """
@@ -400,6 +410,7 @@ def execute_query(request, datasource_id=None):
 
 
 @csrf_exempt
+@require_service_auth()
 @require_http_methods(["POST"])
 def export_query(request, datasource_id=None):
     """

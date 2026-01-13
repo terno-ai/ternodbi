@@ -78,31 +78,39 @@ def get_column_stats(conn, table_inspector, table_name: str, column_name: str, c
         
         # Numeric column stats (exclude date types)
         if isinstance(col.type, (Integer, Float, Numeric, BigInteger, SmallInteger, DECIMAL)) and not is_date_type:
+            # 1. Get Basic Numeric Stats (Min, Max, Avg) - unlikely to fail
             try:
-                numeric_query = select(
+                basic_numeric_query = select(
                     func.avg(col).label("mean"),
                     func.min(col).label("min"),
-                    func.max(col).label("max"),
+                    func.max(col).label("max")
+                ).where(col.isnot(None)).select_from(table_inspector)
+                
+                result = conn.execute(basic_numeric_query).fetchone()
+                mean, min_val, max_val = result
+
+                stats.update({
+                    "mean": safe_float(mean),
+                    "min": safe_float(min_val),
+                    "max": safe_float(max_val),
+                    "range": (safe_float(max_val) - safe_float(min_val)) if (min_val is not None and max_val is not None) else None
+                })
+            except Exception as e:
+                logger.warning(f"Basic numeric stats failed for {table_name}.{column_name}: {e}")
+
+            # 2. Get Variance/StdDev - likely to fail on overflow
+            try:
+                variance_query = select(
                     (func.avg(col * col) - func.avg(col) * func.avg(col)).label("variance")
                 ).where(col.isnot(None)).select_from(table_inspector)
-                result = conn.execute(numeric_query).fetchone()
-                mean, min_val, max_val, variance = result
-
-                mean = safe_float(mean)
-                min_val = safe_float(min_val)
-                max_val = safe_float(max_val)
+                
+                variance = conn.execute(variance_query).scalar()
                 variance = safe_float(variance)
 
                 std_dev = math.sqrt(variance) if (variance is not None and variance >= 0) else None
-                stats.update({
-                    "mean": mean,
-                    "min": min_val,
-                    "max": max_val,
-                    "std_dev": std_dev,
-                    "range": (max_val - min_val) if (min_val is not None and max_val is not None) else None
-                })
+                stats["std_dev"] = std_dev
             except Exception as e:
-                logger.warning(f"Numeric stats failed for {table_name}.{column_name}: {e}")
+                logger.warning(f"Variance/StdDev stats failed for {table_name}.{column_name}: {e}")
 
         # String/Text column stats
         elif isinstance(col.type, (String, Text, Enum)):

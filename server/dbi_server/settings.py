@@ -39,6 +39,9 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    
+    # TernoDBI Authentication
+    'dbi_layer.middleware.ServiceTokenMiddleware',
 ]
 
 ROOT_URLCONF = 'dbi_server.urls'

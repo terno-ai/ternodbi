@@ -136,3 +136,52 @@ if not TERNO_AI_INSTALLED:
         list_display = ('group', 'table', 'data_source', 'filter_str')
         list_filter = ('data_source', 'group')
         raw_id_fields = ('table',)
+
+    from dbi_layer.django_app.models import ServiceToken
+    from django.contrib import messages
+    from django.utils.html import format_html
+    from dbi_layer.services.auth import generate_service_token
+
+    @admin.register(ServiceToken)
+    class ServiceTokenAdmin(admin.ModelAdmin):
+        list_display = ('name', 'key_prefix', 'token_type', 'is_active', 'last_used', 'created_at')
+        list_filter = ('token_type', 'is_active', 'created_at')
+        search_fields = ('name', 'key_prefix')
+        readonly_fields = ('key_hash', 'key_prefix', 'last_used', 'created_at', 'created_by')
+        fields = ('name', 'token_type', 'datasources', 'is_active', 'expires_at', 
+                  'key_hash', 'key_prefix', 'last_used', 'created_at', 'created_by')
+        
+        filter_horizontal = ('datasources',)
+
+        def save_model(self, request, obj, form, change):
+            if not change:  # Creating new token
+                # We interpret the save as a request to generate a new token
+                # The obj already has data from the form, but isn't saved yet.
+                
+                # Use our secure generation utility
+                token, full_key = generate_service_token(
+                    name=obj.name, 
+                    token_type=obj.token_type,
+                    created_by=request.user
+                )
+                
+                # Copy generated fields back to the form object to satisfy Django admin
+                obj.id = token.id
+                obj.key_hash = token.key_hash
+                obj.key_prefix = token.key_prefix
+                obj.created_at = token.created_at
+                
+                # Handle M2M separately after save, but here we just need to ensure the obj reference is correct
+                # Django admin will call save_m2m() next, using 'obj'.
+                
+                # SHOW THE KEY TO USER (One time only)
+                messages.set_level(request, messages.SUCCESS)
+                messages.success(request, format_html(
+                    "<strong>Token Created Successfully!</strong><br>"
+                    "Authentication Key: <code>{}</code><br>"
+                    "<span style='color:red'>WARNING: Copy this now. It will never be shown again.</span>",
+                    full_key
+                ))
+            else:
+                # Update existing (revocation, renaming, etc)
+                super().save_model(request, obj, form, change)

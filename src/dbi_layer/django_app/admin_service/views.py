@@ -13,6 +13,8 @@ from django.views.decorators.csrf import csrf_exempt
 
 from dbi_layer.django_app import models
 from dbi_layer.services.validation import validate_datasource_input
+from dbi_layer.decorators import require_service_auth
+from dbi_layer.django_app.models import ServiceToken
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +24,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 @csrf_exempt
+@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["POST"])
 def create_datasource(request):
     """
@@ -123,6 +126,7 @@ def create_datasource(request):
 
 
 @csrf_exempt
+@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["PATCH"])
 def update_datasource(request, datasource_id):
     """
@@ -180,6 +184,7 @@ def update_datasource(request, datasource_id):
 
 
 @csrf_exempt
+@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["DELETE"])
 def delete_datasource(request, datasource_id):
     """Delete a datasource and all its metadata."""
@@ -205,6 +210,7 @@ def delete_datasource(request, datasource_id):
 # =============================================================================
 
 @csrf_exempt
+@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["PATCH"])
 def update_table(request, table_id):
     """
@@ -261,6 +267,7 @@ def update_table(request, table_id):
 # =============================================================================
 
 @csrf_exempt
+@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["PATCH"])
 def update_column(request, column_id):
     """
@@ -315,6 +322,7 @@ def update_column(request, column_id):
 # Suggestions Management
 # =============================================================================
 
+@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["GET"])
 def list_suggestions(request, datasource_id):
     """List all suggestions for a datasource."""
@@ -337,6 +345,7 @@ def list_suggestions(request, datasource_id):
 
 
 @csrf_exempt
+@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["POST"])
 def add_suggestion(request, datasource_id):
     """
@@ -387,6 +396,7 @@ def add_suggestion(request, datasource_id):
 
 
 @csrf_exempt
+@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["DELETE"])
 def delete_suggestion(request, suggestion_id):
     """Delete a suggestion."""
@@ -411,6 +421,7 @@ def delete_suggestion(request, suggestion_id):
 # =============================================================================
 
 @csrf_exempt
+@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["POST"])
 def validate_connection(request):
     """
@@ -471,6 +482,7 @@ def validate_connection(request):
 # =============================================================================
 
 @csrf_exempt
+@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["POST"])
 def sync_metadata(request, datasource_id):
     """
@@ -512,6 +524,7 @@ def sync_metadata(request, datasource_id):
 # Helper Tools for AI Agents (Description Generation)
 # =============================================================================
 
+@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["GET"])
 def get_table_info(request, datasource_id, table_name):
     """
@@ -556,6 +569,7 @@ def get_table_info(request, datasource_id, table_name):
 
 
 @csrf_exempt
+@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["POST"])
 def get_all_tables_info(request, datasource_id):
     """
