@@ -171,8 +171,10 @@ if not TERNO_AI_INSTALLED:
                 obj.key_prefix = token.key_prefix
                 obj.created_at = token.created_at
                 
-                # Handle M2M separately after save, but here we just need to ensure the obj reference is correct
-                # Django admin will call save_m2m() next, using 'obj'.
+                # Handle M2M: Copy selected datasources to the newly created token
+                datasources = form.cleaned_data.get('datasources')
+                if datasources:
+                    token.datasources.set(datasources)
                 
                 # SHOW THE KEY TO USER (One time only)
                 messages.set_level(request, messages.SUCCESS)

@@ -36,7 +36,7 @@ class ServiceTokenMiddleware:
         # 3. Verify Token
         token = verify_token(token_str)
         if not token:
-            logger.warning(f"Invalid or active token used: {token_str[:15]}...")
+            logger.warning(f"Invalid or inactive token used: {token_str[:15]}...")
             return JsonResponse({"error": "Invalid or expired Service Token"}, status=401)
             
         # 4. Attach to Request
