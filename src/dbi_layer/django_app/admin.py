@@ -57,6 +57,66 @@ if not TERNO_AI_INSTALLED:
                 'classes': ('collapse',),
             }),
         )
+        actions = ['trigger_sync_metadata']
+
+        def save_model(self, request, obj, form, change):
+            """Save datasource and auto-sync metadata for new datasources."""
+            from django.contrib import messages
+            
+            super().save_model(request, obj, form, change)
+            
+            # Auto-sync metadata when creating a new datasource (not on updates)
+            if not change and obj.enabled:
+                try:
+                    from dbi_layer.services.schema_utils import sync_metadata
+                    sync_result = sync_metadata(obj.id)
+                    
+                    if 'error' in sync_result:
+                        messages.warning(
+                            request,
+                            f"Datasource saved, but metadata sync failed: {sync_result['error']}"
+                        )
+                    else:
+                        tables_created = sync_result.get('tables_created', 0)
+                        columns_created = sync_result.get('columns_created', 0)
+                        messages.success(
+                            request,
+                            f"Metadata synced: {tables_created} tables and {columns_created} columns discovered."
+                        )
+                except Exception as e:
+                    messages.warning(
+                        request,
+                        f"Datasource saved, but metadata sync failed: {str(e)}"
+                    )
+
+        def trigger_sync_metadata(self, request, queryset):
+            """Admin action to manually sync metadata for selected datasources."""
+            from django.contrib import messages
+            from dbi_layer.services.schema_utils import sync_metadata
+            
+            for ds in queryset:
+                if not ds.enabled:
+                    messages.warning(request, f"Skipped '{ds.display_name}' - datasource is not enabled.")
+                    continue
+                    
+                try:
+                    sync_result = sync_metadata(ds.id, overwrite=False)
+                    
+                    if 'error' in sync_result:
+                        messages.error(request, f"'{ds.display_name}': {sync_result['error']}")
+                    else:
+                        tables_created = sync_result.get('tables_created', 0)
+                        tables_updated = sync_result.get('tables_updated', 0)
+                        columns_created = sync_result.get('columns_created', 0)
+                        messages.success(
+                            request,
+                            f"'{ds.display_name}': Synced {tables_created} new tables, "
+                            f"{tables_updated} updated, {columns_created} new columns."
+                        )
+                except Exception as e:
+                    messages.error(request, f"'{ds.display_name}': Sync failed - {str(e)}")
+        
+        trigger_sync_metadata.short_description = "Sync metadata (discover tables & columns)"
 
     @admin.register(Table)
     class TableAdmin(admin.ModelAdmin):
