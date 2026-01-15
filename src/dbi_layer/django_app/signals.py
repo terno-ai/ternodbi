@@ -18,6 +18,8 @@ Usage (in your app's receivers.py):
 """
 
 from django.dispatch import Signal
+from django.db.models.signals import post_save, post_delete
+from django.dispatch import receiver
 
 
 # =============================================================================
@@ -51,4 +53,41 @@ datasource_deleted = Signal()
 #   status: str ('success' or 'error')
 #   error: str (optional error message)
 query_executed = Signal()
+
+
+# =============================================================================
+# Cache Invalidation Signal Receivers
+# =============================================================================
+
+def _invalidate_cache_for_datasource(datasource):
+    """Helper to invalidate cache for a datasource."""
+    from dbi_layer.services.shield import delete_cache
+    delete_cache(datasource)
+
+
+def connect_cache_invalidation_signals():
+    """
+    Connect cache invalidation signals to models.
+    
+    Called from apps.py ready() after models are loaded.
+    Uses direct model class references instead of string references
+    to avoid app label resolution issues.
+    """
+    from dbi_layer.django_app.models import Table, TableColumn
+    
+    def invalidate_cache_on_table_change(sender, instance, **kwargs):
+        """Invalidate cache when a Table is created, updated, or deleted."""
+        _invalidate_cache_for_datasource(instance.data_source)
+    
+    def invalidate_cache_on_column_change(sender, instance, **kwargs):
+        """Invalidate cache when a TableColumn is created, updated, or deleted."""
+        _invalidate_cache_for_datasource(instance.table.data_source)
+    
+    # Connect Table signals
+    post_save.connect(invalidate_cache_on_table_change, sender=Table)
+    post_delete.connect(invalidate_cache_on_table_change, sender=Table)
+    
+    # Connect TableColumn signals
+    post_save.connect(invalidate_cache_on_column_change, sender=TableColumn)
+    post_delete.connect(invalidate_cache_on_column_change, sender=TableColumn)
 

@@ -374,23 +374,30 @@ def execute_query(request, datasource_id=None):
                 "error": "Missing 'sql' in request body"
             }, status=400)
         
-        # Optional role-based SQL transformation
+        # Get roles if provided (for row-level filtering)
         role_ids = body.get("roles", [])
-        native_sql = sql
+        
+        # Always translate SQL from public names to native names
+        # This is needed because users/AI agents use public names in their queries
+        from django.contrib.auth.models import Group
         
         if role_ids:
-            from django.contrib.auth.models import Group
+            # With roles: apply role-based filtering + translation
             roles = Group.objects.filter(id__in=role_ids)
-            mDb = prepare_mdb(ds, roles)
-            transform_result = generate_native_sql(mDb, sql, ds.dialect_name)
-            
-            if transform_result.get('status') == 'error':
-                return JsonResponse({
-                    "status": "error",
-                    "error": transform_result.get('error', 'SQL transformation failed')
-                }, status=400)
-            
-            native_sql = transform_result.get('native_sql', sql)
+        else:
+            # Without roles: still translate public names, just no role filtering
+            roles = Group.objects.none()
+        
+        mDb = prepare_mdb(ds, roles)
+        transform_result = generate_native_sql(mDb, sql, ds.dialect_name)
+        
+        if transform_result.get('status') == 'error':
+            return JsonResponse({
+                "status": "error",
+                "error": transform_result.get('error', 'SQL transformation failed')
+            }, status=400)
+        
+        native_sql = transform_result.get('native_sql', sql)
         
         # Execute query
         result = execute_native_sql(ds, native_sql, page=page, per_page=per_page)
@@ -452,23 +459,27 @@ def export_query(request, datasource_id=None):
                 "error": "Missing 'sql' in request body"
             }, status=400)
         
-        # Optional role-based SQL transformation
+        # Get roles if provided (for row-level filtering)
         role_ids = body.get("roles", [])
-        native_sql = sql
+        
+        # Always translate SQL from public names to native names
+        from django.contrib.auth.models import Group
         
         if role_ids:
-            from django.contrib.auth.models import Group
             roles = Group.objects.filter(id__in=role_ids)
-            mDb = prepare_mdb(ds, roles)
-            transform_result = generate_native_sql(mDb, sql, ds.dialect_name)
-            
-            if transform_result.get('status') == 'error':
-                return JsonResponse({
-                    "status": "error",
-                    "error": transform_result.get('error', 'SQL transformation failed')
-                }, status=400)
-            
-            native_sql = transform_result.get('native_sql', sql)
+        else:
+            roles = Group.objects.none()
+        
+        mDb = prepare_mdb(ds, roles)
+        transform_result = generate_native_sql(mDb, sql, ds.dialect_name)
+        
+        if transform_result.get('status') == 'error':
+            return JsonResponse({
+                "status": "error",
+                "error": transform_result.get('error', 'SQL transformation failed')
+            }, status=400)
+        
+        native_sql = transform_result.get('native_sql', sql)
         
         # Export as CSV
         return export_native_sql_result(ds, native_sql)

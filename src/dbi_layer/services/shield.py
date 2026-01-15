@@ -91,9 +91,23 @@ def generate_native_sql(mDb, user_sql, dialect):
 
 
 
+def _get_cache_version_key(datasource_id):
+    """Get the cache key for storing datasource cache version."""
+    return f"dbi_datasource_{datasource_id}_version"
+
+
+def _get_cache_version(datasource_id):
+    """Get current cache version for a datasource."""
+    version = cache.get(_get_cache_version_key(datasource_id))
+    return version if version is not None else 0
+
+
 def get_cache_key(datasource_id, role_ids):
     """
     Generate a standardized cache key for datasource roles.
+    
+    Includes version number to support cache invalidation without
+    needing Redis pattern matching.
     
     Args:
         datasource_id: ID of the DataSource
@@ -103,7 +117,8 @@ def get_cache_key(datasource_id, role_ids):
         String cache key
     """
     ids = sorted(role_ids)
-    return f"dbi_datasource_{datasource_id}_roles_{'_'.join(map(str, ids))}"
+    version = _get_cache_version(datasource_id)
+    return f"dbi_datasource_{datasource_id}_v{version}_roles_{'_'.join(map(str, ids))}"
 
 
 def prepare_mdb(datasource, roles):
@@ -216,25 +231,31 @@ def _merge_grp_filters(tbl_base_filters, tbls_grp_filter):
         all_filters.append(role_filter_str)
 
 
+
 def delete_cache(datasource):
     """
-    Clear cache for a datasource.
+    Invalidate cache for a datasource.
     
-    Note: Since TernoDBI doesn't manage Organisations/Users, it cannot iterate 
-    through all role combinations to clear specific cache keys. 
-    The consuming application should handle cache invalidation using 
-    `get_cache_key` or by clearing the entire cache namespace if supported.
+    Uses version-based invalidation: increments a version counter which
+    causes all old cache keys (with the old version) to miss on lookup.
+    Old entries expire naturally.
+    
+    Works with any Django cache backend - no Redis required.
+    
+    Args:
+        datasource: DataSource model instance, or object with 'id' attribute
     """
     try:
-        # TernoAI logic was: iterate OrgUsers -> Get Roles -> Build Keys -> Delete
-        # TernoDBI logic: We can't see OrgUsers. 
-        # Ideally, we would rely on a cache tag or prefix clearing, but standard Django cache 
-        # doesn't strictly support that efficiently without specific backends.
-        logger.warning(
-            f"delete_cache called for datasource {datasource.id}. "
-            "TernoDBI cannot clear specific role-based caches without Organisation context. "
-            "Please handle cache invalidation in the application layer."
+        datasource_id = datasource.id if hasattr(datasource, 'id') else datasource
+        version_key = _get_cache_version_key(datasource_id)
+        current_version = _get_cache_version(datasource_id)
+        new_version = current_version + 1
+        
+        cache.set(version_key, new_version, timeout=None)
+        
+        logger.info(
+            f"Invalidated cache for datasource {datasource_id}: "
+            f"version {current_version} -> {new_version}"
         )
     except Exception as e:
-        logger.warning(f"Could not clear cache: {e}")
-
+        logger.warning(f"Could not invalidate cache for datasource: {e}")

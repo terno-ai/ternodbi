@@ -12,5 +12,7 @@ class DbiLayerConfig(AppConfig):
 
     def ready(self):
         """Initialize app when Django starts."""
-        # Import signals if any
-        pass
+        # Connect cache invalidation signals using direct model references
+        from dbi_layer.django_app.signals import connect_cache_invalidation_signals
+        connect_cache_invalidation_signals()
+
