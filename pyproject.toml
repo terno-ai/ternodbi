@@ -33,6 +33,10 @@ dependencies = [
     "pyarrow>=14.0",
     "sqlglot>=28.5.0",
     "mcp>=1.25.0",
+    "requests>=2.32.5",
+    "databricks-sqlalchemy>=2.0.8",
+    "snowflake-sqlalchemy>=1.8.2",
+    "psycopg2>=2.9.11",
 ]
 
 [project.optional-dependencies]
