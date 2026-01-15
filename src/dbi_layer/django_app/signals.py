@@ -59,6 +59,11 @@ query_executed = Signal()
 # Cache Invalidation Signal Receivers
 # =============================================================================
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 def _invalidate_cache_for_datasource(datasource):
     """Helper to invalidate cache for a datasource."""
     from dbi_layer.services.shield import delete_cache
@@ -72,22 +77,50 @@ def connect_cache_invalidation_signals():
     Called from apps.py ready() after models are loaded.
     Uses direct model class references instead of string references
     to avoid app label resolution issues.
+    
+    Uses dispatch_uid to prevent duplicate connections if ready() is called
+    multiple times (e.g., during testing or hot reload).
     """
     from dbi_layer.django_app.models import Table, TableColumn
     
     def invalidate_cache_on_table_change(sender, instance, **kwargs):
         """Invalidate cache when a Table is created, updated, or deleted."""
+        logger.debug(
+            f"Table signal fired: {instance.name} (ID: {instance.id}) - "
+            f"invalidating cache for datasource {instance.data_source_id}"
+        )
         _invalidate_cache_for_datasource(instance.data_source)
     
     def invalidate_cache_on_column_change(sender, instance, **kwargs):
         """Invalidate cache when a TableColumn is created, updated, or deleted."""
+        logger.debug(
+            f"Column signal fired: {instance.name} (ID: {instance.id}) - "
+            f"invalidating cache for datasource {instance.table.data_source_id}"
+        )
         _invalidate_cache_for_datasource(instance.table.data_source)
     
-    # Connect Table signals
-    post_save.connect(invalidate_cache_on_table_change, sender=Table)
-    post_delete.connect(invalidate_cache_on_table_change, sender=Table)
+    # Connect Table signals with dispatch_uid to prevent duplicates
+    post_save.connect(
+        invalidate_cache_on_table_change, 
+        sender=Table,
+        dispatch_uid="dbi_layer_table_save_cache_invalidation"
+    )
+    post_delete.connect(
+        invalidate_cache_on_table_change, 
+        sender=Table,
+        dispatch_uid="dbi_layer_table_delete_cache_invalidation"
+    )
     
-    # Connect TableColumn signals
-    post_save.connect(invalidate_cache_on_column_change, sender=TableColumn)
-    post_delete.connect(invalidate_cache_on_column_change, sender=TableColumn)
-
+    # Connect TableColumn signals with dispatch_uid to prevent duplicates
+    post_save.connect(
+        invalidate_cache_on_column_change, 
+        sender=TableColumn,
+        dispatch_uid="dbi_layer_column_save_cache_invalidation"
+    )
+    post_delete.connect(
+        invalidate_cache_on_column_change, 
+        sender=TableColumn,
+        dispatch_uid="dbi_layer_column_delete_cache_invalidation"
+    )
+    
+    logger.debug("Cache invalidation signals connected successfully")
