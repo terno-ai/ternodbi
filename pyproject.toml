@@ -78,13 +78,13 @@ dev = [
 "Documentation" = "https://docs.ternoai.com/dbi"
 
 [project.scripts]
-dbi-mcp = "dbi_layer.mcp.server:main"
+dbi-mcp = "terno_dbi.mcp.server:main"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/dbi_layer"]
+include = ["src/terno_dbi"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/dbi_layer"]
+packages = ["src/terno_dbi"]
 
 [tool.hatch.build.targets.wheel.sources]
 "src" = ""

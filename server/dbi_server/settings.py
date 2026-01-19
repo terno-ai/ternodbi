@@ -17,7 +17,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'dbi_layer.django_app.apps.DbiLayerConfig',
+    'terno_dbi.core.apps.DbiLayerConfig',
 ]
 
 MIDDLEWARE = [
@@ -28,7 +28,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'dbi_layer.middleware.ServiceTokenMiddleware',
+    'terno_dbi.middleware.ServiceTokenMiddleware',
 ]
 
 ROOT_URLCONF = 'dbi_server.urls'
