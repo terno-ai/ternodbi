@@ -23,115 +23,245 @@
             <a href="/admin/" class="btn btn-primary">Open Admin Console</a>
             <a href="/docs/setup/" class="btn btn-secondary">Read Documentation</a>
         </div>
+</section>
+
+<!-- Visual Process Flow -->
+<section class="process-flow">
+    <div class="flow-header">
+        <h2>Your Data, Securely Bridged to AI</h2>
+        <p>TernoDBI handles the complexity of connection, security, and protocol translation.</p>
+    </div>
+
+    <div class="flow-container">
+        <!-- Left: Sources -->
+        <div class="flow-column">
+            <div class="flow-label">DATA SOURCES</div>
+
+            <div class="source-group">
+                <div class="source-label">Warehouses</div>
+                <div class="logo-grid">
+                    <!-- Snowflake -->
+                    <div class="logo-item" title="Snowflake">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"
+                            stroke-linejoin="round">
+                            <path d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M4.93 19.07L19.07 4.93" />
+                        </svg>
+                    </div>
+                    <!-- BigQuery -->
+                    <div class="logo-item" title="BigQuery">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="2" stroke-linecap="round"
+                            stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <path d="M21 21l-4.35-4.35"></path>
+                        </svg>
+                    </div>
+                    <!-- Databricks -->
+                    <div class="logo-item" title="Databricks">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round"
+                            stroke-linejoin="round">
+                            <path d="M12 2l-9 5v10l9 5 9-5V7l-9-5z"></path>
+                            <path d="M12 12l9-5M12 12l-9-5M12 12v10"></path>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <div class="source-group">
+                <div class="source-label">Databases</div>
+                <div class="logo-grid">
+                    <!-- Postgres -->
+                    <div class="logo-item" title="Postgres">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round"
+                            stroke-linejoin="round">
+                            <path d="M18 6L6 18M6 6l12 12" /> <!-- Fallback abstract -->
+                            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z" />
+                        </svg>
+                    </div>
+                    <!-- MySQL -->
+                    <div class="logo-item" title="MySQL">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round"
+                            stroke-linejoin="round">
+                            <path d="M12 2l3 6 6 1-4 5 1 7-6-3-6 3 1-7-4-5 6-1 3-6z" />
+                        </svg>
+                    </div>
+                    <!-- Oracle -->
+                    <div class="logo-item" title="Oracle">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round"
+                            stroke-linejoin="round">
+                            <rect x="2" y="6" width="20" height="12" rx="6" ry="6" />
+                        </svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Arrow -->
+        <div class="flow-arrow">
+            <svg width="40" height="20" viewBox="0 0 40 20" fill="none" stroke="currentColor">
+                <path d="M0 10H38M38 10L30 2M38 10L30 18" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round" />
+            </svg>
+        </div>
+
+        <!-- Center: TernoDBI Core -->
+        <div class="flow-center">
+            <div class="flow-label">INTELLIGENCE LAYER</div>
+            <div class="orbit-container">
+                <div class="orbit-ring"></div>
+                <div class="core-orb">
+                    <div class="core-logo">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none"
+                            stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+                        </svg>
+                    </div>
+                    <div class="core-text">TernoDBI</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Arrow -->
+        <div class="flow-arrow">
+            <svg width="40" height="20" viewBox="0 0 40 20" fill="none" stroke="currentColor">
+                <path d="M0 10H38M38 10L30 2M38 10L30 18" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round" />
+            </svg>
+        </div>
+
+        <!-- Right: Agents -->
+        <div class="flow-column">
+            <div class="flow-label">AI CONSUMERS</div>
+
+            <div class="agent-card">
+                <div class="agent-header">
+                    <div class="agent-dot"></div>
+                    <span style="font-size: 0.8rem; font-weight: 600;">Claude Desktop</span>
+                </div>
+                <div class="agent-body">
+                    <div class="skeleton-line" style="width: 70%"></div>
+                    <div class="skeleton-line" style="width: 40%"></div>
+                </div>
+            </div>
+
+            <div class="agent-card">
+                <div class="agent-header">
+                    <div class="agent-dot" style="background: #10b981;"></div>
+                    <span style="font-size: 0.8rem; font-weight: 600;">Custom Agents</span>
+                </div>
+                <div class="agent-body">
+                    <div class="skeleton-line" style="width: 60%"></div>
+                    <div class="skeleton-line" style="width: 80%"></div>
+                </div>
+            </div>
+        </div>
     </div>
 </section>
 
-<div class="container">
-    <!-- Quick Start -->
-    <section style="margin-bottom: 8rem;">
-        <h2>Quick Start</h2>
-        <div class="grid">
-            <div class="card">
-                <h3>1. Check Health</h3>
-                <p>Verify the API is reachable.</p>
-                <div class="copy-wrapper">
-                    <button class="copy-btn">Copy</button>
-                    <pre><code>curl http://localhost:8000/api/query/health/</code></pre>
-                </div>
-            </div>
-
-            <div class="card">
-                <h3>2. Create Token</h3>
-                <p>Generate a scoped API key.</p>
-                <div class="copy-wrapper">
-                    <button class="copy-btn">Copy</button>
-                    <pre><code>python manage.py issue_token --name "Agent 1" --type query</code></pre>
-                </div>
-            </div>
-
-            <div class="card">
-                <h3>3. Connect Agent</h3>
-                <p>Use with Claude Desktop via MCP.</p>
-                <div class="copy-wrapper">
-                    <button class="copy-btn">Copy</button>
-                    <pre><code>uvx --from terno-dbi dbi-mcp query</code></pre>
-                </div>
+<!-- Quick Start -->
+<section style="margin-bottom: 8rem;">
+    <h2>Quick Start</h2>
+    <div class="grid">
+        <div class="card">
+            <h3>1. Check Health</h3>
+            <p>Verify the API is reachable.</p>
+            <div class="copy-wrapper">
+                <button class="copy-btn">Copy</button>
+                <pre><code>curl http://localhost:8000/api/query/health/</code></pre>
             </div>
         </div>
-    </section>
 
-    <!-- Features -->
-    <section style="margin-bottom: 6rem;">
-        <h2>Capabilities</h2>
-        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
-            <div class="card">
-                <div class="card-icon">
-                    <!-- Shield Icon -->
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
-                        stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-                    </svg>
-                </div>
-                <h3>SQLShield</h3>
-                <p>
-                    Automatic read-only enforcement and AST validation to prevent SQL injection.
-                </p>
-            </div>
-
-            <div class="card">
-                <div class="card-icon">
-                    <!-- Lock Icon -->
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
-                        stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                    </svg>
-                </div>
-                <h3>Access Control</h3>
-                <p>
-                    Table/Column hiding, Row Level Security, and expiring API tokens.
-                </p>
-            </div>
-
-            <div class="card">
-                <div class="card-icon">
-                    <!-- Database/Server Icon -->
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
-                        stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
-                        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
-                        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
-                    </svg>
-                </div>
-                <h3>Multi-DB</h3>
-                <p>
-                    Unified API for Postgres, MySQL, Snowflake, BigQuery, Databricks, Oracle.
-                </p>
-            </div>
-
-            <div class="card">
-                <div class="card-icon">
-                    <!-- CPU/Chip Icon -->
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
-                        stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
-                        <rect x="9" y="9" width="6" height="6"></rect>
-                        <line x1="9" y1="1" x2="9" y2="4"></line>
-                        <line x1="15" y1="1" x2="15" y2="4"></line>
-                        <line x1="9" y1="20" x2="9" y2="23"></line>
-                        <line x1="15" y1="20" x2="15" y2="23"></line>
-                        <line x1="20" y1="9" x2="23" y2="9"></line>
-                        <line x1="20" y1="14" x2="23" y2="14"></line>
-                        <line x1="1" y1="9" x2="4" y2="9"></line>
-                        <line x1="1" y1="14" x2="4" y2="14"></line>
-                    </svg>
-                </div>
-                <h3>Native MCP</h3>
-                <p>
-                    First-class support for the Model Context Protocol (Admin & Query servers).
-                </p>
+        <div class="card">
+            <h3>2. Create Token</h3>
+            <p>Generate a scoped API key.</p>
+            <div class="copy-wrapper">
+                <button class="copy-btn">Copy</button>
+                <pre><code>python manage.py issue_token --name "Agent 1" --type query</code></pre>
             </div>
         </div>
-    </section>
+
+        <div class="card">
+            <h3>3. Connect Agent</h3>
+            <p>Use with Claude Desktop via MCP.</p>
+            <div class="copy-wrapper">
+                <button class="copy-btn">Copy</button>
+                <pre><code>uvx --from terno-dbi dbi-mcp query</code></pre>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Features -->
+<section style="margin-bottom: 6rem;">
+    <h2>Capabilities</h2>
+    <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+        <div class="card">
+            <div class="card-icon">
+                <!-- Shield Icon -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                    stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                </svg>
+            </div>
+            <h3>SQLShield</h3>
+            <p>
+                Automatic read-only enforcement and AST validation to prevent SQL injection.
+            </p>
+        </div>
+
+        <div class="card">
+            <div class="card-icon">
+                <!-- Lock Icon -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                    stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+            </div>
+            <h3>Access Control</h3>
+            <p>
+                Table/Column hiding, Row Level Security, and expiring API tokens.
+            </p>
+        </div>
+
+        <div class="card">
+            <div class="card-icon">
+                <!-- Database/Server Icon -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                    stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                </svg>
+            </div>
+            <h3>Multi-DB</h3>
+            <p>
+                Unified API for Postgres, MySQL, Snowflake, BigQuery, Databricks, Oracle.
+            </p>
+        </div>
+
+        <div class="card">
+            <div class="card-icon">
+                <!-- CPU/Chip Icon -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                    stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+                    <rect x="9" y="9" width="6" height="6"></rect>
+                    <line x1="9" y1="1" x2="9" y2="4"></line>
+                    <line x1="15" y1="1" x2="15" y2="4"></line>
+                    <line x1="9" y1="20" x2="9" y2="23"></line>
+                    <line x1="15" y1="20" x2="15" y2="23"></line>
+                    <line x1="20" y1="9" x2="23" y2="9"></line>
+                    <line x1="20" y1="14" x2="23" y2="14"></line>
+                    <line x1="1" y1="9" x2="4" y2="9"></line>
+                    <line x1="1" y1="14" x2="4" y2="14"></line>
+                </svg>
+            </div>
+            <h3>Native MCP</h3>
+            <p>
+                First-class support for the Model Context Protocol (Admin & Query servers).
+            </p>
+        </div>
+    </div>
+</section>
 </div>
 {% endblock %}

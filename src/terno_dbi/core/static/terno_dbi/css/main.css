@@ -402,4 +402,306 @@ footer {
     nav ul {
         gap: 1.5rem;
     }
+
+    .flow-container {
+        flex-direction: column;
+        gap: 2rem;
+    }
+
+    .flow-arrow {
+        transform: rotate(90deg);
+        margin: 1rem 0;
+    }
+}
+
+/* Process Flow Section */
+/* Process Flow Section */
+.process-flow {
+    margin-bottom: 5rem;
+    padding: 2.5rem 2rem;
+    background: radial-gradient(circle at center, rgba(30, 41, 59, 0.4) 0%, rgba(2, 6, 23, 0.8) 100%);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    /* Stronger border */
+    border-radius: 1.5rem;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 0 40px -10px rgba(0, 0, 0, 0.5);
+    /* Depth */
+    max-width: 1200px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.process-flow::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.5), transparent);
+}
+
+.flow-header {
+    text-align: center;
+    margin-bottom: 2.5rem;
+    position: relative;
+    z-index: 2;
+}
+
+.flow-header h2 {
+    margin-bottom: 0.5rem;
+    font-size: 1.8rem;
+    /* Reset global section h2 absolute centering */
+    display: block;
+    left: auto;
+    transform: none;
+    width: 100%;
+    text-align: center;
+}
+
+.flow-container {
+    display: flex;
+    align-items: stretch;
+    /* Stretch layout */
+    justify-content: center;
+    gap: 2rem;
+    position: relative;
+    z-index: 1;
+}
+
+.flow-column {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    max-width: 320px;
+    /* Constrain columns */
+}
+
+.flow-label {
+    text-align: center;
+    font-size: 0.8rem;
+    /* Bigger labels */
+    letter-spacing: 0.1em;
+    color: var(--accent-primary);
+    margin-bottom: 2rem;
+    /* More space below bigger labels */
+    font-weight: 700;
+    text-transform: uppercase;
+    background: rgba(99, 102, 241, 0.1);
+    padding: 0.35rem 1rem;
+    /* Bigger badge */
+    border-radius: 99px;
+    align-self: center;
+    border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+/* Source Groups */
+.source-group {
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 1rem;
+    padding: 1.5rem;
+    transition: transform 0.3s;
+    min-width: 100%;
+    /* Fill column */
+    min-height: 160px;
+    /* Force height symmetry */
+    display: flex;
+    /* Flex to center content */
+    flex-direction: column;
+    justify-content: center;
+}
+
+.source-group:hover {
+    transform: translateY(-2px);
+    border-color: rgba(99, 102, 241, 0.4);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.source-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+    font-weight: 600;
+}
+
+.logo-grid {
+    display: flex;
+    gap: 1rem;
+    /* More spacing */
+}
+
+.logo-item {
+    width: 2.75rem;
+    /* Bigger icons */
+    height: 2.75rem;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.logo-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: scale(1.1);
+}
+
+.logo-item svg {
+    width: 1.5rem;
+    height: 1.5rem;
+}
+
+/* Arrows */
+.flow-arrow {
+    color: var(--text-secondary);
+    opacity: 0.4;
+    flex-shrink: 0;
+    width: 40px;
+    animation: flowPulse 2s infinite;
+    align-self: center;
+    /* Center in stretch container */
+    margin-top: 3.5rem;
+    /* Adjusted for bigger labels */
+}
+
+@keyframes flowPulse {
+
+    0%,
+    100% {
+        opacity: 0.3;
+        transform: translateX(0);
+    }
+
+    50% {
+        opacity: 0.8;
+        transform: translateX(3px);
+    }
+}
+
+/* Center Orb */
+.flow-center {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    /* True center */
+    margin: 0 2rem;
+    /* More spacing around orb */
+    padding-top: 3.5rem;
+    /* Match arrow/content offset */
+}
+
+.orbit-container {
+    position: relative;
+    width: 240px;
+    /* Bigger orbit */
+    height: 240px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.orbit-ring {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: 50%;
+    animation: orbitSpin 10s linear infinite;
+}
+
+.orbit-ring::before {
+    content: '';
+    position: absolute;
+    top: -4px;
+    left: 50%;
+    width: 6px;
+    height: 6px;
+    background: var(--accent-primary);
+    border-radius: 50%;
+    box-shadow: 0 0 10px var(--accent-primary);
+}
+
+@keyframes orbitSpin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.core-orb {
+    width: 140px;
+    /* Bigger orb */
+    height: 140px;
+    background: radial-gradient(circle at center, var(--accent-primary), #4c1d95);
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    box-shadow: 0 0 50px rgba(99, 102, 241, 0.5);
+    /* Stronger glow */
+    position: relative;
+    z-index: 2;
+}
+
+.core-logo svg {
+    width: 48px;
+    /* Bigger logo */
+    height: 48px;
+    filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.5));
+}
+
+.core-text {
+    font-weight: 700;
+    margin-top: 0.25rem;
+    font-size: 0.9rem;
+    letter-spacing: -0.02em;
+}
+
+/* Agent Cards */
+.agent-card {
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 1rem;
+    padding: 1.5rem;
+    position: relative;
+    overflow: hidden;
+    min-height: 160px;
+    /* Match source-group */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.agent-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.agent-dot {
+    width: 6px;
+    height: 6px;
+    background: #eab308;
+    border-radius: 50%;
+}
+
+.skeleton-line {
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    margin-bottom: 0.4rem;
 }
