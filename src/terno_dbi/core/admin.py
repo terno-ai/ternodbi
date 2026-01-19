@@ -1,21 +1,9 @@
-"""
-Django Admin registrations for TernoDBI models.
-
-Provides a web interface for managing datasources, tables, columns, and access control.
-Access at: http://localhost:8000/admin/
-
-NOTE: These registrations are conditional - they only apply when running TernoDBI
-standalone. When used with TernoAI, TernoAI provides its own admin configurations.
-"""
-
 from django.contrib import admin
 from django.apps import apps
 
-# Check if TernoAI's terno app is installed - if so, skip registration
-# because TernoAI has its own admin.py that registers these models
-TERNO_AI_INSTALLED = apps.is_installed('terno')
+PARENT_APP_INSTALLED = apps.is_installed('terno')
 
-if not TERNO_AI_INSTALLED:
+if not PARENT_APP_INSTALLED:
     from .models import (
         DataSource, Table, TableColumn, ForeignKey,
         PrivateTableSelector, GroupTableSelector,
@@ -25,14 +13,12 @@ if not TERNO_AI_INSTALLED:
     )
 
     class TableColumnInline(admin.TabularInline):
-        """Inline display of columns within a table."""
         model = TableColumn
         extra = 0
         fields = ('name', 'public_name', 'data_type', 'description')
         readonly_fields = ('name', 'data_type')
 
     class ForeignKeyInline(admin.TabularInline):
-        """Inline display of foreign keys within a table."""
         model = ForeignKey
         fk_name = 'constrained_table'
         extra = 0
@@ -60,17 +46,15 @@ if not TERNO_AI_INSTALLED:
         actions = ['trigger_sync_metadata']
 
         def save_model(self, request, obj, form, change):
-            """Save datasource and auto-sync metadata for new datasources."""
             from django.contrib import messages
-            
+
             super().save_model(request, obj, form, change)
-            
-            # Auto-sync metadata when creating a new datasource (not on updates)
+
             if not change and obj.enabled:
                 try:
                     from terno_dbi.services.schema_utils import sync_metadata
                     sync_result = sync_metadata(obj.id)
-                    
+
                     if 'error' in sync_result:
                         messages.warning(
                             request,
@@ -90,18 +74,14 @@ if not TERNO_AI_INSTALLED:
                     )
 
         def trigger_sync_metadata(self, request, queryset):
-            """Admin action to manually sync metadata for selected datasources."""
             from django.contrib import messages
-            from terno_dbi.services.schema_utils import sync_metadata
-            
+            from terno_dbi.services.schema_utils import sync_metadata  
             for ds in queryset:
                 if not ds.enabled:
                     messages.warning(request, f"Skipped '{ds.display_name}' - datasource is not enabled.")
                     continue
-                    
                 try:
-                    sync_result = sync_metadata(ds.id, overwrite=False)
-                    
+                    sync_result = sync_metadata(ds.id, overwrite=False)  
                     if 'error' in sync_result:
                         messages.error(request, f"'{ds.display_name}': {sync_result['error']}")
                     else:
@@ -115,7 +95,7 @@ if not TERNO_AI_INSTALLED:
                         )
                 except Exception as e:
                     messages.error(request, f"'{ds.display_name}': Sync failed - {str(e)}")
-        
+
         trigger_sync_metadata.short_description = "Sync metadata (discover tables & columns)"
 
     @admin.register(Table)
@@ -124,7 +104,7 @@ if not TERNO_AI_INSTALLED:
         list_filter = ('data_source',)
         search_fields = ('name', 'public_name', 'description')
         inlines = [TableColumnInline, ForeignKeyInline]
-        
+
         def column_count(self, obj):
             return obj.tablecolumn_set.count()
         column_count.short_description = 'Columns'
@@ -148,12 +128,11 @@ if not TERNO_AI_INSTALLED:
         list_filter = ('data_source',)
         search_fields = ('suggestion',)
 
-    # Access Control Models
     @admin.register(PrivateTableSelector)
     class PrivateTableSelectorAdmin(admin.ModelAdmin):
         list_display = ('data_source', 'table_count')
         filter_horizontal = ('tables',)
-        
+
         def table_count(self, obj):
             return obj.tables.count()
         table_count.short_description = 'Tables'
@@ -162,7 +141,7 @@ if not TERNO_AI_INSTALLED:
     class GroupTableSelectorAdmin(admin.ModelAdmin):
         list_display = ('group', 'table_count')
         filter_horizontal = ('tables',)
-        
+
         def table_count(self, obj):
             return obj.tables.count()
         table_count.short_description = 'Tables'
@@ -171,7 +150,7 @@ if not TERNO_AI_INSTALLED:
     class PrivateColumnSelectorAdmin(admin.ModelAdmin):
         list_display = ('data_source', 'column_count')
         filter_horizontal = ('columns',)
-        
+
         def column_count(self, obj):
             return obj.columns.count()
         column_count.short_description = 'Columns'
@@ -180,7 +159,7 @@ if not TERNO_AI_INSTALLED:
     class GroupColumnSelectorAdmin(admin.ModelAdmin):
         list_display = ('group', 'column_count')
         filter_horizontal = ('columns',)
-        
+
         def column_count(self, obj):
             return obj.columns.count()
         column_count.short_description = 'Columns'
@@ -210,33 +189,28 @@ if not TERNO_AI_INSTALLED:
         readonly_fields = ('key_hash', 'key_prefix', 'last_used', 'created_at', 'created_by')
         fields = ('name', 'token_type', 'datasources', 'is_active', 'expires_at', 
                   'key_hash', 'key_prefix', 'last_used', 'created_at', 'created_by')
-        
+
         filter_horizontal = ('datasources',)
 
         def save_model(self, request, obj, form, change):
-            if not change:  # Creating new token
-                # We interpret the save as a request to generate a new token
-                # The obj already has data from the form, but isn't saved yet.
-                
-                # Use our secure generation utility
+            if not change:
+
+
                 token, full_key = generate_service_token(
-                    name=obj.name, 
+                    name=obj.name,
                     token_type=obj.token_type,
                     created_by=request.user
                 )
-                
-                # Copy generated fields back to the form object to satisfy Django admin
+
                 obj.id = token.id
                 obj.key_hash = token.key_hash
                 obj.key_prefix = token.key_prefix
                 obj.created_at = token.created_at
-                
-                # Handle M2M: Copy selected datasources to the newly created token
+
                 datasources = form.cleaned_data.get('datasources')
                 if datasources:
                     token.datasources.set(datasources)
-                
-                # SHOW THE KEY TO USER (One time only)
+
                 messages.set_level(request, messages.SUCCESS)
                 messages.success(request, format_html(
                     "<strong>Token Created Successfully!</strong><br>"
@@ -245,5 +219,4 @@ if not TERNO_AI_INSTALLED:
                     full_key
                 ))
             else:
-                # Update existing (revocation, renaming, etc)
                 super().save_model(request, obj, form, change)
