@@ -1,16 +1,5 @@
-"""
-TernoDBI MCP Servers.
-
-Two independent MCP servers for AI agents:
-- Query MCP: Read-only database operations (query, list tables, get schema)
-- Admin MCP: Administrative operations (rename tables/columns, manage suggestions)
-
-Usage:
-    python -m dbi_layer.mcp query   # Start Query MCP server
-    python -m dbi_layer.mcp admin   # Start Admin MCP server
-"""
-
 import sys
+
 
 def main():
     if len(sys.argv) < 2:
@@ -20,9 +9,9 @@ def main():
         print("  query  - Query MCP server (list tables, execute queries, get schema)", file=sys.stderr)
         print("  admin  - Admin MCP server (rename tables/columns, manage suggestions)", file=sys.stderr)
         sys.exit(1)
-    
+
     server_type = sys.argv[1].lower()
-    
+
     if server_type == "query":
         from dbi_layer.mcp.query_server import main as query_main
         query_main()

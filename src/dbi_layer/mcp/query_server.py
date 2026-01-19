@@ -1,14 +1,3 @@
-"""
-Query MCP Server for TernoDBI.
-
-Provides read-only database operations for AI agents:
-- List datasources, tables, columns
-- Execute queries with SQLShield translation
-- Get schema and sample data
-
-Run with: python -m dbi_layer.mcp query
-"""
-
 import os
 import sys
 import json
@@ -20,12 +9,8 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 from dbi_layer.client import TernoDBIClient
-
-# Setup logging
 logger = logging.getLogger(__name__)
 
-# Initialize SDK Client
-# Requires TERNODBI_API_URL to be set, or defaults to what SDK uses (localhost:8000)
 client = TernoDBIClient()
 
 server = Server("ternodbi-query")
@@ -33,7 +18,6 @@ server = Server("ternodbi-query")
 
 @server.list_tools()
 async def list_tools() -> List[Tool]:
-    """List available Query MCP tools."""
     return [
         Tool(
             name="list_datasources",
@@ -145,18 +129,14 @@ async def list_tools() -> List[Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
-    """Handle Query MCP tool calls."""
     try:
         result = None
-        
+
         if name == "list_datasources":
             result = {"datasources": client.list_datasources()}
-            # Note: client methods directly return list or dict. 
-            # We wrap for consistency if needed or use directly.
-            # Client returns list of dicts.
             if isinstance(result["datasources"], list):
                 result["count"] = len(result["datasources"])
-        
+
         elif name == "list_tables":
             datasource_id = arguments["datasource_id"]
             tables = client.list_tables(datasource_id)
@@ -164,7 +144,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 "tables": tables,
                 "count": len(tables) if isinstance(tables, list) else 0
             }
-        
+
         elif name == "list_columns":
             table_id = arguments["table_id"]
             columns = client.list_columns(table_id)
@@ -172,22 +152,22 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 "columns": columns,
                 "count": len(columns)
             }
-        
+
         elif name == "get_schema":
             datasource_id = arguments["datasource_id"]
             result = client.get_schema(datasource_id)
-        
+
         elif name == "execute_query":
             datasource_id = arguments["datasource_id"]
             sql = arguments["sql"]
             limit = arguments.get("limit", 100)
             result = client.execute_query(datasource_id, sql, limit)
-        
+
         elif name == "get_sample_data":
             table_id = arguments["table_id"]
             rows = arguments.get("rows", 10)
             result = client.get_sample_data(table_id, rows)
-        
+
         elif name == "get_suggestions":
             datasource_id = arguments["datasource_id"]
             data = client.list_suggestions(datasource_id)
@@ -195,26 +175,24 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 "suggestions": data.get("suggestions", []),
                 "count": len(data.get("suggestions", []))
             }
-        
+
         else:
             result = {"error": f"Unknown tool: {name}"}
-        
+
         return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
-    
+
     except Exception as e:
         logger.exception(f"Error in Query MCP tool {name}: {e}")
         return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
 
 
 async def run_server():
-    """Run the Query MCP server."""
-    print(f"🔍 Starting TernoDBI Query MCP Server (API: {client.base_url})", file=sys.stderr)
+    print(f"Starting TernoDBI Query MCP Server (API: {client.base_url})", file=sys.stderr)
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
 def main():
-    """CLI entry point for Query MCP."""
     asyncio.run(run_server())
 
 

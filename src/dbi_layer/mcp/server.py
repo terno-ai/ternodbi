@@ -1,10 +1,3 @@
-"""
-DBI Layer MCP Server
-
-Exposes DBI Layer functionality as MCP tools for AI agents.
-Run with: python -m dbi_layer.mcp.server --db-url "postgresql://..."
-"""
-
 import argparse
 import asyncio
 import json
@@ -18,22 +11,16 @@ from mcp.types import Tool, TextContent
 
 from dbi_layer.connectors import ConnectorFactory, BaseConnector
 
-
-# ========== Global State ==========
-
 _connector: BaseConnector = None
 _config: Dict[str, Any] = {}
 
 
 def initialize(db_type: str, db_url: str, credentials: Dict = None, **kwargs):
-    """Initialize the connector."""
     global _connector, _config
-    
     _config = kwargs
     _connector = ConnectorFactory.create_connector(db_type, db_url, credentials)
-    
     dialect_name, dialect_version = _connector.get_dialect_info()
-    print(f"🔌 Connected to database: {dialect_name} {dialect_version}", file=sys.stderr)
+    print(f"Connected to database: {dialect_name} {dialect_version}", file=sys.stderr)
 
 
 server = Server("dbi-layer")
@@ -41,7 +28,6 @@ server = Server("dbi-layer")
 
 @server.list_tools()
 async def list_tools() -> List[Tool]:
-    """List available MCP tools."""
     return [
         Tool(
             name="list_tables",
@@ -112,25 +98,23 @@ async def list_tools() -> List[Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
-    """Handle tool calls."""
     global _connector
-    
+
     if _connector is None:
         return [TextContent(type="text", text="Error: Database not initialized")]
-    
+
     try:
         result = None
-        
+
         if name == "list_tables":
-            # Get tables using connector's metadata
             mdb = _connector.get_metadata()
             tables = list(mdb.tables.keys())
             result = {"tables": tables, "count": len(tables)}
-        
+
         elif name == "get_table_info":
             table_name = arguments["table_name"]
             mdb = _connector.get_metadata()
-            
+
             if table_name not in mdb.tables:
                 result = {"error": f"Table '{table_name}' not found"}
             else:
@@ -146,103 +130,91 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                     "columns": columns,
                     "column_count": len(columns)
                 }
-        
+
         elif name == "execute_query":
             sql = arguments["sql"]
             limit = arguments.get("limit", 100)
-            
-            # Add LIMIT if not present
+
             sql_lower = sql.lower().strip()
             if "limit" not in sql_lower:
                 sql = f"{sql} LIMIT {limit}"
-            
+
             import sqlalchemy
             with _connector.get_connection() as conn:
                 result_proxy = conn.execute(sqlalchemy.text(sql))
                 rows = result_proxy.fetchall()
                 columns = list(result_proxy.keys())
-                
+
                 data = []
                 for row in rows:
                     data.append(dict(zip(columns, row)))
-                
+
                 result = {
                     "columns": columns,
                     "data": data,
                     "row_count": len(data)
                 }
-        
+
         elif name == "get_sample_data":
             table_name = arguments["table_name"]
             rows = arguments.get("rows", 10)
-            
+
             import sqlalchemy
             sql = f"SELECT * FROM {table_name} LIMIT {rows}"
-            
+
             with _connector.get_connection() as conn:
                 result_proxy = conn.execute(sqlalchemy.text(sql))
                 fetch_rows = result_proxy.fetchall()
                 columns = list(result_proxy.keys())
-                
+
                 data = []
                 for row in fetch_rows:
                     data.append(dict(zip(columns, row)))
-                
+
                 result = {
                     "table": table_name,
                     "columns": columns,
                     "data": data,
                     "row_count": len(data)
                 }
-        
+
         else:
             result = {"error": f"Unknown tool: {name}"}
-        
-        # Format result
+
         return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
-    
+
     except Exception as e:
         return [TextContent(type="text", text=f"Error: {str(e)}")]
 
 
-
 async def run_server(db_type: str, db_url: str, credentials: Dict = None):
-    """Run the MCP server."""
     print("Starting DBI Layer MCP Server", file=sys.stderr)
-    
-    # Initialize
     initialize(db_type, db_url, credentials)
-    
-    # Start server
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
 def main():
-    """CLI entry point."""
     parser = argparse.ArgumentParser(description="DBI Layer MCP Server")
     parser.add_argument(
-        "--db-type",
         default=os.environ.get("DBI_DB_TYPE", "sqlite"),
         help="Database type (postgres, mysql, sqlite, bigquery, snowflake)"
     )
     parser.add_argument(
-        "--db-url",
         default=os.environ.get("DBI_DATABASE_URL", "sqlite:///test.db"),
         help="Database connection URL"
     )
     parser.add_argument(
-        "--credentials-file",
         help="Path to JSON credentials file (for BigQuery)"
     )
-    
+
     args = parser.parse_args()
-    
+
     credentials = None
     if args.credentials_file:
         with open(args.credentials_file) as f:
             credentials = json.load(f)
-    
+
     asyncio.run(run_server(args.db_type, args.db_url, credentials))
 
 

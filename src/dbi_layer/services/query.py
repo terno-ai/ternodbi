@@ -21,7 +21,7 @@ def execute_native_sql(datasource, native_sql, page=1, per_page=50):
             datasource.connection_str,
             credentials=datasource.connection_json
         )
-        
+
         with connector.get_connection() as con:
             execute_result = con.execute(sqlalchemy.text(native_sql))
             table_data = _prepare_table_data(execute_result, page, per_page)
@@ -44,7 +44,7 @@ def execute_native_sql_return_df(datasource, native_sql):
             datasource.connection_str,
             credentials=datasource.connection_json
         )
-        
+
         with connector.get_connection() as con:
             execute_result = con.execute(sqlalchemy.text(native_sql))
             fetch_result = execute_result.fetchall()
@@ -71,10 +71,10 @@ def export_native_sql_result(datasource, native_sql):
         datasource.connection_str,
         credentials=datasource.connection_json
     )
-    
+
     utc_time = timezone.now().strftime('%Y-%m-%d_%H-%M-%S')
     file_name = f'dbi_{datasource.display_name}_{utc_time}.csv'
-    
+
     with connector.get_connection() as con:
         execute_result = con.execute(sqlalchemy.text(native_sql))
         response = HttpResponse(content_type='text/csv')
@@ -120,4 +120,3 @@ def _prepare_table_data(execute_result, page, per_page):
             data[column] = _make_json_safe(row[i])
         table_data['data'].append(data)
     return table_data
-

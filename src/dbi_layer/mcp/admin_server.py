@@ -20,7 +20,6 @@ server = Server("ternodbi-admin")
 
 @server.list_tools()
 async def list_tools() -> List[Tool]:
-    """List available Admin MCP tools."""
     return [
         Tool(
             name="rename_table",
@@ -269,41 +268,41 @@ async def list_tools() -> List[Tool]:
 async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
     try:
         result = None
-    
+
         if name == "rename_table":
             table_id = arguments["table_id"]
             public_name = arguments["public_name"]
             result = client.update_table(table_id, public_name=public_name)
-        
+
         elif name == "update_table_description":
             table_id = arguments["table_id"]
             description = arguments["description"]
             result = client.update_table(table_id, description=description)
-        
+
         elif name == "rename_column":
             column_id = arguments["column_id"]
             public_name = arguments["public_name"]
             result = client.update_column(column_id, public_name=public_name)
-        
+
         elif name == "list_suggestions":
             datasource_id = arguments["datasource_id"]
             result = client.list_suggestions(datasource_id)
-        
+
         elif name == "add_suggestion":
             datasource_id = arguments["datasource_id"]
             suggestion_text = arguments["suggestion"]
             result = client.add_suggestion(datasource_id, suggestion_text)
-        
+
         elif name == "delete_suggestion":
             suggestion_id = arguments["suggestion_id"]
             result = client.delete_suggestion(suggestion_id)
-        
+
         elif name == "validate_connection":
             db_type = arguments["type"]
             connection_str = arguments["connection_str"]
             connection_json = arguments.get("connection_json")
             result = client.validate_connection(db_type, connection_str, connection_json)
-        
+
         elif name == "add_datasource":
             display_name = arguments["display_name"]
             db_type = arguments["type"]
@@ -311,37 +310,36 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             connection_json = arguments.get("connection_json")
             description = arguments.get("description", "")
             result = client.create_datasource(display_name, db_type, connection_str, connection_json, description)
-        
+
         elif name == "delete_datasource":
             datasource_id = arguments["datasource_id"]
             result = client.delete_datasource(datasource_id)
-        
+
         elif name == "get_table_info":
             datasource_id = arguments["datasource_id"]
             table_name = arguments["table_name"]
             result = client.get_table_info(datasource_id, table_name)
-        
+
         elif name == "get_all_tables_info":
             datasource_id = arguments["datasource_id"]
             table_names = arguments.get("table_names")
             result = client.get_all_tables_info(datasource_id, table_names)
-        
+
         elif name == "update_column_description":
             column_id = arguments["column_id"]
             description = arguments["description"]
             result = client.update_column(column_id, description=description)
-        
-        
+
         elif name == "sync_metadata":
             datasource_id = arguments["datasource_id"]
             overwrite = arguments.get("overwrite", False)
             result = client.sync_metadata(datasource_id, overwrite=overwrite)
-        
+
         else:
             result = {"error": f"Unknown tool: {name}"}
-        
+
         return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
-    
+
     except Exception as e:
         logger.exception(f"Error in Admin MCP tool {name}: {e}")
         return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
