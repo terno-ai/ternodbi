@@ -52,30 +52,61 @@ TEMPLATES = [
 WSGI_APPLICATION = 'dbi_server.wsgi.application'
 
 
-TERNO_PROJECT_PATH = os.environ.get('TERNO_PROJECT_PATH', '')
-USER_SQLITE_PATH = os.environ.get('USER_SQLITE_PATH', '')
+# Database Configuration
+# ======================
+# Options:
+# 1. DATABASE_ENGINE=MYSQL (production MySQL)
+# 2. DATABASE_ENGINE=POSTGRESQL (production PostgreSQL)
+# 3. DJANGO_PROJECT_PATH=/path/to/project (SQLite only - share with another Django project)
+# 4. Default: standalone SQLite
+#
+# To share database with your existing Django project, use options 1, 2, or 3:
+#   - For SQLite: set DJANGO_PROJECT_PATH to your Django project directory
+#   - For MySQL/PostgreSQL: use the same MYSQL_* or POSTGRES_* credentials as your Django project
+DJANGO_PROJECT_PATH = os.environ.get('DJANGO_PROJECT_PATH', '')
 
-DB_PATH = None
-
-if TERNO_PROJECT_PATH:
-    terno_db = Path(TERNO_PROJECT_PATH) / 'db.sqlite3'
-    if terno_db.exists():
-        DB_PATH = terno_db
-
-if DB_PATH is None:
-    terno_ai_path = Path(__file__).resolve().parent.parent.parent.parent / 'terno-ai' / 'terno' / 'db.sqlite3'
-    if terno_ai_path.exists():
-        DB_PATH = terno_ai_path
-
-if DB_PATH is None:
-    DB_PATH = BASE_DIR / 'db.sqlite3'
-
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': DB_PATH,
+if os.environ.get('DATABASE_ENGINE') == 'MYSQL':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': os.environ.get('MYSQL_DB', 'ternodbi'),
+            'USER': os.environ.get('MYSQL_USER'),
+            'PASSWORD': os.environ.get('MYSQL_PASS'),
+            'HOST': os.environ.get('MYSQL_HOST', 'localhost'),
+            'PORT': os.environ.get('MYSQL_PORT', '3306'),
+            'CONN_MAX_AGE': 1800,
+            'OPTIONS': {
+                'charset': 'utf8mb4',
+                'init_command': "SET NAMES 'utf8mb4'"
+            },
+        }
     }
-}
+elif os.environ.get('DATABASE_ENGINE') == 'POSTGRESQL':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ.get('POSTGRES_DB', 'ternodbi'),
+            'USER': os.environ.get('POSTGRES_USER'),
+            'PASSWORD': os.environ.get('POSTGRES_PASS'),
+            'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
+            'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+            'CONN_MAX_AGE': 1800,
+        }
+    }
+elif DJANGO_PROJECT_PATH:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': Path(DJANGO_PROJECT_PATH) / 'db.sqlite3',
+        }
+    }
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 AUTH_PASSWORD_VALIDATORS = [
