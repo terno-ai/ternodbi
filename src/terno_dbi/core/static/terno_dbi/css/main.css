@@ -512,6 +512,8 @@ footer {
     /* Flex to center content */
     flex-direction: column;
     justify-content: center;
+    align-items: center;
+    /* Center Horizontal */
 }
 
 .source-group:hover {
@@ -553,8 +555,8 @@ footer {
 }
 
 .logo-item svg {
-    width: 1.5rem;
-    height: 1.5rem;
+    width: 2rem;
+    height: 2rem;
 }
 
 /* Arrows */
