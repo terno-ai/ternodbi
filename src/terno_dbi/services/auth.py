@@ -1,12 +1,18 @@
 
 import secrets
 import hashlib
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 from django.utils import timezone
-from terno_dbi.core.models import ServiceToken
+from terno_dbi.core.models import ServiceToken, DataSource
 
 
-def generate_service_token(name: str, token_type: str = ServiceToken.TokenType.QUERY, created_by=None) -> Tuple[ServiceToken, str]:
+def generate_service_token(
+    name: str, 
+    token_type: str = ServiceToken.TokenType.QUERY, 
+    created_by=None,
+    expires_at=None,
+    datasource_ids: Optional[List[int]] = None
+) -> Tuple[ServiceToken, str]:
     random_part = secrets.token_urlsafe(32)
     prefix_type = token_type.lower()
     prefix = f"dbi_{prefix_type}_"
@@ -20,8 +26,13 @@ def generate_service_token(name: str, token_type: str = ServiceToken.TokenType.Q
         key_prefix=prefix,
         key_hash=key_hash,
         created_by=created_by,
-        is_active=True
+        is_active=True,
+        expires_at=expires_at
     )
+
+    if datasource_ids:
+        datasources = DataSource.objects.filter(id__in=datasource_ids)
+        token.datasources.set(datasources)
 
     return token, full_key
 
