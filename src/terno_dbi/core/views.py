@@ -27,8 +27,38 @@ def info(request):
         "version": "1.0.0",
         "supported_databases": supported_dbs,
         "config": {
-            "default_page_size": conf.get("DEFAULT_PAGE_SIZE"),
-            "max_page_size": conf.get("MAX_PAGE_SIZE"),
             "cache_timeout": conf.get("CACHE_TIMEOUT"),
         }
+    })
+
+
+def doc_view(request, page="setup"):
+    import markdown
+    import os
+    from django.conf import settings
+    from django.http import Http404
+
+    # Sanitize page
+    valid_pages = ["architecture", "setup", "mcp-guide", "security"]
+    if page not in valid_pages:
+        page = "setup"
+
+    # Resolve docs path
+    # Base dir is server/, docs are in root so ../docs
+    docs_dir = settings.BASE_DIR.parent / "docs"
+    file_path = docs_dir / f"{page}.md"
+
+    if not file_path.exists():
+        raise Http404("Documentation not found")
+
+    with open(file_path, "r") as f:
+        md_content = f.read()
+
+    html_content = markdown.markdown(
+        md_content, extensions=["fenced_code", "tables", "toc"]
+    )
+
+    return render(request, "terno_dbi/docs.html", {
+        "content": html_content,
+        "current_page": page
     })

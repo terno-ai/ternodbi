@@ -1,0 +1,47 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}TernoDBI - Database Interface Layer{% endblock %}</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'terno_dbi/css/main.css' %}">
+    {% block extra_head %}{% endblock %}
+</head>
+
+<body>
+    <header>
+        <div class="container header-content">
+            <a href="/" class="logo">
+                <span>⚡</span> TernoDBI
+            </a>
+            <nav>
+                <ul>
+                    <li><a href="/docs/setup/">Documentation</a></li>
+                    <li><a href="https://github.com/terno-ai/ternodbi" target="_blank">GitHub</a></li>
+                    <li><a href="/admin/">Admin Console</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        <div class="container footer-content">
+            <p>&copy; {% now "Y" %} TernoAI Inc. All rights reserved.</p>
+            <p>TernoDBI v0.1.0 • Apache 2.0 License</p>
+        </div>
+    </footer>
+
+    <script src="{% static 'terno_dbi/js/status.js' %}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+
+</html>

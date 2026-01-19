@@ -1,0 +1,170 @@
+{% extends 'base.html' %}
+
+{% block title %}Documentation - TernoDBI{% endblock %}
+
+{% block extra_head %}
+<style>
+    .docs-layout {
+        display: grid;
+        grid-template-columns: 250px 1fr;
+        gap: 2rem;
+        margin-top: 2rem;
+    }
+
+    .docs-sidebar {
+        position: sticky;
+        top: 6rem;
+        height: fit-content;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        padding: 1rem;
+    }
+
+    .docs-nav {
+        list-style: none;
+    }
+
+    .docs-nav li {
+        margin-bottom: 0.5rem;
+    }
+
+    .docs-nav a {
+        display: block;
+        padding: 0.5rem 1rem;
+        border-radius: 0.25rem;
+        color: var(--text-secondary);
+        text-decoration: none;
+        transition: all 0.2s;
+    }
+
+    .docs-nav a:hover,
+    .docs-nav a.active {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+
+    .docs-content {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        padding: 2rem 3rem;
+        min-height: 80vh;
+    }
+
+    /* Markdown Styles */
+    .docs-content h1 {
+        font-size: 2.5rem;
+        margin-bottom: 1.5rem;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 1rem;
+    }
+
+    .docs-content h2 {
+        font-size: 1.8rem;
+        margin: 2rem 0 1rem;
+    }
+
+    .docs-content h3 {
+        font-size: 1.4rem;
+        margin: 1.5rem 0 1rem;
+    }
+
+    .docs-content p {
+        margin-bottom: 1rem;
+        line-height: 1.8;
+        max-width: 80ch;
+    }
+
+    .docs-content ul,
+    .docs-content ol {
+        margin-bottom: 1rem;
+        padding-left: 1.5rem;
+    }
+
+    .docs-content li {
+        margin-bottom: 0.5rem;
+    }
+
+    .docs-content table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 1.5rem 0;
+    }
+
+    .docs-content th,
+    .docs-content td {
+        border: 1px solid var(--border);
+        padding: 0.75rem;
+        text-align: left;
+    }
+
+    .docs-content th {
+        background: var(--bg-tertiary);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="docs-layout">
+        <aside class="docs-sidebar">
+            <h3 style="font-size: 1rem; margin-bottom: 1rem; color: var(--text-secondary); text-transform: uppercase;">
+                Documentation</h3>
+            <ul class="docs-nav">
+                <li><a href="/docs/setup/" class="{% if current_page == 'setup' %}active{% endif %}">Setup &
+                        Installation</a></li>
+                <li><a href="/docs/architecture/"
+                        class="{% if current_page == 'architecture' %}active{% endif %}">Architecture</a></li>
+                <li><a href="/docs/mcp-guide/" class="{% if current_page == 'mcp-guide' %}active{% endif %}">MCP
+                        Integration</a></li>
+                <li><a href="/docs/security/" class="{% if current_page == 'security' %}active{% endif %}">Security &
+                        Tokens</a></li>
+            </ul>
+        </aside>
+
+        <article class="docs-content">
+            {{ content|safe }}
+        </article>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+
+    // Configure mermaid
+    mermaid.initialize({
+        startOnLoad: false,
+        theme: 'dark',
+        securityLevel: 'loose',
+    });
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        // Find all mermaid code blocks (rendered by python-markdown as code.language-mermaid)
+        const mermaidBlocks = document.querySelectorAll('code.language-mermaid');
+
+        for (const block of mermaidBlocks) {
+            const pre = block.parentElement;
+            const content = block.textContent;
+
+            // Create a new div for mermaid to render into
+            const div = document.createElement('div');
+            div.className = 'mermaid';
+            div.textContent = content;
+            div.style.background = 'transparent';
+            div.style.display = 'flex';
+            div.style.justifyContent = 'center';
+
+            // Replace the <pre><code>...</code></pre> with the div
+            pre.replaceWith(div);
+        }
+
+        // Render all the .mermaid divs
+        await mermaid.run({
+            querySelector: '.mermaid'
+        });
+    });
+</script>
+{% endblock %}

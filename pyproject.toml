@@ -34,9 +34,17 @@ dependencies = [
     "sqlglot>=28.5.0",
     "mcp>=1.25.0",
     "requests>=2.32.5",
-    "databricks-sqlalchemy>=2.0.8",
+    "python-dotenv>=1.0.0",
+    "markdown>=3.0",
+    # Database Drivers
+    "psycopg2-binary>=2.9",
+    "pymysql>=1.1",
+    "sqlalchemy-bigquery>=1.9",
+    "google-cloud-bigquery>=3.0",
     "snowflake-sqlalchemy>=1.8.2",
-    "psycopg2>=2.9.11",
+    "databricks-sqlalchemy>=2.0.8",
+    "databricks-sql-connector>=2.0",
+    "oracledb>=1.4",
 ]
 
 [project.optional-dependencies]

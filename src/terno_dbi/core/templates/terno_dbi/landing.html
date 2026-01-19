@@ -1,466 +1,102 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TernoDBI - Database Interface Layer</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --primary: #6366f1;
-            --primary-dark: #4f46e5;
-            --bg-dark: #0f172a;
-            --bg-card: #1e293b;
-            --text-primary: #f8fafc;
-            --text-secondary: #94a3b8;
-            --border: #334155;
-            --success: #10b981;
-            --warning: #f59e0b;
-        }
+{% extends 'base.html' %}
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+{% block content %}
+<div class="container">
+    <!-- Hero Section -->
+    <section style="padding: 6rem 0; text-align: center;">
+        <div id="status-badge" class="status-badge" style="margin-bottom: 2rem;">
+            <div class="status-dot"></div>
+            <span>Checking System Status...</span>
+        </div>
 
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--bg-dark);
-            color: var(--text-primary);
-            min-height: 100vh;
-        }
+        <h1
+            style="margin-bottom: 1.5rem; background: linear-gradient(to right, #fff, #94a3b8); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+            The Universal Database Interface<br>for AI Agents
+        </h1>
 
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 24px;
-        }
+        <p style="margin: 0 auto 3rem; font-size: 1.25rem; color: var(--text-secondary);">
+            Connect Postgres, Snowflake, BigQuery, and more to your AI agents securely.
+            Features SQLShield protection, granular API tokens, and native MCP support.
+        </p>
 
-        /* Header */
-        header {
-            padding: 20px 0;
-            border-bottom: 1px solid var(--border);
-        }
+        <div style="display: flex; gap: 1rem; justify-content: center;">
+            <a href="/admin/" class="btn btn-primary">Open Admin Console</a>
+            <a href="/docs/setup/" class="btn btn-secondary">Read Documentation</a>
+        </div>
+    </section>
 
-        .header-content {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            font-size: 24px;
-            font-weight: 700;
-        }
-
-        .logo-icon {
-            width: 40px;
-            height: 40px;
-            background: linear-gradient(135deg, var(--primary), #8b5cf6);
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-        }
-
-        .status-badge {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            background: rgba(16, 185, 129, 0.1);
-            border: 1px solid var(--success);
-            color: var(--success);
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: 500;
-        }
-
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            background: var(--success);
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-
-            0%,
-            100% {
-                opacity: 1;
-            }
-
-            50% {
-                opacity: 0.5;
-            }
-        }
-
-        /* Hero */
-        .hero {
-            text-align: center;
-            padding: 80px 0 60px;
-        }
-
-        .hero h1 {
-            font-size: 48px;
-            font-weight: 700;
-            margin-bottom: 16px;
-            background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .hero p {
-            font-size: 20px;
-            color: var(--text-secondary);
-            max-width: 600px;
-            margin: 0 auto 32px;
-        }
-
-        .hero-buttons {
-            display: flex;
-            gap: 16px;
-            justify-content: center;
-        }
-
-        .btn {
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 500;
-            text-decoration: none;
-            transition: all 0.2s;
-            cursor: pointer;
-            border: none;
-        }
-
-        .btn-primary {
-            background: var(--primary);
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: var(--primary-dark);
-            transform: translateY(-2px);
-        }
-
-        .btn-secondary {
-            background: transparent;
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-        }
-
-        .btn-secondary:hover {
-            background: var(--bg-card);
-        }
-
-        /* Features */
-        .features {
-            padding: 60px 0;
-        }
-
-        .features h2 {
-            text-align: center;
-            font-size: 32px;
-            margin-bottom: 48px;
-        }
-
-        .features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 24px;
-        }
-
-        .feature-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 24px;
-            transition: transform 0.2s, border-color 0.2s;
-        }
-
-        .feature-card:hover {
-            transform: translateY(-4px);
-            border-color: var(--primary);
-        }
-
-        .feature-icon {
-            width: 48px;
-            height: 48px;
-            background: linear-gradient(135deg, var(--primary), #8b5cf6);
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-            margin-bottom: 16px;
-        }
-
-        .feature-card h3 {
-            font-size: 18px;
-            margin-bottom: 8px;
-        }
-
-        .feature-card p {
-            color: var(--text-secondary);
-            font-size: 14px;
-            line-height: 1.6;
-        }
-
-        /* API Section */
-        .api-section {
-            padding: 60px 0;
-        }
-
-        .api-section h2 {
-            text-align: center;
-            font-size: 32px;
-            margin-bottom: 48px;
-        }
-
-        .api-table {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            overflow: hidden;
-        }
-
-        .api-table table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        .api-table th,
-        .api-table td {
-            padding: 16px;
-            text-align: left;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .api-table th {
-            background: rgba(99, 102, 241, 0.1);
-            color: var(--primary);
-            font-weight: 600;
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .api-table tr:last-child td {
-            border-bottom: none;
-        }
-
-        .method-badge {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 600;
-        }
-
-        .method-get {
-            background: rgba(16, 185, 129, 0.2);
-            color: #10b981;
-        }
-
-        .method-post {
-            background: rgba(99, 102, 241, 0.2);
-            color: #6366f1;
-        }
-
-        .method-patch {
-            background: rgba(245, 158, 11, 0.2);
-            color: #f59e0b;
-        }
-
-        .method-delete {
-            background: rgba(239, 68, 68, 0.2);
-            color: #ef4444;
-        }
-
-        .endpoint-path {
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 14px;
-            color: var(--text-primary);
-        }
-
-        /* Footer */
-        footer {
-            border-top: 1px solid var(--border);
-            padding: 40px 0;
-            text-align: center;
-            color: var(--text-secondary);
-        }
-
-        footer a {
-            color: var(--primary);
-            text-decoration: none;
-        }
-
-        /* Responsive */
-        @media (max-width: 768px) {
-            .hero h1 {
-                font-size: 32px;
-            }
-
-            .hero p {
-                font-size: 16px;
-            }
-
-            .hero-buttons {
-                flex-direction: column;
-            }
-
-            .features-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
-</head>
-
-<body>
-    <header>
-        <div class="container header-content">
-            <div class="logo">
-                <div class="logo-icon">⚡</div>
-                <span>TernoDBI</span>
+    <!-- Quick Start -->
+    <section style="margin-bottom: 6rem;">
+        <h2 style="margin-bottom: 2rem;">Quick Start</h2>
+        <div class="grid">
+            <div class="card">
+                <h3 style="margin-bottom: 1rem; font-size: 1.1rem;">1. Check Health</h3>
+                <p style="margin-bottom: 1rem; font-size: 0.9rem; color: var(--text-secondary);">Verify the API is
+                    reachable.</p>
+                <div class="copy-wrapper">
+                    <button class="copy-btn">Copy</button>
+                    <pre><code>curl http://localhost:8000/api/query/health/</code></pre>
+                </div>
             </div>
-            <div class="status-badge">
-                <span class="status-dot"></span>
-                <span>Server Running</span>
+
+            <div class="card">
+                <h3 style="margin-bottom: 1rem; font-size: 1.1rem;">2. Create Token</h3>
+                <p style="margin-bottom: 1rem; font-size: 0.9rem; color: var(--text-secondary);">Generate a scoped API
+                    key.</p>
+                <div class="copy-wrapper">
+                    <button class="copy-btn">Copy</button>
+                    <pre><code>python manage.py issue_token --name "Agent 1" --type query</code></pre>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3 style="margin-bottom: 1rem; font-size: 1.1rem;">3. Connect Agent</h3>
+                <p style="margin-bottom: 1rem; font-size: 0.9rem; color: var(--text-secondary);">Use with Claude Desktop
+                    via MCP.</p>
+                <div class="copy-wrapper">
+                    <button class="copy-btn">Copy</button>
+                    <pre><code>uvx --from terno-dbi dbi-mcp query</code></pre>
+                </div>
             </div>
         </div>
-    </header>
+    </section>
 
-    <main>
-        <section class="hero">
-            <div class="container">
-                <h1>Database Interface Layer</h1>
-                <p>A powerful, token-authenticated API for managing database connections, executing queries, and
-                    controlling access across multiple database types.</p>
-                <div class="hero-buttons">
-                    <a href="/api/query/health/" class="btn btn-primary">Check Health</a>
-                    <a href="/admin/" class="btn btn-secondary">Django Admin</a>
-                </div>
+    <!-- Features -->
+    <section>
+        <h2 style="margin-bottom: 2rem;">Capabilities</h2>
+        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));">
+            <div class="card">
+                <div style="font-size: 2rem; margin-bottom: 1rem;">🛡️</div>
+                <h3>SQLShield</h3>
+                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem;">
+                    Automatic read-only enforcement and AST validation to prevent SQL injection.
+                </p>
             </div>
-        </section>
 
-        <section class="features">
-            <div class="container">
-                <h2>Key Features</h2>
-                <div class="features-grid">
-                    <div class="feature-card">
-                        <div class="feature-icon">🔐</div>
-                        <h3>Token Authentication</h3>
-                        <p>Secure API access with admin and query tokens. Create, revoke, and manage tokens with full
-                            audit trails.</p>
-                    </div>
-                    <div class="feature-card">
-                        <div class="feature-icon">🗄️</div>
-                        <h3>Multi-Database Support</h3>
-                        <p>Connect to PostgreSQL, MySQL, BigQuery, Snowflake, Databricks, Oracle, and SQLite with a
-                            unified API.</p>
-                    </div>
-                    <div class="feature-card">
-                        <div class="feature-icon">🛡️</div>
-                        <h3>Access Control</h3>
-                        <p>Fine-grained permissions with role-based access, table/column hiding, and row-level security
-                            filters.</p>
-                    </div>
-                    <div class="feature-card">
-                        <div class="feature-icon">📊</div>
-                        <h3>Query Execution</h3>
-                        <p>Execute SQL queries with pagination, export results as CSV, and get results as Parquet for
-                            analytics.</p>
-                    </div>
-                    <div class="feature-card">
-                        <div class="feature-icon">⚙️</div>
-                        <h3>Schema Management</h3>
-                        <p>Rename tables and columns, update descriptions, and manage metadata through the Admin API.
-                        </p>
-                    </div>
-                    <div class="feature-card">
-                        <div class="feature-icon">🔌</div>
-                        <h3>Easy Integration</h3>
-                        <p>Install as a Django app in any project or run as a standalone server. Full REST API
-                            documentation.</p>
-                    </div>
-                </div>
+            <div class="card">
+                <div style="font-size: 2rem; margin-bottom: 1rem;">🔐</div>
+                <h3>Access Control</h3>
+                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem;">
+                    Table/Column hiding, Row Level Security, and expiring API tokens.
+                </p>
             </div>
-        </section>
 
-        <section class="api-section">
-            <div class="container">
-                <h2>API Endpoints</h2>
-                <div class="api-table">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Method</th>
-                                <th>Endpoint</th>
-                                <th>Description</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td><span class="method-badge method-get">GET</span></td>
-                                <td class="endpoint-path">/api/query/health/</td>
-                                <td>Health check (no auth)</td>
-                            </tr>
-                            <tr>
-                                <td><span class="method-badge method-get">GET</span></td>
-                                <td class="endpoint-path">/api/query/datasources/</td>
-                                <td>List all datasources</td>
-                            </tr>
-                            <tr>
-                                <td><span class="method-badge method-get">GET</span></td>
-                                <td class="endpoint-path">/api/query/datasources/{id}/tables/</td>
-                                <td>List tables in a datasource</td>
-                            </tr>
-                            <tr>
-                                <td><span class="method-badge method-post">POST</span></td>
-                                <td class="endpoint-path">/api/query/datasources/{id}/query/</td>
-                                <td>Execute SQL query</td>
-                            </tr>
-                            <tr>
-                                <td><span class="method-badge method-post">POST</span></td>
-                                <td class="endpoint-path">/api/admin/tokens/create/</td>
-                                <td>Create new API token</td>
-                            </tr>
-                            <tr>
-                                <td><span class="method-badge method-get">GET</span></td>
-                                <td class="endpoint-path">/api/admin/tokens/</td>
-                                <td>List all tokens</td>
-                            </tr>
-                            <tr>
-                                <td><span class="method-badge method-patch">PATCH</span></td>
-                                <td class="endpoint-path">/api/admin/tables/{id}/</td>
-                                <td>Update table metadata</td>
-                            </tr>
-                            <tr>
-                                <td><span class="method-badge method-delete">DELETE</span></td>
-                                <td class="endpoint-path">/api/admin/tokens/{id}/</td>
-                                <td>Delete a token</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+            <div class="card">
+                <div style="font-size: 2rem; margin-bottom: 1rem;">🔌</div>
+                <h3>Multi-DB</h3>
+                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem;">
+                    Unified API for Postgres, MySQL, Snowflake, BigQuery, Databricks, Oracle.
+                </p>
             </div>
-        </section>
-    </main>
 
-    <footer>
-        <div class="container">
-            <p>TernoDBI v1.0.0 • <a href="https://github.com/ternoai/ternodbi">GitHub</a> • Part of the <a
-                    href="https://terno.ai">TernoAI</a> ecosystem</p>
+            <div class="card">
+                <div style="font-size: 2rem; margin-bottom: 1rem;">🤖</div>
+                <h3>Native MCP</h3>
+                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem;">
+                    First-class support for the Model Context Protocol (Admin & Query servers).
+                </p>
+            </div>
         </div>
-    </footer>
-</body>
-
-</html>
+    </section>
+</div>
+{% endblock %}
