@@ -1,7 +1,3 @@
-"""
-URL configuration for DBI Server.
-"""
-
 from django.contrib import admin
 from django.urls import path, include
 from dbi_layer.django_app.views import landing_page
