@@ -1,38 +1,39 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="container">
-    <!-- Hero Section -->
-    <section style="padding: 6rem 0; text-align: center;">
-        <div id="status-badge" class="status-badge" style="margin-bottom: 2rem;">
+<!-- Gradient Hero Background -->
+<section class="hero">
+    <div class="container">
+        <div id="status-badge" class="status-badge">
             <div class="status-dot"></div>
             <span>Checking System Status...</span>
         </div>
 
-        <h1
-            style="margin-bottom: 1.5rem; background: linear-gradient(to right, #fff, #94a3b8); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+        <h1>
             The Universal Database Interface<br>for AI Agents
         </h1>
 
-        <p style="margin: 0 auto 3rem; font-size: 1.25rem; color: var(--text-secondary);">
-            Connect Postgres, Snowflake, BigQuery, and more to your AI agents securely.
-            Features SQLShield protection, granular API tokens, and native MCP support.
+        <p>
+            Securely connect your AI agents to <strong>Postgres, MySQL, SQLite, Snowflake, BigQuery, Databricks, and
+                Oracle</strong>.
+            Built for the Model Context Protocol with SQLShield protection and enterprise-grade security.
         </p>
 
-        <div style="display: flex; gap: 1rem; justify-content: center;">
+        <div style="display: flex; gap: 1rem; justify-content: center; margin-top: 2.5rem;">
             <a href="/admin/" class="btn btn-primary">Open Admin Console</a>
             <a href="/docs/setup/" class="btn btn-secondary">Read Documentation</a>
         </div>
-    </section>
+    </div>
+</section>
 
+<div class="container">
     <!-- Quick Start -->
-    <section style="margin-bottom: 6rem;">
-        <h2 style="margin-bottom: 2rem;">Quick Start</h2>
+    <section style="margin-bottom: 8rem;">
+        <h2>Quick Start</h2>
         <div class="grid">
             <div class="card">
-                <h3 style="margin-bottom: 1rem; font-size: 1.1rem;">1. Check Health</h3>
-                <p style="margin-bottom: 1rem; font-size: 0.9rem; color: var(--text-secondary);">Verify the API is
-                    reachable.</p>
+                <h3>1. Check Health</h3>
+                <p>Verify the API is reachable.</p>
                 <div class="copy-wrapper">
                     <button class="copy-btn">Copy</button>
                     <pre><code>curl http://localhost:8000/api/query/health/</code></pre>
@@ -40,9 +41,8 @@
             </div>
 
             <div class="card">
-                <h3 style="margin-bottom: 1rem; font-size: 1.1rem;">2. Create Token</h3>
-                <p style="margin-bottom: 1rem; font-size: 0.9rem; color: var(--text-secondary);">Generate a scoped API
-                    key.</p>
+                <h3>2. Create Token</h3>
+                <p>Generate a scoped API key.</p>
                 <div class="copy-wrapper">
                     <button class="copy-btn">Copy</button>
                     <pre><code>python manage.py issue_token --name "Agent 1" --type query</code></pre>
@@ -50,9 +50,8 @@
             </div>
 
             <div class="card">
-                <h3 style="margin-bottom: 1rem; font-size: 1.1rem;">3. Connect Agent</h3>
-                <p style="margin-bottom: 1rem; font-size: 0.9rem; color: var(--text-secondary);">Use with Claude Desktop
-                    via MCP.</p>
+                <h3>3. Connect Agent</h3>
+                <p>Use with Claude Desktop via MCP.</p>
                 <div class="copy-wrapper">
                     <button class="copy-btn">Copy</button>
                     <pre><code>uvx --from terno-dbi dbi-mcp query</code></pre>
@@ -62,37 +61,73 @@
     </section>
 
     <!-- Features -->
-    <section>
-        <h2 style="margin-bottom: 2rem;">Capabilities</h2>
-        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));">
+    <section style="margin-bottom: 6rem;">
+        <h2>Capabilities</h2>
+        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
             <div class="card">
-                <div style="font-size: 2rem; margin-bottom: 1rem;">🛡️</div>
+                <div class="card-icon">
+                    <!-- Shield Icon -->
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                    </svg>
+                </div>
                 <h3>SQLShield</h3>
-                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem;">
+                <p>
                     Automatic read-only enforcement and AST validation to prevent SQL injection.
                 </p>
             </div>
 
             <div class="card">
-                <div style="font-size: 2rem; margin-bottom: 1rem;">🔐</div>
+                <div class="card-icon">
+                    <!-- Lock Icon -->
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
+                </div>
                 <h3>Access Control</h3>
-                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem;">
+                <p>
                     Table/Column hiding, Row Level Security, and expiring API tokens.
                 </p>
             </div>
 
             <div class="card">
-                <div style="font-size: 2rem; margin-bottom: 1rem;">🔌</div>
+                <div class="card-icon">
+                    <!-- Database/Server Icon -->
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                    </svg>
+                </div>
                 <h3>Multi-DB</h3>
-                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem;">
+                <p>
                     Unified API for Postgres, MySQL, Snowflake, BigQuery, Databricks, Oracle.
                 </p>
             </div>
 
             <div class="card">
-                <div style="font-size: 2rem; margin-bottom: 1rem;">🤖</div>
+                <div class="card-icon">
+                    <!-- CPU/Chip Icon -->
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+                        <rect x="9" y="9" width="6" height="6"></rect>
+                        <line x1="9" y1="1" x2="9" y2="4"></line>
+                        <line x1="15" y1="1" x2="15" y2="4"></line>
+                        <line x1="9" y1="20" x2="9" y2="23"></line>
+                        <line x1="15" y1="20" x2="15" y2="23"></line>
+                        <line x1="20" y1="9" x2="23" y2="9"></line>
+                        <line x1="20" y1="14" x2="23" y2="14"></line>
+                        <line x1="1" y1="9" x2="4" y2="9"></line>
+                        <line x1="1" y1="14" x2="4" y2="14"></line>
+                    </svg>
+                </div>
                 <h3>Native MCP</h3>
-                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem;">
+                <p>
                     First-class support for the Model Context Protocol (Admin & Query servers).
                 </p>
             </div>
