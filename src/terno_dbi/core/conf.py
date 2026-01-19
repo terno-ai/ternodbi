@@ -21,7 +21,7 @@ DEFAULTS = {
 
 def get(key: str):
     """
-    Get a DBI Layer configuration value.
+    Get a Terno DBI configuration value.
     
     First checks Django settings.DBI_LAYER dict, then falls back to defaults.
     

@@ -1,1 +1,1 @@
-"""Django app module for DBI Layer."""
+"""Django app module for Terno DBI."""

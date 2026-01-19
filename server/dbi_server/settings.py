@@ -17,7 +17,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'terno_dbi.core.apps.DbiLayerConfig',
+    'terno_dbi.core.apps.TernoDBIConfig',
 ]
 
 MIDDLEWARE = [

@@ -188,14 +188,14 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
 
 
 async def run_server(db_type: str, db_url: str, credentials: Dict = None):
-    print("Starting DBI Layer MCP Server", file=sys.stderr)
+    print("Starting Terno DBI MCP Server", file=sys.stderr)
     initialize(db_type, db_url, credentials)
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
 def main():
-    parser = argparse.ArgumentParser(description="DBI Layer MCP Server")
+    parser = argparse.ArgumentParser(description="Terno DBI MCP Server")
     parser.add_argument(
         default=os.environ.get("DBI_DB_TYPE", "sqlite"),
         help="Database type (postgres, mysql, sqlite, bigquery, snowflake)"

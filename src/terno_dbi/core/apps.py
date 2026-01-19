@@ -1,14 +1,14 @@
-"""Django app configuration for DBI Layer."""
+"""Django app configuration for Terno DBI."""
 
 from django.apps import AppConfig
 
 
-class DbiLayerConfig(AppConfig):
-    """Django app config for terno_dbi."""
+class TernoDBIConfig(AppConfig):
+    """Django app config for terno_dbi.core."""
 
     default_auto_field = "django.db.models.BigAutoField"
     name = "terno_dbi.core"
-    verbose_name = "DBI Layer"
+    verbose_name = "Terno DBI"
 
     def ready(self):
         """Initialize app when Django starts."""

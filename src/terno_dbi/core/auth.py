@@ -1,5 +1,5 @@
 """
-Authentication module for DBI Layer.
+Authentication module for Terno DBI.
 
 Provides token-based authentication decorators for views.
 """
