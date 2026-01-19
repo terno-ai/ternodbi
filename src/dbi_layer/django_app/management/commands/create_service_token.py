@@ -49,18 +49,15 @@ class Command(BaseCommand):
         name = options['name']
         expires_days = options['expires']
         datasource_ids = options['datasource']
-        
-        # Generate token key
+
         raw_key = ServiceToken.generate_key()
         key_hash = ServiceToken.hash_key(raw_key)
-        key_prefix = raw_key[:12]  # dbi_sk_xxxx
-        
-        # Calculate expiry
+        key_prefix = raw_key[:12]
+
         expires_at = None
         if expires_days:
             expires_at = timezone.now() + timedelta(days=expires_days)
-        
-        # Create token
+
         token = ServiceToken.objects.create(
             key_hash=key_hash,
             key_prefix=key_prefix,
@@ -68,8 +65,7 @@ class Command(BaseCommand):
             token_type=token_type,
             expires_at=expires_at,
         )
-        
-        # Add datasource scope if specified
+
         if datasource_ids:
             from dbi_layer.django_app.models import DataSource
             datasources = DataSource.objects.filter(id__in=datasource_ids)
@@ -77,8 +73,7 @@ class Command(BaseCommand):
             scope_msg = f"Scoped to {datasources.count()} datasource(s)"
         else:
             scope_msg = "Global access (all datasources)"
-        
-        # Output
+
         self.stdout.write(self.style.SUCCESS('\n' + '=' * 60))
         self.stdout.write(self.style.SUCCESS('Service Token Created'))
         self.stdout.write(self.style.SUCCESS('=' * 60))
@@ -90,11 +85,11 @@ class Command(BaseCommand):
             self.stdout.write(f'Expires: {expires_at.isoformat()}')
         else:
             self.stdout.write('Expires: Never')
-        
+
         self.stdout.write(self.style.WARNING(
             '\n[IMPORTANT] Save this token now! It cannot be retrieved later.\n'
         ))
-        
+
         self.stdout.write(self.style.SUCCESS(
             f'\nUsage:\n  curl -H "Authorization: Bearer {raw_key}" ...\n'
         ))

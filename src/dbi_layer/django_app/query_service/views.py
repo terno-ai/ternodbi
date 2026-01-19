@@ -15,7 +15,6 @@ from dbi_layer.decorators import require_service_auth
 logger = logging.getLogger(__name__)
 
 
-
 def health(request):
     return JsonResponse({
         "status": "ok",
@@ -26,7 +25,7 @@ def health(request):
 
 def info(request):
     from dbi_layer.connectors import ConnectorFactory
-    
+
     return JsonResponse({
         "service": "dbi_layer.query_service",
         "version": "1.0.0",
@@ -39,7 +38,7 @@ def info(request):
 @require_http_methods(["GET"])
 def list_datasources(request):
     datasources = models.DataSource.objects.filter(enabled=True)
-    
+
     data = []
     for ds in datasources:
         suggestions = list(
@@ -52,7 +51,7 @@ def list_datasources(request):
             'type': ds.type,
             'suggestions': suggestions,
         })
-    
+
     return JsonResponse({
         "status": "success",
         "datasources": data
@@ -88,7 +87,7 @@ def list_tables(request, datasource_id):
         }, status=404)
 
     role_ids_str = request.GET.get('roles', '')
-    
+
     if role_ids_str:
         from django.contrib.auth.models import Group
         role_ids = [int(r) for r in role_ids_str.split(',') if r.strip()]
@@ -115,13 +114,12 @@ def list_tables(request, datasource_id):
             'table_description': table.description,
             'column_data': column_data
         })
-    
-    # Get suggestions
+
     suggestions = list(
         models.DatasourceSuggestions.objects.filter(data_source=ds)
         .values_list('suggestion', flat=True)
     )
-    
+
     return JsonResponse({
         'status': 'success',
         'tables': tables_list,
@@ -139,7 +137,6 @@ def list_columns(request, datasource_id, table_id):
 @require_service_auth()
 @require_http_methods(["GET"])
 def get_table_columns(request, table_id):
-    """List columns for a specific table by ID."""
     try:
         table = models.Table.objects.get(id=table_id)
     except models.Table.DoesNotExist:
@@ -147,9 +144,9 @@ def get_table_columns(request, table_id):
             "status": "error",
             "error": f"Table {table_id} not found"
         }, status=404)
-    
+
     columns = models.TableColumn.objects.filter(table=table)
-    
+
     return JsonResponse({
         "status": "success",
         "table_id": table_id,
@@ -172,10 +169,10 @@ def get_schema(request, datasource_id):
         datasource = models.DataSource.objects.get(id=datasource_id)
     except models.DataSource.DoesNotExist:
         return JsonResponse({"error": "Datasource not found"}, status=404)
-        
+
     tables = models.Table.objects.filter(data_source=datasource)
     schema = []
-    
+
     for table in tables:
         columns = models.TableColumn.objects.filter(table=table)
         schema.append({
@@ -191,7 +188,7 @@ def get_schema(request, datasource_id):
                 for c in columns
             ]
         })
-    
+
     return JsonResponse({
         "datasource": datasource.display_name,
         "schema": schema,
@@ -209,11 +206,11 @@ def list_foreign_keys(request, datasource_id):
             "status": "error",
             "error": f"DataSource {datasource_id} not found"
         }, status=404)
-    
+
     fks = models.ForeignKey.objects.filter(
         constrained_table__data_source=ds
     ).select_related('constrained_table', 'referred_table')
-    
+
     fk_data = []
     for fk in fks:
         fk_data.append({
@@ -223,7 +220,7 @@ def list_foreign_keys(request, datasource_id):
             "referred_table": fk.referred_table.public_name,  # Use public_name
             "referred_column": fk.referred_columns.public_name if fk.referred_columns else None,
         })
-    
+
     return JsonResponse({
         "status": "success",
         "datasource_id": datasource_id,
@@ -242,25 +239,24 @@ def get_sample_data(request, table_id):
             "status": "error",
             "error": f"Table {table_id} not found"
         }, status=404)
-    
+
     try:
         rows = int(request.GET.get("rows", 10))
-        # Hard limit to prevent fetching too much
         rows = min(rows, 100)
     except ValueError:
         rows = 10
-        
+
     sql = f"SELECT * FROM {table.name} LIMIT {rows}"
-    
+
     try:
         result = execute_native_sql(ds, sql, page=1, per_page=rows)
-        
+
         if result.get("status") == "error":
             return JsonResponse({
                 "status": "error",
                 "error": result.get("error", "Query failed")
             }, status=500)
-        
+
         table_data = result.get("table_data", {})
         return JsonResponse({
             "status": "success",
@@ -289,7 +285,7 @@ def execute_query(request, datasource_id=None):
                 "status": "error",
                 "error": "Datasource ID required"
             }, status=400)
-        
+
         try:
             ds = models.DataSource.objects.get(id=ds_id, enabled=True)
         except models.DataSource.DoesNotExist:
@@ -304,7 +300,7 @@ def execute_query(request, datasource_id=None):
             body.get("per_page", conf.get("DEFAULT_PAGE_SIZE")),
             conf.get("MAX_PAGE_SIZE")
         )
-        
+
         if not sql:
             return JsonResponse({
                 "status": "error",
@@ -312,25 +308,25 @@ def execute_query(request, datasource_id=None):
             }, status=400)
         role_ids = body.get("roles", [])
         from django.contrib.auth.models import Group
-        
+
         if role_ids:
             roles = Group.objects.filter(id__in=role_ids)
         else:
             roles = Group.objects.none()
-        
+
         mDb = prepare_mdb(ds, roles)
         transform_result = generate_native_sql(mDb, sql, ds.dialect_name)
-        
+
         if transform_result.get('status') == 'error':
             return JsonResponse({
                 "status": "error",
                 "error": transform_result.get('error', 'SQL transformation failed')
             }, status=400)
-        
+
         native_sql = transform_result.get('native_sql', sql)
         result = execute_native_sql(ds, native_sql, page=page, per_page=per_page)
         return JsonResponse(result)
-        
+
     except json.JSONDecodeError:
         return JsonResponse({
             "status": "error",
@@ -356,7 +352,7 @@ def export_query(request, datasource_id=None):
                 "status": "error",
                 "error": "Datasource ID required"
             }, status=400)
-        
+
         try:
             ds = models.DataSource.objects.get(id=ds_id, enabled=True)
         except models.DataSource.DoesNotExist:
@@ -364,7 +360,7 @@ def export_query(request, datasource_id=None):
                 "status": "error",
                 "error": f"DataSource {ds_id} not found"
             }, status=404)
-        
+
         sql = body.get("sql")
         if not sql:
             return JsonResponse({
@@ -373,24 +369,24 @@ def export_query(request, datasource_id=None):
             }, status=400)
         role_ids = body.get("roles", [])
         from django.contrib.auth.models import Group
-        
+
         if role_ids:
             roles = Group.objects.filter(id__in=role_ids)
         else:
             roles = Group.objects.none()
-        
+
         mDb = prepare_mdb(ds, roles)
         transform_result = generate_native_sql(mDb, sql, ds.dialect_name)
-        
+
         if transform_result.get('status') == 'error':
             return JsonResponse({
                 "status": "error",
                 "error": transform_result.get('error', 'SQL transformation failed')
             }, status=400)
-        
+
         native_sql = transform_result.get('native_sql', sql)
         return export_native_sql_result(ds, native_sql)
-        
+
     except json.JSONDecodeError:
         return JsonResponse({
             "status": "error",

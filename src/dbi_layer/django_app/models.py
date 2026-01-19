@@ -1,32 +1,15 @@
-"""
-Django models for DBI Layer.
-
-These provide abstract base classes that TernoAI inherits from.
-TernoAI owns the concrete models and database tables.
-"""
-
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.models import Group, User
 
 
-# =============================================================================
-# Abstract Base Classes for Organisation (TernoAI inherits these)
-# =============================================================================
-
 class OrganisationBase(models.Model):
-    """
-    Abstract base class for Organisation.
-    
-    TernoAI creates concrete Organisation that inherits from this.
-    This class defines the core fields for multi-tenancy.
-    """
     name = models.CharField(max_length=255)
     subdomain = models.CharField(max_length=100, unique=True)
     owner = models.ForeignKey(
-        User, 
-        on_delete=models.CASCADE, 
-        related_name='organisation'  # Match original TernoAI model
+        User,
+        on_delete=models.CASCADE,
+        related_name='organisation'
     )
     verified = models.BooleanField(default=True)
     is_active = models.BooleanField(default=False)
@@ -41,12 +24,6 @@ class OrganisationBase(models.Model):
 
 
 class OrganisationUserBase(models.Model):
-    """
-    Abstract base class for Organisation-User relationship.
-    
-    TernoAI creates concrete OrganisationUser that inherits from this.
-    Child class must define: organisation = ForeignKey(Organisation, ...)
-    """
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
@@ -59,14 +36,6 @@ class OrganisationUserBase(models.Model):
 
 
 class OrganisationDataSourceBase(models.Model):
-    """
-    Abstract base class for Organisation-DataSource relationship.
-    
-    TernoAI creates concrete OrganisationDataSource that inherits from this.
-    Child class must define:
-        - organisation = ForeignKey(Organisation, ...)
-        - datasource = ForeignKey(DataSource, ...)
-    """
     # Note: datasource FK must be defined in child class to avoid cross-app reference issues
     created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
@@ -80,12 +49,6 @@ class OrganisationDataSourceBase(models.Model):
 
 
 class OrganisationGroupBase(models.Model):
-    """
-    Abstract base class for Organisation-Group relationship.
-    
-    TernoAI creates concrete OrganisationGroup that inherits from this.
-    Child class must define: organisation = ForeignKey(Organisation, ...)
-    """
     group = models.ForeignKey(Group, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
@@ -97,14 +60,8 @@ class OrganisationGroupBase(models.Model):
         return f"{self.group.name}"
 
 
-# =============================================================================
-# Concrete DataSource Models (owned by TernoDBI)
-# =============================================================================
-
-
 class DataSource(models.Model):
-    """Database connection configuration."""
-    
+
     class DBType(models.TextChoices):
         default = "generic", _("Generic")
         Oracle = "oracle", _("Oracle")
@@ -113,7 +70,7 @@ class DataSource(models.Model):
         bigquery = "bigquery", _("BigQuery")
         databricks = "databricks", _("DataBricks")
         snowflake = "snowflake", _("Snowflake")
-    
+
     display_name = models.CharField(max_length=40, default='Datasource 1')
     type = models.CharField(max_length=20, choices=DBType,
                             default=DBType.default)
@@ -145,7 +102,6 @@ class DataSource(models.Model):
 
 
 class DatasourceSuggestions(models.Model):
-    """Query suggestions for a datasource."""
     data_source = models.ForeignKey(DataSource, on_delete=models.CASCADE)
     suggestion = models.TextField(blank=True, null=True)
 
@@ -156,10 +112,7 @@ class DatasourceSuggestions(models.Model):
         return f"{self.data_source.display_name}: {self.suggestion[:50] if self.suggestion else ''}"
 
 
-
 class Table(models.Model):
-    """Model to represent a table in the data source."""
-    
     name = models.CharField(max_length=255)
     public_name = models.CharField(max_length=255, null=True, blank=True)
     data_source = models.ForeignKey(DataSource, on_delete=models.CASCADE)
@@ -187,8 +140,6 @@ class Table(models.Model):
 
 
 class TableColumn(models.Model):
-    """Model to represent a column in a table."""
-    
     name = models.CharField(max_length=255)
     public_name = models.CharField(max_length=255, null=True, blank=True)
     table = models.ForeignKey(Table, on_delete=models.CASCADE)
@@ -211,8 +162,6 @@ class TableColumn(models.Model):
 
 
 class ForeignKey(models.Model):
-    """Foreign key relationship between tables."""
-    
     constrained_table = models.ForeignKey(
         Table, on_delete=models.CASCADE,
         related_name='contrained_table',
@@ -240,8 +189,6 @@ class ForeignKey(models.Model):
 
 
 class PrivateTableSelector(models.Model):
-    """Model for user to select private tables (hidden globally)."""
-    
     data_source = models.ForeignKey(DataSource, on_delete=models.CASCADE)
     tables = models.ManyToManyField(
         Table, blank=True,
@@ -256,8 +203,6 @@ class PrivateTableSelector(models.Model):
 
 
 class GroupTableSelector(models.Model):
-    """Per-group table access control."""
-    
     group = models.ForeignKey(Group, on_delete=models.CASCADE)
     tables = models.ManyToManyField(
         Table, blank=True,
@@ -276,8 +221,6 @@ class GroupTableSelector(models.Model):
 
 
 class PrivateColumnSelector(models.Model):
-    """Model for user to select private columns (hidden globally)."""
-    
     data_source = models.ForeignKey(DataSource, on_delete=models.CASCADE)
     columns = models.ManyToManyField(
         TableColumn, blank=True,
@@ -292,8 +235,6 @@ class PrivateColumnSelector(models.Model):
 
 
 class GroupColumnSelector(models.Model):
-    """Per-group column access control."""
-    
     group = models.ForeignKey(Group, on_delete=models.CASCADE)
     columns = models.ManyToManyField(
         TableColumn, blank=True,
@@ -312,8 +253,6 @@ class GroupColumnSelector(models.Model):
 
 
 class GroupTableRowFilter(models.Model):
-    """Row-level filters per group."""
-    
     data_source = models.ForeignKey(DataSource, on_delete=models.CASCADE)
     table = models.ForeignKey(Table, on_delete=models.CASCADE)
     group = models.ForeignKey(Group, on_delete=models.CASCADE)
@@ -324,8 +263,6 @@ class GroupTableRowFilter(models.Model):
 
 
 class TableRowFilter(models.Model):
-    """Global row filters for tables."""
-    
     data_source = models.ForeignKey(DataSource, on_delete=models.CASCADE)
     table = models.ForeignKey(Table, on_delete=models.CASCADE)
     filter_str = models.CharField(max_length=300)
@@ -335,19 +272,10 @@ class TableRowFilter(models.Model):
 
 
 class ServiceToken(models.Model):
-    """
-    API tokens for authenticating service requests.
-    
-    Two token types:
-    - admin: Full access (create tokens, rename tables, hide columns, etc.)
-    - query: Read-only access (list datasources, tables, execute queries)
-    """
-    
     class TokenType(models.TextChoices):
         ADMIN = 'admin', _('Admin Service')
         QUERY = 'query', _('Query Service')
-    
-    # Token key (stored as hash, prefix shown for identification)
+
     key_hash = models.CharField(
         max_length=128, 
         unique=True, 
@@ -358,8 +286,6 @@ class ServiceToken(models.Model):
         max_length=10,
         help_text="First 8 chars of token for identification"
     )
-    
-    # Token metadata
     name = models.CharField(
         max_length=100,
         help_text="Friendly name for the token"
@@ -369,16 +295,13 @@ class ServiceToken(models.Model):
         choices=TokenType.choices,
         default=TokenType.QUERY
     )
-    
-    # Scope (null = global access to all datasources)
+
     datasources = models.ManyToManyField(
         DataSource,
         blank=True,
         related_name='service_tokens',
         help_text="If empty, token has global access. Otherwise limited to these datasources."
     )
-    
-    # Audit fields
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
         User,
@@ -401,29 +324,27 @@ class ServiceToken(models.Model):
         default=True,
         help_text="Set to False to revoke the token"
     )
-    
+
     class Meta:
         db_table = 'dbi_servicetoken'
         ordering = ['-created_at']
-    
+
     def __str__(self):
         return f"{self.name} ({self.token_type}) - {self.key_prefix}..."
-    
+
     @classmethod
     def generate_key(cls):
-        """Generate a new random token key."""
         import secrets
         return f"dbi_sk_{secrets.token_hex(24)}"
-    
+
     @classmethod
     def hash_key(cls, key):
         """Hash a token key for storage."""
         import hashlib
         return hashlib.sha256(key.encode()).hexdigest()
-    
+
     def has_access_to(self, datasource):
         """Check if token has access to a specific datasource."""
-        # Global access if no datasources specified
         if not self.datasources.exists():
             return True
         return self.datasources.filter(id=datasource.id).exists()

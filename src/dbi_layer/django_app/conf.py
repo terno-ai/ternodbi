@@ -1,39 +1,20 @@
-"""
-Configuration module for TernoDBI.
-
-Provides centralized, configurable settings with sensible defaults.
-Consuming applications can override settings via Django's settings.py:
-
-    # In settings.py
-    DBI_LAYER = {
-        "DEFAULT_PAGE_SIZE": 100,
-        "MAX_PAGE_SIZE": 1000,
-        "CACHE_TIMEOUT": 7200,
-    }
-"""
-
 from django.conf import settings
 
 DEFAULTS = {
-    # Pagination
     "DEFAULT_PAGE_SIZE": 50,
     "MAX_PAGE_SIZE": 500,
-    
-    # Cache
-    "CACHE_TIMEOUT": 3600,  # 1 hour in seconds
+
+    "CACHE_TIMEOUT": 3600,
     "CACHE_PREFIX": "dbi_",
-    
-    # Connection pooling
+
     "DEFAULT_POOL_SIZE": 20,
     "DEFAULT_MAX_OVERFLOW": 30,
     "DEFAULT_POOL_TIMEOUT": 60,
     "DEFAULT_POOL_RECYCLE": 1800,
-    
-    # Query limits
+
     "MAX_QUERY_ROWS": 10000,
-    "QUERY_TIMEOUT": 300,  # 5 minutes
-    
-    # Export limits
+    "QUERY_TIMEOUT": 300,
+
     "MAX_EXPORT_ROWS": 100000,
 }
 
@@ -61,7 +42,7 @@ def get(key: str):
 def get_all():
     """
     Get all configuration values (defaults merged with user settings).
-    
+
     Returns:
         Dict of all configuration key-value pairs
     """

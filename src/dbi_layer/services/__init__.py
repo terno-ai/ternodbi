@@ -1,5 +1,3 @@
-"""Services module for DBI Layer."""
-
 from dbi_layer.services.shield import (
     prepare_mdb,
     generate_mdb,

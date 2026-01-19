@@ -22,13 +22,13 @@ def create_datasource(request):
         connection_str = body.get("connection_str") or body.get("connection_string")
         connection_json = body.get("connection_json")
         description = body.get("description", "")
-        
+
         if not name or not db_type or not connection_str:
             return JsonResponse({
                 "status": "error",
                 "error": "Missing required fields: display_name, type, connection_str"
             }, status=400)
-        
+
         # BigQuery special handling
         if db_type.lower() == 'bigquery':
             if not connection_json:
@@ -61,7 +61,7 @@ def create_datasource(request):
         )
         from dbi_layer.services.schema_utils import sync_metadata
         sync_result = sync_metadata(ds.id)
-        
+
         return JsonResponse({
             "status": "success",
             "datasource_id": ds.id,
@@ -76,7 +76,7 @@ def create_datasource(request):
                 "columns_created": sync_result.get("columns_created", 0),
             }
         }, status=201)
-        
+
     except json.JSONDecodeError:
         return JsonResponse({
             "status": "error",
@@ -101,10 +101,10 @@ def update_datasource(request, datasource_id):
             "status": "error",
             "error": f"DataSource {datasource_id} not found"
         }, status=404)
-    
+
     try:
         body = json.loads(request.body)
-        
+
         updated = []
         if "name" in body or "display_name" in body:
             ds.display_name = body.get("name") or body.get("display_name")
@@ -115,10 +115,10 @@ def update_datasource(request, datasource_id):
         if "enabled" in body:
             ds.enabled = body["enabled"]
             updated.append("enabled")
-        
+
         if updated:
             ds.save(update_fields=updated)
-        
+
         return JsonResponse({
             "status": "success",
             "message": f"Datasource updated: {', '.join(updated)}",
@@ -130,7 +130,7 @@ def update_datasource(request, datasource_id):
                 "enabled": ds.enabled,
             }
         })
-        
+
     except json.JSONDecodeError:
         return JsonResponse({
             "status": "error",
@@ -142,7 +142,6 @@ def update_datasource(request, datasource_id):
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["DELETE"])
 def delete_datasource(request, datasource_id):
-    """Delete a datasource and all its metadata."""
     try:
         ds = models.DataSource.objects.get(id=datasource_id)
     except models.DataSource.DoesNotExist:
@@ -150,10 +149,10 @@ def delete_datasource(request, datasource_id):
             "status": "error",
             "error": f"DataSource {datasource_id} not found"
         }, status=404)
-    
+
     name = ds.display_name
     ds.delete()
-    
+
     return JsonResponse({
         "status": "success",
         "message": f"Datasource '{name}' and all its metadata have been deleted"
@@ -171,10 +170,10 @@ def update_table(request, table_id):
             "status": "error",
             "error": f"Table {table_id} not found"
         }, status=404)
-    
+
     try:
         body = json.loads(request.body)
-        
+
         updated = []
         if "public_name" in body:
             table.public_name = body["public_name"]
@@ -182,10 +181,10 @@ def update_table(request, table_id):
         if "description" in body:
             table.description = body["description"]
             updated.append("description")
-        
+
         if updated:
             table.save(update_fields=updated)
-        
+
         return JsonResponse({
             "status": "success",
             "message": f"Table updated: {', '.join(updated)}",
@@ -195,7 +194,7 @@ def update_table(request, table_id):
                 "description": table.description,
             }
         })
-        
+
     except json.JSONDecodeError:
         return JsonResponse({
             "status": "error",
@@ -214,10 +213,10 @@ def update_column(request, column_id):
             "status": "error",
             "error": f"Column {column_id} not found"
         }, status=404)
-    
+
     try:
         body = json.loads(request.body)
-        
+
         updated = []
         if "public_name" in body:
             column.public_name = body["public_name"]
@@ -225,10 +224,10 @@ def update_column(request, column_id):
         if "description" in body:
             column.description = body["description"]
             updated.append("description")
-        
+
         if updated:
             column.save(update_fields=updated)
-        
+
         return JsonResponse({
             "status": "success",
             "message": f"Column updated: {', '.join(updated)}",
@@ -238,7 +237,7 @@ def update_column(request, column_id):
                 "data_type": column.data_type,
             }
         })
-        
+
     except json.JSONDecodeError:
         return JsonResponse({
             "status": "error",
@@ -246,14 +245,9 @@ def update_column(request, column_id):
         }, status=400)
 
 
-# =============================================================================
-# Suggestions Management
-# =============================================================================
-
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["GET"])
 def list_suggestions(request, datasource_id):
-    """List all suggestions for a datasource."""
     try:
         ds = models.DataSource.objects.get(id=datasource_id)
     except models.DataSource.DoesNotExist:
@@ -261,10 +255,10 @@ def list_suggestions(request, datasource_id):
             "status": "error",
             "error": f"DataSource {datasource_id} not found"
         }, status=404)
-    
+
     suggestions = models.DatasourceSuggestions.objects.filter(data_source=ds)
     data = [{"id": s.id, "suggestion": s.suggestion} for s in suggestions]
-    
+
     return JsonResponse({
         "status": "success",
         "datasource_id": datasource_id,
@@ -276,14 +270,6 @@ def list_suggestions(request, datasource_id):
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["POST"])
 def add_suggestion(request, datasource_id):
-    """
-    Add a suggestion to a datasource.
-    
-    Request body:
-        {
-            "suggestion": "Show me top 10 customers"
-        }
-    """
     try:
         ds = models.DataSource.objects.get(id=datasource_id)
     except models.DataSource.DoesNotExist:
@@ -291,22 +277,22 @@ def add_suggestion(request, datasource_id):
             "status": "error",
             "error": f"DataSource {datasource_id} not found"
         }, status=404)
-    
+
     try:
         body = json.loads(request.body)
         suggestion_text = body.get("suggestion")
-        
+
         if not suggestion_text:
             return JsonResponse({
                 "status": "error",
                 "error": "Missing 'suggestion' in request body"
             }, status=400)
-        
+
         suggestion = models.DatasourceSuggestions.objects.create(
             data_source=ds,
             suggestion=suggestion_text
         )
-        
+
         return JsonResponse({
             "status": "success",
             "suggestion": {
@@ -315,7 +301,7 @@ def add_suggestion(request, datasource_id):
                 "datasource_id": ds.id
             }
         }, status=201)
-        
+
     except json.JSONDecodeError:
         return JsonResponse({
             "status": "error",
@@ -327,7 +313,6 @@ def add_suggestion(request, datasource_id):
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["DELETE"])
 def delete_suggestion(request, suggestion_id):
-    """Delete a suggestion."""
     try:
         suggestion = models.DatasourceSuggestions.objects.get(id=suggestion_id)
     except models.DatasourceSuggestions.DoesNotExist:
@@ -335,9 +320,9 @@ def delete_suggestion(request, suggestion_id):
             "status": "error",
             "error": f"Suggestion {suggestion_id} not found"
         }, status=404)
-    
+
     suggestion.delete()
-    
+
     return JsonResponse({
         "status": "success",
         "message": "Suggestion deleted"
@@ -353,15 +338,15 @@ def validate_connection(request):
         db_type = body.get("type")
         conn_str = body.get("connection_str") or body.get("connection_string")
         conn_json = body.get("connection_json")
-        
+
         if not db_type or not conn_str:
             return JsonResponse({
                 "status": "error",
                 "error": "Missing 'type' or 'connection_str'"
             }, status=400)
-        
+
         error = validate_datasource_input(db_type, conn_str, conn_json)
-        
+
         if error:
             return JsonResponse({
                 "status": "error",
@@ -374,7 +359,7 @@ def validate_connection(request):
                 "valid": True,
                 "message": "Connection validated successfully"
             })
-            
+
     except json.JSONDecodeError:
         return JsonResponse({
             "status": "error",
@@ -399,17 +384,17 @@ def sync_metadata(request, datasource_id):
             "status": "error",
             "error": f"DataSource {datasource_id} not found"
         }, status=404)
-    
+
     try:
         body = json.loads(request.body)
         overwrite = body.get("overwrite", False)
     except json.JSONDecodeError:
         overwrite = False
-    
+
     try:
         from dbi_layer.services.schema_utils import sync_metadata
         sync_result = sync_metadata(ds.id, overwrite)
-        
+
         return JsonResponse({
             "status": "success",
             "datasource_id": ds.id,
@@ -430,12 +415,12 @@ def get_table_info(request, datasource_id, table_name):
         ds = models.DataSource.objects.get(id=datasource_id)
     except models.DataSource.DoesNotExist:
         return JsonResponse({"error": f"DataSource {datasource_id} not found"}, status=404)
-        
+
     try:
         table = models.Table.objects.get(data_source=ds, name=table_name)
     except models.Table.DoesNotExist:
         return JsonResponse({"error": f"Table {table_name} not found"}, status=404)
-        
+
     columns = models.TableColumn.objects.filter(table=table).values(
         'public_name', 'data_type', 'description'
     )
@@ -467,21 +452,21 @@ def get_all_tables_info(request, datasource_id):
         ds = models.DataSource.objects.get(id=datasource_id)
     except models.DataSource.DoesNotExist:
         return JsonResponse({"error": f"DataSource {datasource_id} not found"}, status=404)
-    
+
     try:
         body = json.loads(request.body)
         table_names = body.get("table_names", [])
     except:
         table_names = []
-        
+
     qs = models.Table.objects.filter(data_source=ds)
     if table_names:
         qs = qs.filter(name__in=table_names)
-    
+
     qs = qs.prefetch_related('columns')
-    
+
     results = []
-    
+
     for table in qs:
         columns = list(table.columns.all().values('public_name', 'data_type', 'description'))
         results.append({
@@ -489,7 +474,7 @@ def get_all_tables_info(request, datasource_id):
             "description": table.description,
             "columns": columns
         })
-        
+
     return JsonResponse({
         "status": "success",
         "tables": results

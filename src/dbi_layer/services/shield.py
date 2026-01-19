@@ -1,9 +1,3 @@
-"""
-SQLShield integration for DBI Layer.
-
-Functions for building MDatabase, generating native SQL, and applying filters.
-"""
-
 import logging
 from django.core.cache import cache
 from sqlshield.shield import Session
@@ -15,19 +9,10 @@ logger = logging.getLogger(__name__)
 
 
 def generate_mdb(datasource):
-    """
-    Generate SQLShield MDatabase from datasource metadata.
-    
-    Args:
-        datasource: DataSource model instance
-        
-    Returns:
-        MDatabase instance
-    """
     tables = {}
     dbtables = models.Table.objects.filter(data_source=datasource)
     columns = {}
-    
+
     for dbt in dbtables:
         tables[dbt.name] = {
             'name': dbt.name,
@@ -65,17 +50,6 @@ def generate_mdb(datasource):
 
 
 def generate_native_sql(mDb, user_sql, dialect):
-    """
-    Generate native SQL from user SQL using SQLShield.
-    
-    Args:
-        mDb: MDatabase instance
-        user_sql: SQL with public names
-        dialect: Target SQL dialect
-        
-    Returns:
-        Dict with 'status' and 'native_sql' or 'error'
-    """
     sess = Session(mDb, '')
     try:
         native_sql = sess.generateNativeSQL(user_sql, dialect)
@@ -90,52 +64,26 @@ def generate_native_sql(mDb, user_sql, dialect):
         }
 
 
-
 def _get_cache_version_key(datasource_id):
-    """Get the cache key for storing datasource cache version."""
     return f"dbi_datasource_{datasource_id}_version"
 
 
 def _get_cache_version(datasource_id):
-    """Get current cache version for a datasource."""
     version = cache.get(_get_cache_version_key(datasource_id))
     return version if version is not None else 0
 
 
 def get_cache_key(datasource_id, role_ids):
-    """
-    Generate a standardized cache key for datasource roles.
-    
-    Includes version number to support cache invalidation without
-    needing Redis pattern matching.
-    
-    Args:
-        datasource_id: ID of the DataSource
-        role_ids: List or iterable of role/group IDs
-        
-    Returns:
-        String cache key
-    """
     ids = sorted(role_ids)
     version = _get_cache_version(datasource_id)
     return f"dbi_datasource_{datasource_id}_v{version}_roles_{'_'.join(map(str, ids))}"
 
 
 def prepare_mdb(datasource, roles):
-    """
-    Prepare MDatabase with access control filters.
-    
-    Args:
-        datasource: DataSource model instance
-        roles: QuerySet of user groups/roles
-        
-    Returns:
-        MDatabase instance with filters applied
-    """
     from dbi_layer.services.access import (
         get_admin_config_object, get_all_group_tables, get_all_group_columns
     )
-    
+
     role_ids = sorted(roles.values_list('id', flat=True))
     cache_key = get_cache_key(datasource.id, role_ids)
     cached_mdb = cache.get(cache_key)
@@ -159,7 +107,6 @@ def prepare_mdb(datasource, roles):
 
 
 def _keep_only_columns(mDb, tables, columns):
-    """Filter MDatabase to only include allowed columns."""
     for _, table in mDb.tables.items():
         table_obj = tables.filter(name=table.name)
         if table_obj:
@@ -176,7 +123,6 @@ def _keep_only_columns(mDb, tables, columns):
 
 
 def _update_table_descriptions(tables):
-    """Update table descriptions from database."""
     for tbl_name, tbl_object in tables.items():
         table_obj = models.Table.objects.filter(name=tbl_name).first()
         if table_obj:
@@ -184,7 +130,6 @@ def _update_table_descriptions(tables):
 
 
 def _update_filters(tables, datasource, roles):
-    """Apply row-level filters to tables."""
     tbl_base_filters = _get_base_filters(datasource)
     tbls_grp_filter = _get_grp_filters(datasource, roles)
     _merge_grp_filters(tbl_base_filters, tbls_grp_filter)
@@ -194,7 +139,6 @@ def _update_filters(tables, datasource, roles):
 
 
 def _get_base_filters(datasource):
-    """Get base row filters for datasource."""
     tbl_base_filters = {}
     for trf in models.TableRowFilter.objects.filter(data_source=datasource):
         filter_str = trf.filter_str.strip()
@@ -204,7 +148,6 @@ def _get_base_filters(datasource):
 
 
 def _get_grp_filters(datasource, roles):
-    """Get group-specific row filters."""
     tbls_grp_filter = {}
     for gtrf in models.GroupTableRowFilter.objects.filter(data_source=datasource, group__in=roles):
         filter_str = gtrf.filter_str.strip()
@@ -220,7 +163,6 @@ def _get_grp_filters(datasource, roles):
 
 
 def _merge_grp_filters(tbl_base_filters, tbls_grp_filter):
-    """Merge group filters with base filters."""
     for tbl, grp_filters in tbls_grp_filter.items():
         role_filter_str = " ( " + ' OR '.join(grp_filters) + " ) "
         all_filters = []
@@ -231,28 +173,15 @@ def _merge_grp_filters(tbl_base_filters, tbls_grp_filter):
         all_filters.append(role_filter_str)
 
 
-
 def delete_cache(datasource):
-    """
-    Invalidate cache for a datasource.
-    
-    Uses version-based invalidation: increments a version counter which
-    causes all old cache keys (with the old version) to miss on lookup.
-    Old entries expire naturally.
-    
-    Works with any Django cache backend - no Redis required.
-    
-    Args:
-        datasource: DataSource model instance, or object with 'id' attribute
-    """
     try:
         datasource_id = datasource.id if hasattr(datasource, 'id') else datasource
         version_key = _get_cache_version_key(datasource_id)
         current_version = _get_cache_version(datasource_id)
         new_version = current_version + 1
-        
+
         cache.set(version_key, new_version, timeout=None)
-        
+
         logger.info(
             f"Invalidated cache for datasource {datasource_id}: "
             f"version {current_version} -> {new_version}"

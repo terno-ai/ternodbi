@@ -12,10 +12,8 @@ from dbi_layer.django_app import conf
 logger = logging.getLogger(__name__)
 
 
-
 def landing_page(request):
     return render(request, 'dbi_layer/landing.html')
-
 
 
 def health(request):
@@ -28,7 +26,7 @@ def health(request):
 
 def info(request):
     supported_dbs = ConnectorFactory.get_supported_databases()
-    
+
     return JsonResponse({
         "service": "dbi_layer",
         "version": "1.0.0",
@@ -46,7 +44,7 @@ def list_datasources(request):
     datasources = models.DataSource.objects.all().values(
         'id', 'display_name', 'type', 'created_at'
     )
-    
+
     return JsonResponse({
         "status": "success",
         "count": len(datasources),
@@ -80,7 +78,7 @@ def list_tables(request, datasource_id):
     try:
         ds = models.DataSource.objects.get(id=datasource_id)
         tables = models.Table.objects.filter(data_source=ds)
-        
+
         return JsonResponse({
             "status": "success",
             "datasource_id": datasource_id,
@@ -106,7 +104,7 @@ def list_columns(request, datasource_id, table_id):
     try:
         table = models.Table.objects.get(id=table_id, data_source_id=datasource_id)
         columns = models.TableColumn.objects.filter(table=table)
-        
+
         return JsonResponse({
             "status": "success",
             "table_id": table_id,
@@ -133,7 +131,7 @@ def list_columns(request, datasource_id, table_id):
 @require_http_methods(["POST"])
 def execute_query(request, datasource_id):
     from dbi_layer.services.query import execute_native_sql
-    
+
     try:
         ds = models.DataSource.objects.get(id=datasource_id)
     except models.DataSource.DoesNotExist:
@@ -141,7 +139,7 @@ def execute_query(request, datasource_id):
             "status": "error",
             "error": f"DataSource {datasource_id} not found"
         }, status=404)
-    
+
     try:
         body = json.loads(request.body)
         sql = body.get("sql")
@@ -150,16 +148,16 @@ def execute_query(request, datasource_id):
             body.get("per_page", conf.get("DEFAULT_PAGE_SIZE")),
             conf.get("MAX_PAGE_SIZE")
         )
-        
+
         if not sql:
             return JsonResponse({
                 "status": "error",
                 "error": "Missing 'sql' in request body"
             }, status=400)
-        
+
         result = execute_native_sql(ds, sql, page=page, per_page=per_page)
         return JsonResponse(result)
-        
+
     except json.JSONDecodeError:
         return JsonResponse({
             "status": "error",
@@ -177,21 +175,21 @@ def execute_query(request, datasource_id):
 @require_http_methods(["POST"])
 def validate_connection(request):
     from dbi_layer.services.validation import validate_datasource_input
-    
+
     try:
         body = json.loads(request.body)
         db_type = body.get("type")
         conn_str = body.get("connection_string")
         conn_json = body.get("connection_json")
-        
+
         if not db_type or not conn_str:
             return JsonResponse({
                 "status": "error",
                 "error": "Missing 'type' or 'connection_string'"
             }, status=400)
-        
+
         error = validate_datasource_input(db_type, conn_str, conn_json)
-        
+
         if error:
             return JsonResponse({
                 "status": "error",
@@ -204,7 +202,7 @@ def validate_connection(request):
                 "valid": True,
                 "message": "Connection validated successfully"
             })
-            
+
     except json.JSONDecodeError:
         return JsonResponse({
             "status": "error",
