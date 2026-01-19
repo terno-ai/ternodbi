@@ -1,10 +1,3 @@
-"""
-Admin Service Views for TernoDBI.
-
-REST API endpoints for managing datasources, tables, and columns.
-No authentication required - consuming apps should add their own auth layer.
-"""
-
 import json
 import logging
 from django.http import JsonResponse
@@ -18,34 +11,12 @@ from dbi_layer.django_app.models import ServiceToken
 
 logger = logging.getLogger(__name__)
 
-
-# =============================================================================
-# DataSource Management
-# =============================================================================
-
 @csrf_exempt
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["POST"])
 def create_datasource(request):
-    """
-    Create a new datasource.
-    
-    Expects JSON body:
-        {
-            "display_name": "My Database",
-            "type": "postgres",
-            "connection_str": "postgresql://...",
-            "connection_json": {},  // Optional, for BigQuery
-            "description": "..."  // Optional
-        }
-        
-    Returns:
-        JSON with created datasource ID
-    """
     try:
         body = json.loads(request.body)
-        
-        # Support both field name styles
         name = body.get("display_name") or body.get("name")
         db_type = body.get("type")
         connection_str = body.get("connection_str") or body.get("connection_string")
@@ -73,16 +44,12 @@ def create_datasource(request):
                         "status": "error",
                         "error": "Invalid connection_json format"
                     }, status=400)
-        
-        # Validate connection
         error = validate_datasource_input(db_type, connection_str, connection_json)
         if error:
             return JsonResponse({
                 "status": "error",
                 "error": f"Connection validation failed: {error}"
             }, status=400)
-        
-        # Create datasource
         ds = models.DataSource.objects.create(
             display_name=name,
             type=db_type.lower(),
@@ -92,8 +59,6 @@ def create_datasource(request):
             dialect_name=db_type.lower(),
             enabled=True,
         )
-        
-        # Auto-sync metadata to discover tables and columns
         from dbi_layer.services.schema_utils import sync_metadata
         sync_result = sync_metadata(ds.id)
         
@@ -129,16 +94,6 @@ def create_datasource(request):
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["PATCH"])
 def update_datasource(request, datasource_id):
-    """
-    Update a datasource.
-    
-    Request body:
-        {
-            "name": "New Name",
-            "description": "Updated description",
-            "enabled": false
-        }
-    """
     try:
         ds = models.DataSource.objects.get(id=datasource_id)
     except models.DataSource.DoesNotExist:
@@ -205,23 +160,10 @@ def delete_datasource(request, datasource_id):
     })
 
 
-# =============================================================================
-# Table Management
-# =============================================================================
-
 @csrf_exempt
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["PATCH"])
 def update_table(request, table_id):
-    """
-    Update table metadata.
-    
-    Request body:
-        {
-            "public_name": "New Display Name",
-            "description": "Updated description"
-        }
-    """
     try:
         table = models.Table.objects.get(id=table_id)
     except models.Table.DoesNotExist:
@@ -249,8 +191,7 @@ def update_table(request, table_id):
             "message": f"Table updated: {', '.join(updated)}",
             "table": {
                 "id": table.id,
-                "name": table.name,
-                "public_name": table.public_name,
+                "name": table.public_name,
                 "description": table.description,
             }
         })
@@ -262,22 +203,10 @@ def update_table(request, table_id):
         }, status=400)
 
 
-# =============================================================================
-# Column Management
-# =============================================================================
-
 @csrf_exempt
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["PATCH"])
 def update_column(request, column_id):
-    """
-    Update column metadata.
-    
-    Request body:
-        {
-            "public_name": "New Display Name"
-        }
-    """
     try:
         column = models.TableColumn.objects.get(id=column_id)
     except models.TableColumn.DoesNotExist:
@@ -305,8 +234,7 @@ def update_column(request, column_id):
             "message": f"Column updated: {', '.join(updated)}",
             "column": {
                 "id": column.id,
-                "name": column.name,
-                "public_name": column.public_name,
+                "name":column.public_name,
                 "data_type": column.data_type,
             }
         })
@@ -416,27 +344,10 @@ def delete_suggestion(request, suggestion_id):
     })
 
 
-# =============================================================================
-# Connection Validation
-# =============================================================================
-
 @csrf_exempt
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["POST"])
 def validate_connection(request):
-    """
-    Validate a database connection before creating datasource.
-    
-    Expects JSON body:
-        {
-            "type": "postgres",
-            "connection_str": "postgresql://...",
-            "connection_json": {}  # Optional, for BigQuery
-        }
-        
-    Returns:
-        JSON with validation result
-    """
     try:
         body = json.loads(request.body)
         db_type = body.get("type")
@@ -477,18 +388,10 @@ def validate_connection(request):
         }, status=500)
 
 
-# =============================================================================
-# Metadata Sync
-# =============================================================================
-
 @csrf_exempt
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["POST"])
 def sync_metadata(request, datasource_id):
-    """
-    Trigger metadata synchronization for a datasource.
-    Discover tables, columns, and foreign keys.
-    """
     try:
         ds = models.DataSource.objects.get(id=datasource_id)
     except models.DataSource.DoesNotExist:
@@ -520,17 +423,9 @@ def sync_metadata(request, datasource_id):
         }, status=500)
 
 
-# =============================================================================
-# Helper Tools for AI Agents (Description Generation)
-# =============================================================================
-
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["GET"])
 def get_table_info(request, datasource_id, table_name):
-    """
-    Get comprehensive info for a table to help AI generate descriptions.
-    Includes: columns, types, sample data (small), existing description.
-    """
     try:
         ds = models.DataSource.objects.get(id=datasource_id)
     except models.DataSource.DoesNotExist:
@@ -541,15 +436,11 @@ def get_table_info(request, datasource_id, table_name):
     except models.Table.DoesNotExist:
         return JsonResponse({"error": f"Table {table_name} not found"}, status=404)
         
-    # Get columns
     columns = models.TableColumn.objects.filter(table=table).values(
-        'name', 'data_type', 'description'
+        'public_name', 'data_type', 'description'
     )
-    
-    # Get sample data (small batch)
     try:
         from dbi_layer.services.query import execute_native_sql
-        # We use a safe internal query 
         sql = f"SELECT * FROM {table.name} LIMIT 3" 
         sample_result = execute_native_sql(ds, sql, page=1, per_page=3)
         sample_rows = sample_result.get('data', [])
@@ -560,7 +451,7 @@ def get_table_info(request, datasource_id, table_name):
     return JsonResponse({
         "status": "success",
         "table": {
-            "name": table.name,
+            "name": table.public_name,
             "description": table.description,
             "columns": list(columns),
             "sample_rows": sample_rows
@@ -572,10 +463,6 @@ def get_table_info(request, datasource_id, table_name):
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["POST"])
 def get_all_tables_info(request, datasource_id):
-    """
-    Get info for multiple tables for batch description generation.
-    Body: {"table_names": ["users", "orders"]} (Optional, else all)
-    """
     try:
         ds = models.DataSource.objects.get(id=datasource_id)
     except models.DataSource.DoesNotExist:
@@ -591,18 +478,14 @@ def get_all_tables_info(request, datasource_id):
     if table_names:
         qs = qs.filter(name__in=table_names)
     
-    # Optimize query
     qs = qs.prefetch_related('columns')
     
     results = []
-    # Limit to avoid timeouts on huge DBs - max 20 tables per batch recommendation
-    # But user might request all. We'll return basic info for all.
     
     for table in qs:
-        # We skip sample data for "all tables" to be fast
-        columns = list(table.columns.all().values('name', 'data_type', 'description'))
+        columns = list(table.columns.all().values('public_name', 'data_type', 'description'))
         results.append({
-            "name": table.name,
+            "name": table.public_name,
             "description": table.description,
             "columns": columns
         })

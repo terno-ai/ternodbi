@@ -1,9 +1,3 @@
-"""
-Views for DBI Layer Django App.
-
-Provides REST API endpoints for database operations.
-"""
-
 import json
 import logging
 from django.http import JsonResponse
@@ -18,33 +12,13 @@ from dbi_layer.django_app import conf
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# Landing Page
-# =============================================================================
 
 def landing_page(request):
-    """
-    Landing page showing TernoDBI capabilities.
-    """
     return render(request, 'dbi_layer/landing.html')
 
 
-# =============================================================================
-# Health & Status Endpoints
-# =============================================================================
-
-
-# =============================================================================
-# Health & Status Endpoints
-# =============================================================================
 
 def health(request):
-    """
-    Health check endpoint.
-    
-    Returns:
-        JSON response with service status
-    """
     return JsonResponse({
         "status": "ok",
         "service": "dbi_layer",
@@ -53,12 +27,6 @@ def health(request):
 
 
 def info(request):
-    """
-    Service information endpoint.
-    
-    Returns:
-        JSON response with configuration and supported databases
-    """
     supported_dbs = ConnectorFactory.get_supported_databases()
     
     return JsonResponse({
@@ -73,18 +41,8 @@ def info(request):
     })
 
 
-# =============================================================================
-# DataSource Endpoints
-# =============================================================================
-
 @require_http_methods(["GET"])
 def list_datasources(request):
-    """
-    List all datasources.
-    
-    Returns:
-        JSON response with list of datasources
-    """
     datasources = models.DataSource.objects.all().values(
         'id', 'display_name', 'type', 'created_at'
     )
@@ -98,15 +56,6 @@ def list_datasources(request):
 
 @require_http_methods(["GET"])
 def get_datasource(request, datasource_id):
-    """
-    Get a specific datasource.
-    
-    Args:
-        datasource_id: ID of the datasource
-        
-    Returns:
-        JSON response with datasource details
-    """
     try:
         ds = models.DataSource.objects.get(id=datasource_id)
         return JsonResponse({
@@ -128,26 +77,22 @@ def get_datasource(request, datasource_id):
 
 @require_http_methods(["GET"])
 def list_tables(request, datasource_id):
-    """
-    List tables for a datasource.
-    
-    Args:
-        datasource_id: ID of the datasource
-        
-    Returns:
-        JSON response with list of tables
-    """
     try:
         ds = models.DataSource.objects.get(id=datasource_id)
-        tables = models.Table.objects.filter(data_source=ds).values(
-            'id', 'name', 'public_name', 'description'
-        )
+        tables = models.Table.objects.filter(data_source=ds)
         
         return JsonResponse({
             "status": "success",
             "datasource_id": datasource_id,
-            "count": len(tables),
-            "tables": list(tables)
+            "count": tables.count(),
+            "tables": [
+                {
+                    'id': t.id,
+                    'name': t.public_name,
+                    'description': t.description or ""
+                }
+                for t in tables
+            ]
         })
     except models.DataSource.DoesNotExist:
         return JsonResponse({
@@ -158,28 +103,23 @@ def list_tables(request, datasource_id):
 
 @require_http_methods(["GET"])
 def list_columns(request, datasource_id, table_id):
-    """
-    List columns for a table.
-    
-    Args:
-        datasource_id: ID of the datasource
-        table_id: ID of the table
-        
-    Returns:
-        JSON response with list of columns
-    """
     try:
         table = models.Table.objects.get(id=table_id, data_source_id=datasource_id)
-        columns = models.TableColumn.objects.filter(table=table).values(
-            'id', 'name', 'public_name', 'data_type'
-        )
+        columns = models.TableColumn.objects.filter(table=table)
         
         return JsonResponse({
             "status": "success",
             "table_id": table_id,
-            "table_name": table.name,
-            "count": len(columns),
-            "columns": list(columns)
+            "table_name": table.public_name,
+            "count": columns.count(),
+            "columns": [
+                {
+                    'id': c.id,
+                    'name': c.public_name,
+                    'data_type': c.data_type
+                }
+                for c in columns
+            ]
         })
     except models.Table.DoesNotExist:
         return JsonResponse({
@@ -188,26 +128,10 @@ def list_columns(request, datasource_id, table_id):
         }, status=404)
 
 
-# =============================================================================
-# Query Endpoints
-# =============================================================================
 
 @csrf_exempt
 @require_http_methods(["POST"])
 def execute_query(request, datasource_id):
-    """
-    Execute a query against a datasource.
-    
-    Expects JSON body:
-        {
-            "sql": "SELECT * FROM users LIMIT 10",
-            "page": 1,
-            "per_page": 50
-        }
-        
-    Returns:
-        JSON response with query results
-    """
     from dbi_layer.services.query import execute_native_sql
     
     try:
@@ -249,26 +173,9 @@ def execute_query(request, datasource_id):
         }, status=500)
 
 
-# =============================================================================
-# Validation Endpoints
-# =============================================================================
-
 @csrf_exempt
 @require_http_methods(["POST"])
 def validate_connection(request):
-    """
-    Validate a database connection.
-    
-    Expects JSON body:
-        {
-            "type": "postgres",
-            "connection_string": "postgresql://...",
-            "connection_json": {}  # Optional, for BigQuery
-        }
-        
-    Returns:
-        JSON response with validation result
-    """
     from dbi_layer.services.validation import validate_datasource_input
     
     try:

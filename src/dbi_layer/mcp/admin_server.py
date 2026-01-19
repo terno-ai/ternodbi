@@ -1,14 +1,3 @@
-"""
-Admin MCP Server for TernoDBI.
-
-Provides administrative operations for AI agents:
-- Rename tables and columns (update public names)
-- Manage query suggestions
-- Update descriptions
-
-Run with: python -m dbi_layer.mcp admin
-"""
-
 import os
 import sys
 import json
@@ -21,11 +10,9 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 from dbi_layer.client import TernoDBIClient
 
-# Setup logging
+
 logger = logging.getLogger(__name__)
 
-# Initialize SDK Client
-# Requires TERNODBI_API_URL to be set, or defaults to what SDK uses (localhost:8000)
 client = TernoDBIClient()
 
 server = Server("ternodbi-admin")
@@ -35,29 +22,6 @@ server = Server("ternodbi-admin")
 async def list_tools() -> List[Tool]:
     """List available Admin MCP tools."""
     return [
-        Tool(
-            name="list_datasources",
-            description="List all configured database connections",
-            inputSchema={
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        ),
-        Tool(
-            name="list_tables",
-            description="List all tables in a datasource",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "datasource_id": {
-                        "type": "integer",
-                        "description": "ID of the datasource"
-                    }
-                },
-                "required": ["datasource_id"]
-            }
-        ),
         Tool(
             name="rename_table",
             description="Update the public display name of a table",
@@ -92,20 +56,6 @@ async def list_tools() -> List[Tool]:
                     }
                 },
                 "required": ["table_id", "description"]
-            }
-        ),
-        Tool(
-            name="list_columns",
-            description="List all columns for a table",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "table_id": {
-                        "type": "integer",
-                        "description": "ID of the table"
-                    }
-                },
-                "required": ["table_id"]
             }
         ),
         Tool(
@@ -317,29 +267,10 @@ async def list_tools() -> List[Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
-    """Handle Admin MCP tool calls."""
     try:
         result = None
-        
-        # NOTE: For some tools missing in SDK, we return error for now until API is updated.
-        # This is expected during transition.
-        
-        if name == "list_datasources":
-            datasources = client.list_datasources()
-            result = {
-                "datasources": datasources,
-                "count": len(datasources)
-            }
-        
-        elif name == "list_tables":
-            datasource_id = arguments["datasource_id"]
-            tables = client.list_tables(datasource_id)
-            result = {
-                "tables": tables,
-                "count": len(tables)
-            }
-        
-        elif name == "rename_table":
+    
+        if name == "rename_table":
             table_id = arguments["table_id"]
             public_name = arguments["public_name"]
             result = client.update_table(table_id, public_name=public_name)
@@ -348,14 +279,6 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             table_id = arguments["table_id"]
             description = arguments["description"]
             result = client.update_table(table_id, description=description)
-        
-        elif name == "list_columns":
-            table_id = arguments["table_id"]
-            columns = client.list_columns(table_id)
-            result = {
-                "columns": columns,
-                "count": len(columns)
-            }
         
         elif name == "rename_column":
             column_id = arguments["column_id"]
@@ -425,14 +348,12 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
 
 
 async def run_server():
-    """Run the Admin MCP server."""
-    print(f"⚙️ Starting TernoDBI Admin MCP Server (API: {client.base_url})", file=sys.stderr)
+    print(f"Starting TernoDBI Admin MCP Server (API: {client.base_url})", file=sys.stderr)
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
 def main():
-    """CLI entry point for Admin MCP."""
     asyncio.run(run_server())
 
 

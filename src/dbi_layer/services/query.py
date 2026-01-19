@@ -1,6 +1,3 @@
-"""
-Query execution services for DBI Layer.
-"""
 
 import io
 import math
@@ -18,18 +15,6 @@ logger = logging.getLogger(__name__)
 
 
 def execute_native_sql(datasource, native_sql, page=1, per_page=50):
-    """
-    Execute native SQL and return paginated results.
-    
-    Args:
-        datasource: DataSource model instance
-        native_sql: SQL query to execute
-        page: Page number (1-indexed)
-        per_page: Results per page
-        
-    Returns:
-        Dict with 'status' and 'table_data' or 'error'
-    """
     try:
         connector = ConnectorFactory.create_connector(
             datasource.type,
@@ -53,16 +38,6 @@ def execute_native_sql(datasource, native_sql, page=1, per_page=50):
 
 
 def execute_native_sql_return_df(datasource, native_sql):
-    """
-    Execute native SQL and return as base64-encoded parquet.
-    
-    Args:
-        datasource: DataSource model instance
-        native_sql: SQL query to execute
-        
-    Returns:
-        Dict with 'status' and 'parquet_b64' or 'error'
-    """
     try:
         connector = ConnectorFactory.create_connector(
             datasource.type,
@@ -91,16 +66,6 @@ def execute_native_sql_return_df(datasource, native_sql):
 
 
 def export_native_sql_result(datasource, native_sql):
-    """
-    Execute native SQL and return as CSV response.
-    
-    Args:
-        datasource: DataSource model instance
-        native_sql: SQL query to execute
-        
-    Returns:
-        HttpResponse with CSV content
-    """
     connector = ConnectorFactory.create_connector(
         datasource.type,
         datasource.connection_str,
@@ -120,8 +85,18 @@ def export_native_sql_result(datasource, native_sql):
         return response
 
 
+def _make_json_safe(value):
+    """Convert a value to be JSON serializable."""
+    if value is None:
+        return None
+    if isinstance(value, (bytearray, bytes)):
+        return base64.b64encode(value).decode('utf-8')
+    if isinstance(value, (int, float, str, bool)):
+        return value
+    return str(value)
+
+
 def _prepare_table_data(execute_result, page, per_page):
-    """Prepare paginated table data from query result."""
     table_data = {}
     table_data['columns'] = list(execute_result.keys())
 
@@ -142,6 +117,7 @@ def _prepare_table_data(execute_result, page, per_page):
     for row in paginated_results:
         data = {}
         for i, column in enumerate(table_data['columns']):
-            data[column] = row[i]
+            data[column] = _make_json_safe(row[i])
         table_data['data'].append(data)
     return table_data
+

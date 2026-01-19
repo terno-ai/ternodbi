@@ -1,10 +1,3 @@
-"""
-Query Service Views for TernoDBI.
-
-Simple REST API endpoints for database operations.
-No authentication required - consuming apps (like TernoAI) should add their own auth layer.
-"""
-
 import json
 import logging
 from django.http import JsonResponse
@@ -22,12 +15,8 @@ from dbi_layer.decorators import require_service_auth
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# Health & Info Endpoints
-# =============================================================================
 
 def health(request):
-    """Health check endpoint."""
     return JsonResponse({
         "status": "ok",
         "service": "dbi_layer.query_service",
@@ -36,7 +25,6 @@ def health(request):
 
 
 def info(request):
-    """Service information endpoint."""
     from dbi_layer.connectors import ConnectorFactory
     
     return JsonResponse({
@@ -46,19 +34,10 @@ def info(request):
     })
 
 
-# =============================================================================
-# DataSource Endpoints
-# =============================================================================
 
 @require_service_auth()
 @require_http_methods(["GET"])
 def list_datasources(request):
-    """
-    List all enabled datasources.
-    
-    Returns:
-        JSON with list of datasources
-    """
     datasources = models.DataSource.objects.filter(enabled=True)
     
     data = []
@@ -83,15 +62,6 @@ def list_datasources(request):
 @require_service_auth()
 @require_http_methods(["GET"])
 def get_datasource(request, datasource_id):
-    """
-    Get a specific datasource.
-    
-    Args:
-        datasource_id: ID of the datasource
-        
-    Returns:
-        JSON with datasource details
-    """
     try:
         ds = models.DataSource.objects.get(id=datasource_id, enabled=True)
         return JsonResponse({
@@ -106,22 +76,9 @@ def get_datasource(request, datasource_id):
         }, status=404)
 
 
-# =============================================================================
-# Table Endpoints
-# =============================================================================
-
 @require_service_auth()
 @require_http_methods(["GET"])
 def list_tables(request, datasource_id):
-    """
-    List tables for a datasource.
-    
-    Optional query param:
-        - roles: comma-separated group IDs for role-based filtering
-    
-    Returns:
-        JSON with list of tables and their columns
-    """
     try:
         ds = models.DataSource.objects.get(id=datasource_id, enabled=True)
     except models.DataSource.DoesNotExist:
@@ -129,8 +86,7 @@ def list_tables(request, datasource_id):
             "status": "error",
             "error": f"DataSource {datasource_id} not found"
         }, status=404)
-    
-    # Get role IDs from query param (optional)
+
     role_ids_str = request.GET.get('roles', '')
     
     if role_ids_str:
@@ -139,21 +95,17 @@ def list_tables(request, datasource_id):
         roles = Group.objects.filter(id__in=role_ids)
         tables, columns = get_admin_config_object(ds, roles)
     else:
-        # No role filtering - return all tables
         tables = models.Table.objects.filter(data_source=ds)
         columns = models.TableColumn.objects.filter(table__in=tables)
-    
-    # Build tables list for SDK/MCP
+
     tables_list = []
     for table in tables:
         tables_list.append({
             'id': table.id,
-            'name': table.name,
-            'public_name': table.public_name,
+            'name': table.public_name,
             'description': table.description or ""
         })
 
-    # Build legacy table_data (optional, kept for whatever used it before)
     table_data = []
     for table in tables:
         table_columns = columns.filter(table_id=table.id)
@@ -181,7 +133,6 @@ def list_tables(request, datasource_id):
 @require_service_auth()
 @require_http_methods(["GET"])
 def list_columns(request, datasource_id, table_id):
-    """List columns for a specific table (Legacy/Hierarchical)."""
     return get_table_columns(request, table_id)
 
 
@@ -197,24 +148,26 @@ def get_table_columns(request, table_id):
             "error": f"Table {table_id} not found"
         }, status=404)
     
-    columns = models.TableColumn.objects.filter(table=table).values(
-        'id', 'name', 'public_name', 'data_type'
-    )
+    columns = models.TableColumn.objects.filter(table=table)
     
     return JsonResponse({
         "status": "success",
         "table_id": table_id,
-        "table_name": table.name,
-        "columns": list(columns)
+        "table_name": table.public_name,
+        "columns": [
+            {
+                'id': c.id,
+                'name': c.public_name,
+                'data_type': c.data_type
+            }
+            for c in columns
+        ]
     })
 
 
 @require_service_auth()
 @require_http_methods(["GET"])
 def get_schema(request, datasource_id):
-    """
-    Get full schema (tables and columns) for a datasource.
-    """
     try:
         datasource = models.DataSource.objects.get(id=datasource_id)
     except models.DataSource.DoesNotExist:
@@ -226,13 +179,13 @@ def get_schema(request, datasource_id):
     for table in tables:
         columns = models.TableColumn.objects.filter(table=table)
         schema.append({
-            "table_name": table.name,
-            "public_name": table.public_name,
+            "id": table.id,
+            "table_name": table.public_name,
             "description": table.description or "",
             "columns": [
                 {
-                    "name": c.name,
-                    "public_name": c.public_name,
+                    "id": c.id,
+                    "name": c.public_name,
                     "type": c.data_type
                 }
                 for c in columns
@@ -249,7 +202,6 @@ def get_schema(request, datasource_id):
 @require_service_auth()
 @require_http_methods(["GET"])
 def list_foreign_keys(request, datasource_id):
-    """List foreign key relationships for a datasource."""
     try:
         ds = models.DataSource.objects.get(id=datasource_id, enabled=True)
     except models.DataSource.DoesNotExist:
@@ -266,10 +218,10 @@ def list_foreign_keys(request, datasource_id):
     for fk in fks:
         fk_data.append({
             "id": fk.id,
-            "constrained_table": fk.constrained_table.name,
-            "constrained_column": fk.constrained_columns.name if fk.constrained_columns else None,
-            "referred_table": fk.referred_table.name,
-            "referred_column": fk.referred_columns.name if fk.referred_columns else None,
+            "constrained_table": fk.constrained_table.public_name,  # Use public_name
+            "constrained_column": fk.constrained_columns.public_name if fk.constrained_columns else None,
+            "referred_table": fk.referred_table.public_name,  # Use public_name
+            "referred_column": fk.referred_columns.public_name if fk.referred_columns else None,
         })
     
     return JsonResponse({
@@ -282,7 +234,6 @@ def list_foreign_keys(request, datasource_id):
 @require_service_auth()
 @require_http_methods(["GET"])
 def get_sample_data(request, table_id):
-    """Get sample rows for a table."""
     try:
         table = models.Table.objects.get(id=table_id)
         ds = table.data_source
@@ -301,15 +252,21 @@ def get_sample_data(request, table_id):
         
     sql = f"SELECT * FROM {table.name} LIMIT {rows}"
     
-    # Use existing query execution service
-    # Note: We skip SQLShield translation here because we generate the SQL securely using internal table name
     try:
         result = execute_native_sql(ds, sql, page=1, per_page=rows)
+        
+        if result.get("status") == "error":
+            return JsonResponse({
+                "status": "error",
+                "error": result.get("error", "Query failed")
+            }, status=500)
+        
+        table_data = result.get("table_data", {})
         return JsonResponse({
             "status": "success",
             "table_id": table_id,
-            "columns": result.get("columns", []),
-            "data": result.get("data", [])
+            "columns": table_data.get("columns", []),
+            "data": table_data.get("data", [])
         })
     except Exception as e:
         logger.exception(f"Sample data error: {e}")
@@ -319,33 +276,13 @@ def get_sample_data(request, table_id):
         }, status=500)
 
 
-# =============================================================================
-# Query Execution Endpoints
-# =============================================================================
 
 @csrf_exempt
 @require_service_auth()
 @require_http_methods(["POST"])
 def execute_query(request, datasource_id=None):
-    """
-    Execute a SQL query against a datasource.
-    
-    Expects JSON body:
-        {
-            "sql": "SELECT * FROM users LIMIT 10",
-            "datasourceId": 1,  // Optional if datasource_id in URL
-            "page": 1,
-            "per_page": 50,
-            "roles": [1, 2]  // Optional: group IDs for role-based SQL transformation
-        }
-        
-    Returns:
-        JSON with query results
-    """
     try:
         body = json.loads(request.body)
-        
-        # Resolve datasource ID
         ds_id = datasource_id or body.get("datasourceId")
         if not ds_id:
             return JsonResponse({
@@ -373,19 +310,12 @@ def execute_query(request, datasource_id=None):
                 "status": "error",
                 "error": "Missing 'sql' in request body"
             }, status=400)
-        
-        # Get roles if provided (for row-level filtering)
         role_ids = body.get("roles", [])
-        
-        # Always translate SQL from public names to native names
-        # This is needed because users/AI agents use public names in their queries
         from django.contrib.auth.models import Group
         
         if role_ids:
-            # With roles: apply role-based filtering + translation
             roles = Group.objects.filter(id__in=role_ids)
         else:
-            # Without roles: still translate public names, just no role filtering
             roles = Group.objects.none()
         
         mDb = prepare_mdb(ds, roles)
@@ -398,8 +328,6 @@ def execute_query(request, datasource_id=None):
             }, status=400)
         
         native_sql = transform_result.get('native_sql', sql)
-        
-        # Execute query
         result = execute_native_sql(ds, native_sql, page=page, per_page=per_page)
         return JsonResponse(result)
         
@@ -420,23 +348,8 @@ def execute_query(request, datasource_id=None):
 @require_service_auth()
 @require_http_methods(["POST"])
 def export_query(request, datasource_id=None):
-    """
-    Export query results as CSV.
-    
-    Expects JSON body:
-        {
-            "sql": "SELECT * FROM users",
-            "datasourceId": 1,  // Optional if datasource_id in URL
-            "roles": [1, 2]  // Optional: group IDs for role-based SQL transformation
-        }
-        
-    Returns:
-        CSV file download
-    """
     try:
         body = json.loads(request.body)
-        
-        # Resolve datasource ID
         ds_id = datasource_id or body.get("datasourceId")
         if not ds_id:
             return JsonResponse({
@@ -458,11 +371,7 @@ def export_query(request, datasource_id=None):
                 "status": "error",
                 "error": "Missing 'sql' in request body"
             }, status=400)
-        
-        # Get roles if provided (for row-level filtering)
         role_ids = body.get("roles", [])
-        
-        # Always translate SQL from public names to native names
         from django.contrib.auth.models import Group
         
         if role_ids:
@@ -480,8 +389,6 @@ def export_query(request, datasource_id=None):
             }, status=400)
         
         native_sql = transform_result.get('native_sql', sql)
-        
-        # Export as CSV
         return export_native_sql_result(ds, native_sql)
         
     except json.JSONDecodeError:
