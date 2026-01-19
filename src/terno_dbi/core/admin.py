@@ -9,7 +9,7 @@ if not PARENT_APP_INSTALLED:
         PrivateTableSelector, GroupTableSelector,
         PrivateColumnSelector, GroupColumnSelector,
         GroupTableRowFilter, TableRowFilter,
-        DatasourceSuggestions,
+
     )
 
     class TableColumnInline(admin.TabularInline):
@@ -122,11 +122,6 @@ if not PARENT_APP_INSTALLED:
         list_filter = ('constrained_table__data_source',)
         raw_id_fields = ('constrained_table', 'constrained_columns', 'referred_table', 'referred_columns')
 
-    @admin.register(DatasourceSuggestions)
-    class DatasourceSuggestionsAdmin(admin.ModelAdmin):
-        list_display = ('suggestion', 'data_source')
-        list_filter = ('data_source',)
-        search_fields = ('suggestion',)
 
     @admin.register(PrivateTableSelector)
     class PrivateTableSelectorAdmin(admin.ModelAdmin):

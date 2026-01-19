@@ -245,62 +245,8 @@ def update_column(request, column_id):
         }, status=400)
 
 
-@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
-@require_http_methods(["GET"])
-def list_suggestions(request, datasource_id):
-    try:
-        ds = models.DataSource.objects.get(id=datasource_id)
-    except models.DataSource.DoesNotExist:
-        return JsonResponse({
-            "status": "error",
-            "error": f"DataSource {datasource_id} not found"
-        }, status=404)
-
-    suggestions = models.DatasourceSuggestions.objects.filter(data_source=ds)
-    data = [{"id": s.id, "suggestion": s.suggestion} for s in suggestions]
-
-    return JsonResponse({
-        "status": "success",
-        "datasource_id": datasource_id,
-        "suggestions": data
-    })
 
 
-@csrf_exempt
-@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
-@require_http_methods(["POST"])
-def add_suggestion(request, datasource_id):
-    try:
-        ds = models.DataSource.objects.get(id=datasource_id)
-    except models.DataSource.DoesNotExist:
-        return JsonResponse({
-            "status": "error",
-            "error": f"DataSource {datasource_id} not found"
-        }, status=404)
-
-    try:
-        body = json.loads(request.body)
-        suggestion_text = body.get("suggestion")
-
-        if not suggestion_text:
-            return JsonResponse({
-                "status": "error",
-                "error": "Missing 'suggestion' in request body"
-            }, status=400)
-
-        suggestion = models.DatasourceSuggestions.objects.create(
-            data_source=ds,
-            suggestion=suggestion_text
-        )
-
-        return JsonResponse({
-            "status": "success",
-            "suggestion": {
-                "id": suggestion.id,
-                "suggestion": suggestion.suggestion,
-                "datasource_id": ds.id
-            }
-        }, status=201)
 
     except json.JSONDecodeError:
         return JsonResponse({
@@ -309,24 +255,6 @@ def add_suggestion(request, datasource_id):
         }, status=400)
 
 
-@csrf_exempt
-@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
-@require_http_methods(["DELETE"])
-def delete_suggestion(request, suggestion_id):
-    try:
-        suggestion = models.DatasourceSuggestions.objects.get(id=suggestion_id)
-    except models.DatasourceSuggestions.DoesNotExist:
-        return JsonResponse({
-            "status": "error",
-            "error": f"Suggestion {suggestion_id} not found"
-        }, status=404)
-
-    suggestion.delete()
-
-    return JsonResponse({
-        "status": "success",
-        "message": "Suggestion deleted"
-    })
 
 
 @csrf_exempt

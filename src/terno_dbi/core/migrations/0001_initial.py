@@ -31,7 +31,6 @@ def create_tables_if_needed(apps, schema_editor):
         ('DataSource', 'terno_datasource'),
         ('Table', 'terno_table'),
         ('TableColumn', 'terno_tablecolumn'),
-        ('DatasourceSuggestions', 'terno_datasourcesuggestions'),
         ('ForeignKey', 'terno_foreignkey'),
         ('PrivateTableSelector', 'terno_privatetableselector'),
         ('GroupTableSelector', 'terno_grouptableselector'),
@@ -150,15 +149,7 @@ class Migration(migrations.Migration):
                     options={'db_table': 'terno_tablecolumn'},
                 ),
                 
-                migrations.CreateModel(
-                    name='DatasourceSuggestions',
-                    fields=[
-                        ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                        ('suggestion', models.TextField(blank=True, null=True)),
-                        ('data_source', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='core.datasource')),
-                    ],
-                    options={'db_table': 'terno_datasourcesuggestions'},
-                ),
+
                 
                 # ForeignKey
                 migrations.CreateModel(

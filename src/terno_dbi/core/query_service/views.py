@@ -41,15 +41,12 @@ def list_datasources(request):
 
     data = []
     for ds in datasources:
-        suggestions = list(
-            models.DatasourceSuggestions.objects.filter(data_source=ds)
-            .values_list('suggestion', flat=True)
-        )
+
         data.append({
             'id': ds.id,
             'name': ds.display_name,
             'type': ds.type,
-            'suggestions': suggestions,
+
         })
 
     return JsonResponse({
@@ -115,16 +112,13 @@ def list_tables(request, datasource_id):
             'column_data': column_data
         })
 
-    suggestions = list(
-        models.DatasourceSuggestions.objects.filter(data_source=ds)
-        .values_list('suggestion', flat=True)
-    )
+
 
     return JsonResponse({
         'status': 'success',
         'tables': tables_list,
         'table_data': table_data,
-        'suggestions': suggestions
+
     })
 
 

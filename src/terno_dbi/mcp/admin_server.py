@@ -75,52 +75,7 @@ async def list_tools() -> List[Tool]:
                 "required": ["column_id", "public_name"]
             }
         ),
-        Tool(
-            name="list_suggestions",
-            description="List all query suggestions for a datasource",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "datasource_id": {
-                        "type": "integer",
-                        "description": "ID of the datasource"
-                    }
-                },
-                "required": ["datasource_id"]
-            }
-        ),
-        Tool(
-            name="add_suggestion",
-            description="Add a query suggestion for a datasource",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "datasource_id": {
-                        "type": "integer",
-                        "description": "ID of the datasource"
-                    },
-                    "suggestion": {
-                        "type": "string",
-                        "description": "The query suggestion text"
-                    }
-                },
-                "required": ["datasource_id", "suggestion"]
-            }
-        ),
-        Tool(
-            name="delete_suggestion",
-            description="Delete a query suggestion",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "suggestion_id": {
-                        "type": "integer",
-                        "description": "ID of the suggestion to delete"
-                    }
-                },
-                "required": ["suggestion_id"]
-            }
-        ),
+
         Tool(
             name="validate_connection",
             description="Test a database connection before adding a datasource. Supported types: postgres, mysql, sqlite, bigquery, snowflake, oracle, databricks",
@@ -284,18 +239,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             public_name = arguments["public_name"]
             result = client.update_column(column_id, public_name=public_name)
 
-        elif name == "list_suggestions":
-            datasource_id = arguments["datasource_id"]
-            result = client.list_suggestions(datasource_id)
 
-        elif name == "add_suggestion":
-            datasource_id = arguments["datasource_id"]
-            suggestion_text = arguments["suggestion"]
-            result = client.add_suggestion(datasource_id, suggestion_text)
-
-        elif name == "delete_suggestion":
-            suggestion_id = arguments["suggestion_id"]
-            result = client.delete_suggestion(suggestion_id)
 
         elif name == "validate_connection":
             db_type = arguments["type"]

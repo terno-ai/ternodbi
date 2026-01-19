@@ -101,15 +101,6 @@ class DataSource(models.Model):
         return self.display_name
 
 
-class DatasourceSuggestions(models.Model):
-    data_source = models.ForeignKey(DataSource, on_delete=models.CASCADE)
-    suggestion = models.TextField(blank=True, null=True)
-
-    class Meta:
-        db_table = 'terno_datasourcesuggestions'
-
-    def __str__(self):
-        return f"{self.data_source.display_name}: {self.suggestion[:50] if self.suggestion else ''}"
 
 
 class Table(models.Model):
