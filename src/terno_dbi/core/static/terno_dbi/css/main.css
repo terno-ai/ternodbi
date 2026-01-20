@@ -95,9 +95,9 @@ a {
 /* Layout */
 .container {
     width: 100%;
-    max-width: 1280px;
+    max-width: 1100px;
     margin: 0 auto;
-    padding: 0 2rem;
+    padding: 0 3rem;
 }
 
 /* Header */
@@ -201,8 +201,8 @@ nav a:hover {
 /* Main Grid */
 .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-    gap: 2rem;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
     margin-top: 2rem;
 }
 
@@ -211,7 +211,7 @@ nav a:hover {
     background: radial-gradient(circle at top left, rgba(30, 41, 59, 0.6), rgba(15, 23, 42, 0.8));
     border: 1px solid var(--glass-border);
     border-radius: var(--radius-md);
-    padding: 2.5rem;
+    padding: 2rem;
     position: relative;
     overflow: hidden;
     transition: all 0.4s;
