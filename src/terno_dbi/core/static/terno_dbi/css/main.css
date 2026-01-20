@@ -596,8 +596,8 @@ footer {
     /* True center */
     margin: 0 2rem;
     /* More spacing around orb */
-    padding-top: 3.5rem;
-    /* Match arrow/content offset */
+    padding-top: 1.75rem;
+    /* Moved up for better alignment */
 }
 
 .orbit-container {
@@ -667,7 +667,7 @@ footer {
 
 .core-text {
     font-weight: 700;
-    margin-top: 0.25rem;
+    margin-top: -1rem;
     font-size: 0.9rem;
     letter-spacing: -0.02em;
 }
