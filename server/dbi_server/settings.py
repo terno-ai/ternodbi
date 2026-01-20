@@ -3,6 +3,10 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+import terno_dbi
+
+TERNO_DBI_PATH = Path(terno_dbi.__file__).resolve().parent
+
 SECRET_KEY = os.environ.get('DBI_SECRET_KEY', 'django-insecure-change-me-in-production')
 
 DEBUG = os.environ.get('DBI_DEBUG', 'True').lower() == 'true'
@@ -36,7 +40,9 @@ ROOT_URLCONF = 'dbi_server.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [
+            TERNO_DBI_PATH / 'core' / 'frontend' / 'templates',
+        ],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -63,6 +69,7 @@ WSGI_APPLICATION = 'dbi_server.wsgi.application'
 # To share database with your existing Django project, use options 1, 2, or 3:
 #   - For SQLite: set DJANGO_PROJECT_PATH to your Django project directory
 #   - For MySQL/PostgreSQL: use the same MYSQL_* or POSTGRES_* credentials as your Django project
+#   - Note: SQLite DB path is constructed relative to the PROJECT_PATH if provided, otherwise BASE_DIR
 DJANGO_PROJECT_PATH = os.environ.get('DJANGO_PROJECT_PATH', '')
 
 if os.environ.get('DATABASE_ENGINE') == 'MYSQL':
@@ -121,6 +128,9 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 STATIC_URL = '/static/'
+STATICFILES_DIRS = [
+    TERNO_DBI_PATH / 'core' / 'frontend' / 'static',
+]
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
