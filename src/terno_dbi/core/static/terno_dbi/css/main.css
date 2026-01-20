@@ -262,16 +262,36 @@ nav a:hover {
     position: relative;
 }
 
-/* Terminal Header */
+/* Terminal Header with Glowing Dots */
 .copy-wrapper::before {
-    content: "● ● ●";
-    display: block;
+    content: "";
+    display: flex;
+    gap: 6px;
     background: #161b22;
-    color: #30363d;
-    padding: 0.5rem 1rem;
-    font-size: 0.75rem;
-    letter-spacing: 4px;
+    padding: 0.6rem 1rem;
     border-bottom: 1px solid #30363d;
+}
+
+.copy-wrapper {
+    position: relative;
+}
+
+.copy-wrapper::before {
+    content: "";
+    display: block;
+    position: relative;
+    width: 100%;
+    height: 28px;
+    background:
+        radial-gradient(circle at 16px 14px, #ff5f56, #ff5f56 5px, transparent 5px),
+        radial-gradient(circle at 34px 14px, #ffbd2e, #ffbd2e 5px, transparent 5px),
+        radial-gradient(circle at 52px 14px, #27c93f, #27c93f 5px, transparent 5px),
+        #161b22;
+    border-bottom: 1px solid #30363d;
+    box-shadow:
+        16px 0 8px -8px rgba(255, 95, 86, 0.4),
+        34px 0 8px -8px rgba(255, 189, 46, 0.4),
+        52px 0 8px -8px rgba(39, 201, 63, 0.4);
 }
 
 /* Section Headers */
