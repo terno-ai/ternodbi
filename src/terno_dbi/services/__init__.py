@@ -8,6 +8,8 @@ from terno_dbi.services.query import (
     execute_native_sql,
     execute_native_sql_return_df,
     export_native_sql_result,
+    execute_paginated_query,
+    export_native_sql_streaming,
 )
 from terno_dbi.services.access import (
     get_all_group_tables,
@@ -26,6 +28,8 @@ __all__ = [
     'execute_native_sql',
     'execute_native_sql_return_df',
     'export_native_sql_result',
+    'execute_paginated_query',
+    'export_native_sql_streaming',
     # access
     'get_all_group_tables',
     'get_all_group_columns',
@@ -33,4 +37,5 @@ __all__ = [
     # validation
     'validate_datasource_input',
 ]
+
 

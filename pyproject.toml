@@ -94,6 +94,9 @@ include = ["src/terno_dbi"]
 [tool.hatch.build.targets.wheel]
 packages = ["src/terno_dbi"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"src/terno_dbi/py.typed" = "terno_dbi/py.typed"
+
 [tool.hatch.build.targets.wheel.sources]
 "src" = ""
 

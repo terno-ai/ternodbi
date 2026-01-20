@@ -7,7 +7,11 @@ from django.shortcuts import get_object_or_404
 
 from terno_dbi.core import models
 from terno_dbi.core import conf
-from terno_dbi.services.query import execute_native_sql, export_native_sql_result
+from terno_dbi.services.query import (
+    execute_native_sql, 
+    execute_paginated_query,
+    export_native_sql_result
+)
 from terno_dbi.services.shield import prepare_mdb, generate_native_sql
 from terno_dbi.services.access import get_admin_config_object
 from terno_dbi.decorators import require_service_auth
@@ -289,17 +293,24 @@ def execute_query(request, datasource_id=None):
             }, status=404)
         
         sql = body.get("sql")
-        page = body.get("page", 1)
-        per_page = min(
-            body.get("per_page", conf.get("DEFAULT_PAGE_SIZE")),
-            conf.get("MAX_PAGE_SIZE")
-        )
-
         if not sql:
             return JsonResponse({
                 "status": "error",
                 "error": "Missing 'sql' in request body"
             }, status=400)
+        
+        # Pagination parameters
+        pagination_mode = body.get("pagination_mode", "offset")
+        page = body.get("page", 1)
+        per_page = min(
+            body.get("per_page", conf.get("DEFAULT_PAGE_SIZE")),
+            conf.get("MAX_PAGE_SIZE")
+        )
+        cursor = body.get("cursor")
+        direction = body.get("direction", "forward")
+        order_by = body.get("order_by")  # List of {"column": "name", "direction": "DESC"}
+        
+        # Role-based access
         role_ids = body.get("roles", [])
         from django.contrib.auth.models import Group
 
@@ -318,7 +329,18 @@ def execute_query(request, datasource_id=None):
             }, status=400)
 
         native_sql = transform_result.get('native_sql', sql)
-        result = execute_native_sql(ds, native_sql, page=page, per_page=per_page)
+        
+        # Use new paginated query API
+        result = execute_paginated_query(
+            datasource=ds,
+            native_sql=native_sql,
+            pagination_mode=pagination_mode,
+            page=page,
+            per_page=per_page,
+            cursor=cursor,
+            direction=direction,
+            order_by=order_by
+        )
         return JsonResponse(result)
 
     except json.JSONDecodeError:

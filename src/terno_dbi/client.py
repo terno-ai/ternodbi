@@ -138,14 +138,119 @@ class TernoDBIClient:
         response = requests.delete(url, headers=self._get_headers())
         return self._handle_response(response)
 
-    def execute_query(self, datasource_id: int, sql: str, limit: int = 100) -> Dict:
+    def execute_query(
+        self, 
+        datasource_id: int, 
+        sql: str, 
+        pagination_mode: str = "offset",
+        page: int = 1,
+        per_page: int = 50,
+        cursor: Optional[str] = None,
+        direction: str = "forward",
+        order_by: Optional[List[Dict[str, str]]] = None,
+        # Legacy parameter (deprecated)
+        limit: Optional[int] = None
+    ) -> Dict:
+        """
+        Execute SQL query with pagination support.
+        
+        Args:
+            datasource_id: ID of the datasource to query
+            sql: SQL query to execute
+            pagination_mode: "offset" (default) or "cursor"
+            page: Page number for offset mode (1-indexed)
+            per_page: Rows per page (max: 500)
+            cursor: Cursor string from previous response (for cursor mode)
+            direction: "forward" or "backward" for cursor mode
+            order_by: List of {"column": "name", "direction": "DESC"} dicts
+            limit: DEPRECATED - use per_page instead
+        
+        Returns:
+            Dict with status, table_data including:
+            - columns, data, page, per_page
+            - has_next, has_prev
+            - next_cursor, prev_cursor (for cursor mode)
+        """
         url = f"{self.base_url}/api/query/datasources/{datasource_id}/query/"
-        payload = {"sql": sql, "limit": limit}
+        
+        # Handle legacy limit parameter
+        if limit is not None:
+            per_page = limit
+        
+        payload = {
+            "sql": sql,
+            "pagination_mode": pagination_mode,
+            "page": page,
+            "per_page": min(per_page, 500)
+        }
+        
+        if cursor:
+            payload["cursor"] = cursor
+        if direction != "forward":
+            payload["direction"] = direction
+        if order_by:
+            payload["order_by"] = order_by
+        
         response = requests.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
+
+    def iter_query(
+        self, 
+        datasource_id: int, 
+        sql: str, 
+        per_page: int = 100,
+        order_by: Optional[List[Dict[str, str]]] = None
+    ):
+        """
+        Iterate through all results using cursor pagination.
+        
+        Memory-efficient for very large datasets. Uses cursor pagination
+        internally for O(1) performance at any depth.
+        
+        Args:
+            datasource_id: ID of the datasource to query
+            sql: SQL query to execute
+            per_page: Batch size (rows per request)
+            order_by: List of {"column": "name", "direction": "DESC"} dicts
+        
+        Yields:
+            List[Dict]: Batch of rows as dictionaries
+        
+        Example:
+            for batch in client.iter_query(1, "SELECT * FROM large_table"):
+                for row in batch:
+                    process(row)
+        """
+        cursor = None
+        while True:
+            result = self.execute_query(
+                datasource_id, 
+                sql, 
+                pagination_mode="cursor",
+                per_page=per_page,
+                cursor=cursor,
+                order_by=order_by
+            )
+            
+            if result.get("status") == "error":
+                raise Exception(result.get("error", "Query failed"))
+            
+            table_data = result.get("table_data", {})
+            data = table_data.get("data", [])
+            
+            if data:
+                yield data
+            
+            if not table_data.get("has_next"):
+                break
+            
+            cursor = table_data.get("next_cursor")
+            if not cursor:
+                break
 
     def get_sample_data(self, table_id: int, rows: int = 10) -> Dict:
         url = f"{self.base_url}/api/query/tables/{table_id}/sample/"
         response = requests.get(url, params={"rows": rows}, headers=self._get_headers())
         data = self._handle_response(response)
         return data
+
