@@ -39,7 +39,7 @@ def doc_view(request, page="setup"):
     from django.http import Http404
 
     # Sanitize page
-    valid_pages = ["architecture", "setup", "mcp-guide", "security"]
+    valid_pages = ["architecture", "setup", "mcp-guide", "security", "api"]
     if page not in valid_pages:
         page = "setup"
 
