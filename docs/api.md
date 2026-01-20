@@ -143,24 +143,45 @@ Returns foreign key relationships for schema understanding.
 POST /api/query/datasources/{id}/query/
 ```
 
-Executes a SQL query through SQLShield validation.
+Executes a SQL query with advanced pagination support.
 
 **Request Body:**
 ```json
 {
-  "sql": "SELECT * FROM users LIMIT 10"
+  "sql": "SELECT * FROM users",
+  "pagination_mode": "cursor",  // "offset" (default) or "cursor"
+  "per_page": 50,              // Default: 50, Max: 500
+  "page": 1,                   // For offset mode
+  "cursor": "...",             // For cursor mode (next/prev_cursor from response)
+  "direction": "forward",      // "forward" (default) or "backward"
+  "order_by": [                // Required for cursor mode
+    {"column": "id", "direction": "DESC"}
+  ]
 }
 ```
 
 **Response:**
 ```json
 {
-  "columns": ["id", "name", "email"],
-  "rows": [
-    [1, "Alice", "alice@example.com"],
-    [2, "Bob", "bob@example.com"]
-  ],
-  "row_count": 2
+  "status": "success",
+  "table_data": {
+    "columns": ["id", "name", "email"],
+    "data": [
+      [1, "Alice", "alice@example.com"],
+      [2, "Bob", "bob@example.com"]
+    ],
+    "page": 1,
+    "per_page": 50,
+    "row_count": 1000,         // Estimation or exact count
+    "total_pages": 20,         // Only available in offset mode
+    "has_next": true,
+    "has_prev": false,
+    "next_cursor": "eyJ2Ijox...",  // Pass this to 'cursor' param for next page
+    "prev_cursor": null
+  },
+  "warnings": [
+    "PAGINATION_WARNING: Deep offset (50000) - consider cursor pagination"
+  ]
 }
 ```
 

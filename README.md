@@ -18,6 +18,9 @@
     *   **SQLShield Integration**: Automatic AST-based SQL validation to prevent injection and enforce read-only policies.
     *   **Service Tokens**: Granular API key authentication with expiration and datasource scoping.
     *   **Row Level Security**: Configurable row-level filters and column masking.
+*   **Enterprise Pagination**:
+    *   **Cursor-Based**: O(1) performance for deep datasets with HMAC-signed cursors.
+    *   **Streaming**: Server-side cursors for exporting millions of rows with low memory usage.
 
 ---
 
@@ -93,6 +96,34 @@ python manage.py issue_token --name "Admin User" --type admin
 
 # Scoped Token (Specific Datasource)
 python manage.py issue_token --name "DWH Only" --type query --datasource 1
+```
+
+### 3. Pagination Features
+
+TernoDBI supports two pagination modes:
+
+**Offset Mode (Default)**
+Best for UI with page numbers.
+```bash
+POST /api/query/datasources/1/query/
+{
+    "sql": "SELECT * FROM users",
+    "pagination_mode": "offset",
+    "page": 2,
+    "per_page": 50
+}
+```
+
+**Cursor Mode (High Performance)**
+Best for infinite scrolling and large exports. O(1) performance.
+```bash
+POST /api/query/datasources/1/query/
+{
+    "sql": "SELECT * FROM users",
+    "pagination_mode": "cursor",
+    "per_page": 50,
+    "cursor": "eyJ2IjoxLCJ2YWx1ZXM..."  # From previous response
+}
 ```
 
 ---

@@ -12,7 +12,9 @@ We expose two separate MCP servers to separate concerns:
     *   `list_datasources`: See available databases.
     *   `list_tables`: See tables in a database.
     *   `get_schema`: Get DDL/Schema for specific tables.
-    *   `execute_sql`: Run `SELECT` queries (safeguarded by SQLShield).
+    *   `execute_query`: Run `SELECT` queries with advanced pagination.
+        *   Supports `offset` (page-based) and `cursor` (infinite scroll) modes.
+        *   Security: All cursors are HMAC-signed to prevent tampering.
     *   `search_context`: Semantic search over table descriptions (if vector store enabled).
 
 ### 2. Admin Server (`ternodbi-admin`)
