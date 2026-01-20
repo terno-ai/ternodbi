@@ -15,9 +15,9 @@
         </h1>
 
         <p>
-            Securely connect your AI agents to <strong>Postgres, MySQL, SQLite, Snowflake, BigQuery, Databricks, and
-                Oracle</strong>.
-            Built for the Model Context Protocol with SQLShield protection and enterprise-grade security.
+            Securely connect AI agents to your databases.
+            Enrich your schema with descriptions, aliases, and privacy controls. Built for the Model Context Protocol
+            with SQLShield protection.
         </p>
 
         <div style="display: flex; gap: 1rem; justify-content: center; margin-top: 2.5rem;">
@@ -292,6 +292,110 @@
                 </p>
             </div>
         </div>
+    </div>
+</section>
+
+<!-- API Reference -->
+<section style="margin-bottom: 6rem;">
+    <div class="container">
+        <h2>API Reference</h2>
+        <p style="text-align: center; margin-bottom: 2rem; color: var(--text-secondary);">
+            Quick overview of available endpoints. <a href="/docs/api/">View full API documentation →</a>
+        </p>
+
+        <details class="api-details">
+            <summary class="api-summary">Query Service (Read Operations)</summary>
+            <div class="api-table-wrapper">
+                <table class="api-table">
+                    <thead>
+                        <tr>
+                            <th>Method</th>
+                            <th>Endpoint</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="method get">GET</span></td>
+                            <td><code>/api/query/health/</code></td>
+                            <td>Health check</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method get">GET</span></td>
+                            <td><code>/api/query/datasources/</code></td>
+                            <td>List all datasources</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method get">GET</span></td>
+                            <td><code>/api/query/datasources/{id}/</code></td>
+                            <td>Get datasource details</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method get">GET</span></td>
+                            <td><code>/api/query/datasources/{id}/schema/</code></td>
+                            <td>Get full schema</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method get">GET</span></td>
+                            <td><code>/api/query/datasources/{id}/tables/</code></td>
+                            <td>List tables</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method post">POST</span></td>
+                            <td><code>/api/query/datasources/{id}/query/</code></td>
+                            <td>Execute SQL query</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </details>
+
+        <details class="api-details">
+            <summary class="api-summary">Admin Service (Write Operations)</summary>
+            <div class="api-table-wrapper">
+                <table class="api-table">
+                    <thead>
+                        <tr>
+                            <th>Method</th>
+                            <th>Endpoint</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="method post">POST</span></td>
+                            <td><code>/api/admin/datasources/</code></td>
+                            <td>Create datasource</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method put">PUT</span></td>
+                            <td><code>/api/admin/datasources/{id}/</code></td>
+                            <td>Update datasource</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method delete">DELETE</span></td>
+                            <td><code>/api/admin/datasources/{id}/delete/</code></td>
+                            <td>Delete datasource</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method post">POST</span></td>
+                            <td><code>/api/admin/datasources/{id}/sync/</code></td>
+                            <td>Sync metadata</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method put">PUT</span></td>
+                            <td><code>/api/admin/tables/{id}/</code></td>
+                            <td>Update table metadata</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method put">PUT</span></td>
+                            <td><code>/api/admin/columns/{id}/</code></td>
+                            <td>Update column metadata</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </details>
     </div>
 </section>
 </div>
