@@ -102,6 +102,61 @@
     .docs-content th {
         background: var(--bg-tertiary);
     }
+
+    /* Code Block Styling */
+    .docs-content pre {
+        position: relative;
+        background: #0d1117;
+        border: 1px solid rgba(99, 102, 241, 0.2);
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        margin: 1rem 0;
+        overflow-x: auto;
+    }
+
+    .docs-content pre code {
+        background: transparent;
+        color: #e6edf3;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.9rem;
+        line-height: 1.6;
+    }
+
+    .docs-content code {
+        background: rgba(99, 102, 241, 0.15);
+        color: var(--accent-primary);
+        padding: 0.2rem 0.4rem;
+        border-radius: 4px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.85rem;
+    }
+
+    .code-copy-btn {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        background: rgba(99, 102, 241, 0.3);
+        border: none;
+        border-radius: 4px;
+        padding: 0.4rem 0.6rem;
+        color: #fff;
+        cursor: pointer;
+        font-size: 0.75rem;
+        opacity: 0;
+        transition: opacity 0.2s, background 0.2s;
+    }
+
+    .docs-content pre:hover .code-copy-btn {
+        opacity: 1;
+    }
+
+    .code-copy-btn:hover {
+        background: var(--accent-primary);
+    }
+
+    .code-copy-btn.copied {
+        background: #10b981;
+    }
 </style>
 {% endblock %}
 
@@ -165,6 +220,30 @@
         // Render all the .mermaid divs
         await mermaid.run({
             querySelector: '.mermaid'
+        });
+
+        // Add copy buttons to all code blocks
+        const preBlocks = document.querySelectorAll('.docs-content pre');
+        preBlocks.forEach(pre => {
+            // Skip mermaid blocks (already replaced)
+            if (pre.querySelector('code.language-mermaid')) return;
+
+            const btn = document.createElement('button');
+            btn.className = 'code-copy-btn';
+            btn.textContent = 'Copy';
+            btn.addEventListener('click', async () => {
+                const code = pre.querySelector('code');
+                if (code) {
+                    await navigator.clipboard.writeText(code.textContent);
+                    btn.textContent = 'Copied!';
+                    btn.classList.add('copied');
+                    setTimeout(() => {
+                        btn.textContent = 'Copy';
+                        btn.classList.remove('copied');
+                    }, 2000);
+                }
+            });
+            pre.appendChild(btn);
         });
     });
 </script>
