@@ -144,6 +144,9 @@ Add the following configuration to your `claude_desktop_config.json`:
 }
 ```
 
+> [!TIP]
+> Run `which dbi-mcp` in your terminal to find the absolute path to use in the configuration above.
+
 #### Production (using uvx)
 ```json
 {
