@@ -8,7 +8,7 @@
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
 *   **Multi-Database Support**: Unified connection handling for Postgres, MySQL, Snowflake, BigQuery, Databricks, Oracle, and SQLite.
 *   **Split MCP Architecture**:
@@ -21,7 +21,7 @@
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 Detailed guides for setting up and using TernoDBI:
 
@@ -32,7 +32,7 @@ Detailed guides for setting up and using TernoDBI:
 
 ---
 
-## 📦 Installation
+## Installation
 
 To install TernoDBI and all supported database drivers:
 
@@ -44,7 +44,7 @@ pip install -e .
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 TernoDBI uses environment variables for configuration. Copy the sample file to start:
 
@@ -70,7 +70,7 @@ source server/env.sh
 
 ---
 
-## 🛠️ Usage
+## Usage
 
 ### 1. Running the API Server
 
@@ -97,7 +97,7 @@ python manage.py issue_token --name "DWH Only" --type query --datasource 1
 
 ---
 
-## 🤖 MCP Server Integration
+## MCP Server Integration
 
 TernoDBI exposes two MCP servers for AI agents (like Claude Desktop or Terno Agents).
 
@@ -177,7 +177,7 @@ Add the following configuration to your `claude_desktop_config.json`:
 
 ---
 
-## 🧪 Development
+## Development
 
 ### Running Tests
 ```bash
@@ -193,6 +193,6 @@ python spider2_harness.py
 
 ---
 
-## 📄 License
+## License
 
 Apache 2.0 - See [LICENSE](LICENSE) for details.
