@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 def safe_float(val):
-    """Convert Decimal to float safely."""
     if isinstance(val, Decimal):
         return float(val)
     return val
@@ -26,8 +25,7 @@ def get_column_stats(conn, table_inspector, table_name: str, column_name: str, c
     try:
         if column_name not in table_inspector.columns:
             logger.error(f"Column '{column_name}' not found in table '{table_name}'")
-            return {}
-        
+            return {}   
         col = table_inspector.c[column_name]
         dialect_name = conn.dialect.name.lower()
 
@@ -56,7 +54,7 @@ def get_column_stats(conn, table_inspector, table_name: str, column_name: str, c
             stats["is_indexed"] = False
 
         is_date_type = isinstance(col.type, (DateTime, Date, TIMESTAMP))
-        
+
         if isinstance(col.type, (Integer, Float, Numeric, BigInteger, SmallInteger, DECIMAL)) and not is_date_type:
             try:
                 basic_numeric_query = select(
@@ -64,7 +62,7 @@ def get_column_stats(conn, table_inspector, table_name: str, column_name: str, c
                     func.min(col).label("min"),
                     func.max(col).label("max")
                 ).where(col.isnot(None)).select_from(table_inspector)
-                
+
                 result = conn.execute(basic_numeric_query).fetchone()
                 mean, min_val, max_val = result
 
@@ -81,7 +79,7 @@ def get_column_stats(conn, table_inspector, table_name: str, column_name: str, c
                 variance_query = select(
                     (func.avg(col * col) - func.avg(col) * func.avg(col)).label("variance")
                 ).where(col.isnot(None)).select_from(table_inspector)
-                
+
                 variance = conn.execute(variance_query).scalar()
                 variance = safe_float(variance)
 
@@ -174,7 +172,7 @@ def get_table_info(datasource, table_name: str, sample_rows_count: int = 10) -> 
         datasource.connection_str,
         credentials=datasource.connection_json
     )
-    
+
     result = {
         "table_name": table_name,
         "datasource_name": datasource.display_name,
@@ -184,7 +182,7 @@ def get_table_info(datasource, table_name: str, sample_rows_count: int = 10) -> 
         "column_names": [],
         "relationships": []
     }
-    
+
     try:
         with connector.get_connection() as conn:
             metadata = MetaData()
@@ -214,7 +212,7 @@ def get_table_info(datasource, table_name: str, sample_rows_count: int = 10) -> 
                 ]
             except Exception as e:
                 logger.warning(f"Could not get foreign keys for {table_name}: {e}")
-  
+
         try:
             table_model = models.Table.objects.get(name=table_name, data_source=datasource)
             result["existing_description"] = table_model.description
@@ -231,17 +229,17 @@ def get_table_info(datasource, table_name: str, sample_rows_count: int = 10) -> 
                     pass
         except models.Table.DoesNotExist:
             pass
-            
+
     except Exception as e:
         logger.exception(f"Error getting table info for {table_name}: {e}")
         result["error"] = str(e)
-    
+
     return result
 
 
 def get_datasource_tables_info(datasource_id: int, table_names: Optional[List[str]] = None) -> Dict[str, Any]:
     from terno_dbi.core import models
-    
+
     try:
         datasource = models.DataSource.objects.get(id=datasource_id, enabled=True)
     except models.DataSource.DoesNotExist:
@@ -251,7 +249,7 @@ def get_datasource_tables_info(datasource_id: int, table_names: Optional[List[st
         tables = models.Table.objects.filter(data_source=datasource, name__in=table_names)
     else:
         tables = models.Table.objects.filter(data_source=datasource)
-    
+
     result = {
         "datasource_id": datasource_id,
         "datasource_name": datasource.display_name,
@@ -259,58 +257,52 @@ def get_datasource_tables_info(datasource_id: int, table_names: Optional[List[st
         "tables_count": tables.count(),
         "tables": []
     }
-    
+
     for table in tables:
         table_info = get_table_info(datasource, table.name)
         result["tables"].append(table_info)
-    
+
     return result
 
 
-# System schemas to exclude when syncing from INFORMATION_SCHEMA
 SYSTEM_SCHEMAS = {'INFORMATION_SCHEMA', 'information_schema', 'pg_catalog', 'pg_toast'}
 
 
 def _sync_from_information_schema(connector, datasource, result, overwrite=False):
     """
     Fallback sync using INFORMATION_SCHEMA when SQLAlchemy/SQLShield reflection fails.
-    
+
     This is useful for databases where only views exist (no tables), or when
     views are stored in a way that SQLAlchemy's reflection doesn't pick them up.
-    
+
     Works for Snowflake, BigQuery, PostgreSQL, MySQL, etc.
-    
+
     Args:
         connector: Database connector instance
         datasource: DataSource model instance
         result: Result dict to update (mutated in place)
         overwrite: If True, update existing table/column metadata
-        
+
     Returns:
         Number of tables/views discovered
     """
     from terno_dbi.core import models
     from sqlalchemy import text
-    
+
     tables_discovered = 0
-    
-    # Extract schema from connection string if present
-    # Format: snowflake://user@account/database/schema
+
     target_schema = None
     conn_str = datasource.connection_str
-    
-    # Try to extract schema from Snowflake connection string
+
     if 'snowflake://' in conn_str:
         parts = conn_str.split('/')
-        if len(parts) >= 5:  # Has schema
-            target_schema = parts[-1].split('?')[0]  # Remove query params
+        if len(parts) >= 5:
+            target_schema = parts[-1].split('?')[0]
     
     logger.info(f"Syncing from INFORMATION_SCHEMA (target_schema={target_schema})")
     
     try:
         with connector.get_connection() as conn:
-            # Build query to get all columns from INFORMATION_SCHEMA
-            # Filter by target schema if specified, otherwise get all non-system schemas
             if target_schema and target_schema.upper() not in SYSTEM_SCHEMAS:
                 query = text("""
                     SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE, ORDINAL_POSITION
@@ -320,44 +312,37 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
                 """)
                 rows = conn.execute(query, {"schema": target_schema}).fetchall()
             else:
-                # Get all non-system schemas
                 query = text("""
                     SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE, ORDINAL_POSITION
                     FROM INFORMATION_SCHEMA.COLUMNS
                     WHERE UPPER(TABLE_SCHEMA) NOT IN ('INFORMATION_SCHEMA', 'PG_CATALOG', 'PG_TOAST')
                     ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
                 """)
-                rows = conn.execute(query).fetchall()
-            
+                rows = conn.execute(query).fetchall()     
             logger.info(f"INFORMATION_SCHEMA returned {len(rows)} column rows")
-            
-            # Group columns by table
-            tables_dict = {}  # {(schema, table_name): [(col_name, data_type), ...]}
+
+            tables_dict = {}
             for row in rows:
                 schema_name, table_name, column_name, data_type, _ = row
                 key = (schema_name, table_name)
                 if key not in tables_dict:
                     tables_dict[key] = []
                 tables_dict[key].append((column_name, data_type))
-            
+
             logger.info(f"Found {len(tables_dict)} tables/views in INFORMATION_SCHEMA")
-            
-            # Create/update tables and columns
+
             for (schema_name, table_name), columns in tables_dict.items():
                 try:
-                    # Use schema.table format for multi-schema databases
-                    # or just table name if schema matches target
                     if target_schema and schema_name.upper() == target_schema.upper():
                         full_table_name = table_name
                     else:
                         full_table_name = f"{schema_name}.{table_name}"
-                    
-                    # Check if table already exists
+
                     existing_table = models.Table.objects.filter(
                         data_source=datasource,
                         name=full_table_name
                     ).first()
-                    
+
                     if existing_table and not overwrite:
                         result["tables_skipped"] += 1
                         result["tables"].append({
@@ -366,8 +351,7 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
                             "id": existing_table.id
                         })
                         continue
-                    
-                    # Create or update table
+
                     if existing_table:
                         table_model = existing_table
                         result["tables_updated"] += 1
@@ -379,15 +363,14 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
                         )
                         result["tables_created"] += 1
                         tables_discovered += 1
-                    
-                    # Create/update columns
+
                     columns_count = 0
                     for col_name, data_type in columns:
                         existing_col = models.TableColumn.objects.filter(
                             table=table_model,
                             name=col_name
                         ).first()
-                        
+
                         if existing_col:
                             if overwrite:
                                 existing_col.data_type = str(data_type) if data_type else 'UNKNOWN'
@@ -401,7 +384,7 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
                             )
                             result["columns_created"] += 1
                         columns_count += 1
-                    
+
                     result["tables"].append({
                         "name": full_table_name,
                         "status": "created" if not existing_table else "updated",
@@ -409,7 +392,7 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
                         "columns": columns_count,
                         "source": "information_schema"
                     })
-                    
+
                 except Exception as e:
                     logger.exception(f"Error syncing table {schema_name}.{table_name}: {e}")
                     result["tables"].append({
@@ -417,42 +400,28 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
                         "status": "error",
                         "error": str(e)
                     })
-            
+
     except Exception as e:
         logger.exception(f"Error querying INFORMATION_SCHEMA: {e}")
-    
+
     return tables_discovered
 
 
 def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]:
-    """
-    Sync metadata from database to Django models.
-    Uses ConnectorFactory.get_metadata() to discover tables, columns, and foreign keys.
-    
-    This mirrors TernoAI's load_metadata task functionality.
-    
-    Args:
-        datasource_id: ID of the datasource to sync
-        overwrite: If True, update existing table/column metadata
-        
-    Returns:
-        Dictionary with sync results
-    """
     from terno_dbi.core import models
     from terno_dbi.connectors import ConnectorFactory
-    
+
     try:
         datasource = models.DataSource.objects.get(id=datasource_id, enabled=True)
     except models.DataSource.DoesNotExist:
         return {"error": f"Datasource {datasource_id} not found or not enabled"}
-    
-    # Get connector
+
     connector = ConnectorFactory.create_connector(
         datasource.type,
         datasource.connection_str,
         credentials=datasource.connection_json
     )
-    
+
     result = {
         "datasource_id": datasource_id,
         "datasource_name": datasource.display_name,
@@ -463,9 +432,8 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
         "foreign_keys_created": 0,
         "tables": []
     }
-    
+
     try:
-        # Update dialect info if not already set
         if not datasource.dialect_name or not datasource.dialect_version:
             try:
                 dialect_name, dialect_version = connector.get_dialect_info()
@@ -474,14 +442,11 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
                 datasource.save(update_fields=['dialect_name', 'dialect_version'])
             except Exception as e:
                 logger.warning(f"Could not get dialect info: {e}")
-        
-        # Get metadata using the connector (returns MDatabase with tables, columns, FKs)
+
         mdb = connector.get_metadata()
-        
+
         logger.info(f"Found {len(mdb.tables)} tables in database via SQLShield")
-        
-        # Fallback: If SQLShield found 0 tables, try INFORMATION_SCHEMA
-        # This handles databases with only views (no tables)
+
         if len(mdb.tables) == 0:
             logger.info("SQLShield found 0 tables, falling back to INFORMATION_SCHEMA")
             tables_discovered = _sync_from_information_schema(
@@ -491,21 +456,17 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
             result["sync_method"] = "information_schema"
             logger.info(f"INFORMATION_SCHEMA fallback discovered {tables_discovered} tables/views")
             return result
-        
+
         result["sync_method"] = "sqlshield"
-        
-        # Phase 1: Create/update tables and columns
+
         for tbl_name, tbl in mdb.tables.items():
             try:
-                # Use tbl.name (actual case from DB) not tbl_name (lowercase dict key)
                 actual_table_name = tbl.name
-                
-                # Check if table already exists
                 existing_table = models.Table.objects.filter(
                     data_source=datasource, 
                     name=actual_table_name
                 ).first()
-                
+
                 if existing_table and not overwrite:
                     result["tables_skipped"] += 1
                     result["tables"].append({
@@ -514,8 +475,7 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
                         "id": existing_table.id
                     })
                     continue
-                
-                # Create or update table
+
                 if existing_table:
                     table_model = existing_table
                     result["tables_updated"] += 1
@@ -526,15 +486,14 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
                         public_name=actual_table_name,
                     )
                     result["tables_created"] += 1
-                
-                # Create/update columns from MDatabase table
+
                 columns_count = 0
                 for col_name, col in tbl.columns.items():
                     existing_col = models.TableColumn.objects.filter(
                         table=table_model,
                         name=col_name
                     ).first()
-                    
+
                     if existing_col:
                         if overwrite:
                             existing_col.data_type = str(col.type)
@@ -548,14 +507,14 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
                         )
                         result["columns_created"] += 1
                     columns_count += 1
-                
+
                 result["tables"].append({
                     "name": actual_table_name,
                     "status": "created" if not existing_table else "updated",
                     "id": table_model.id,
                     "columns": columns_count
                 })
-                
+
             except Exception as e:
                 logger.exception(f"Error syncing table {tbl_name}: {e}")
                 result["tables"].append({
@@ -563,48 +522,47 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
                     "status": "error",
                     "error": str(e)
                 })
-        
+
         for tbl_name, tbl in mdb.tables.items():
             try:
                 foreign_keys = tbl.Foreign_Keys
                 if not foreign_keys:
                     continue
-                    
+
                 table = models.Table.objects.filter(
                     name=tbl.name, data_source=datasource
                 ).first()
-                
+
                 if not table:
                     continue
-                
+
                 for fk in foreign_keys:
                     try:
                         constrained_columns = models.TableColumn.objects.filter(
                             name=fk.constrained_columns[0].name,
                             table__data_source=datasource
                         ).first()
-                        
+
                         referred_table = models.Table.objects.filter(
                             name=fk.referred_table.name, 
                             data_source=datasource
                         ).first()
-                        
+
                         referred_columns = models.TableColumn.objects.filter(
                             name=fk.referred_columns[0].name,
                             table__data_source=datasource
                         ).first()
-                        
+
                         if not all([constrained_columns, referred_table, referred_columns]):
                             continue
-                        
-                        # Check if FK already exists
+
                         existing_fk = models.ForeignKey.objects.filter(
                             constrained_table=table,
                             constrained_columns=constrained_columns,
                             referred_table=referred_table,
                             referred_columns=referred_columns
                         ).first()
-                        
+
                         if not existing_fk:
                             models.ForeignKey.objects.create(
                                 constrained_table=table,
@@ -615,14 +573,13 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
                             result["foreign_keys_created"] += 1
                     except Exception as fk_error:
                         logger.warning(f"Error creating FK for {tbl_name}: {fk_error}")
-                        
+
             except Exception as e:
                 logger.warning(f"Error processing FKs for table {tbl_name}: {e}")
-        
+
         result["tables_synced"] = result["tables_created"] + result["tables_updated"]
         return result
-        
+
     except Exception as e:
         logger.exception(f"Error syncing metadata for datasource {datasource_id}: {e}")
         return {"error": str(e)}
-
