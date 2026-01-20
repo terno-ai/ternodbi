@@ -215,13 +215,6 @@ Add the following configuration to your `claude_desktop_config.json`:
 pytest
 ```
 
-### Benchmarks (Spider 2.0)
-TernoDBI includes a harness for running the Spider 2.0 Text-to-SQL benchmark.
-```bash
-cd benchmarks/spider2
-python spider2_harness.py
-```
-
 ---
 
 ## License
