@@ -1,6 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-    checkHealth(); // Initial check
-    setInterval(checkHealth, 30000); // Poll every 30s
+    checkHealth();
 });
 
 async function checkHealth() {
