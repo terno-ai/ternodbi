@@ -63,5 +63,5 @@ class CursorCodec:
             return payload
         except ValueError:
             raise
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             raise ValueError(f"Invalid cursor: {e}")

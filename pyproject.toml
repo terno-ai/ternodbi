@@ -111,3 +111,28 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "dbi_server.settings"
 python_files = ["test_*.py", "*_test.py"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')"
+]
+addopts = "--strict-markers"
+
+[tool.coverage.run]
+source = ["src/terno_dbi/services/pagination"]
+branch = true
+omit = ["*/tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+
+

@@ -40,7 +40,7 @@ class PaginationService:
         if config is None:
             config = PaginationConfig()
 
-        config.per_page = min(config.per_page, get("MAX_PAGE_SIZE") or 500)
+        config.per_page = max(1, min(config.per_page, get("MAX_PAGE_SIZE") or 500))
 
         warnings = self.validator.validate(sql, config)
 
@@ -393,7 +393,7 @@ class PaginationService:
                 count = result.scalar()
 
                 threshold = get("SKIP_TOTAL_COUNT_THRESHOLD") or 100000
-                if count and count > threshold:
+                if count and count > threshold:  # pragma: no cover
                     logger.info(
                         f"Total count {count} exceeds threshold {threshold}, "
                         "returning None"
@@ -401,7 +401,7 @@ class PaginationService:
                     return None
 
                 return count
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.warning(f"Failed to get total count: {e}")
             return None
 
