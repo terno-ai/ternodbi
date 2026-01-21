@@ -5,7 +5,7 @@
 [![Django](https://img.shields.io/badge/django-4.2%2B-green)](https://www.djangoproject.com/)
 [![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)](tests/unit/services/pagination/)
 
-**TernoDBI** is a database interface layer designed for **Security** and **Accuracy**, bridging the gap between **AI Agents** and **Enterprise Data**. It provides a unified API for interacting with warehouse-scale databases while enforcing strict access controls and optimizing schema context for high-precision LLM queries.
+**TernoDBI** is a database interface layer designed for Security and Accuracy, bridging the gap between **AI Agents** and **Enterprise Data**. It provides a unified, secure API for interacting with warehouse-scale databases while enforcing strict access controls and optimizing schema context for LLMs.
 
 ---
 
@@ -139,6 +139,7 @@ Download Claude Desktop from [https://claude.ai/download](https://claude.ai/down
 2.  Go to **Account** → **Settings**
 3.  Navigate to **Developer** section
 4.  Click **Edit Config** to open `claude_desktop_config.json`
+![Claude Desktop Settings](assets/config.png)
 
 #### Step 3: Add MCP Server Configuration
 
@@ -148,8 +149,16 @@ Add the following configuration to your `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
+    "ternodbi-admin": {
+      "command": "/path/to/your/venv/bin/dbi-mcp",
+      "args": ["admin"],
+      "env": {
+        "TERNODBI_API_URL": "http://127.0.0.1:8000",
+        "TERNODBI_API_KEY": "dbi_admin_..."
+      }
+    },
     "ternodbi-query": {
-      "command": "/absolute/path/to/venv/bin/dbi-mcp",
+      "command": "/path/to/your/venv/bin/dbi-mcp",
       "args": ["query"],
       "env": {
         "TERNODBI_API_URL": "http://127.0.0.1:8000",
@@ -159,7 +168,8 @@ Add the following configuration to your `claude_desktop_config.json`:
   }
 }
 ```
-
+> [!TIP]
+> Run `which dbi-mcp` in your terminal to find the absolute path to use in the configuration above.
 **Production (UVX):**
 ```json
 {
