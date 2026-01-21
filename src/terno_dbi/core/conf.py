@@ -4,11 +4,11 @@ DEFAULTS = {
     # Pagination
     "DEFAULT_PAGE_SIZE": 50,
     "MAX_PAGE_SIZE": 500,
-    "DEFAULT_PAGINATION_MODE": "offset",  # offset, cursor, or stream
+    "DEFAULT_PAGINATION_MODE": "offset",
     "CURSOR_PAGINATION_ENABLED": True,
-    "SKIP_TOTAL_COUNT_THRESHOLD": 100000,  # Skip COUNT(*) for large tables
-    "STREAM_YIELD_SIZE": 1000,  # Rows per yield for streaming
-    "COUNT_QUERY_TIMEOUT": 10,  # Seconds before COUNT query times out
+    "SKIP_TOTAL_COUNT_THRESHOLD": 100000,
+    "STREAM_YIELD_SIZE": 1000,
+    "COUNT_QUERY_TIMEOUT": 10,
 
     # Caching
     "CACHE_TIMEOUT": 3600,
@@ -28,31 +28,10 @@ DEFAULTS = {
 
 
 def get(key: str):
-    """
-    Get a Terno DBI configuration value.
-    
-    First checks Django settings.DBI_LAYER dict, then falls back to defaults.
-    
-    Args:
-        key: Configuration key to retrieve
-        
-    Returns:
-        Configuration value
-        
-    Example:
-        from terno_dbi.core.conf import get
-        page_size = get("DEFAULT_PAGE_SIZE")  # Returns 50 or overridden value
-    """
     user_settings = getattr(settings, "DBI_LAYER", {})
     return user_settings.get(key, DEFAULTS.get(key))
 
 
 def get_all():
-    """
-    Get all configuration values (defaults merged with user settings).
-
-    Returns:
-        Dict of all configuration key-value pairs
-    """
     user_settings = getattr(settings, "DBI_LAYER", {})
     return {**DEFAULTS, **user_settings}

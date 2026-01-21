@@ -1,7 +1,7 @@
 from .types import (
-    PaginationMode, 
-    OrderColumn, 
-    PaginationConfig, 
+    PaginationMode,
+    OrderColumn,
+    PaginationConfig,
     PaginatedResult
 )
 from .codecs import CursorCodec

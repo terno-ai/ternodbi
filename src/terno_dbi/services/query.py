@@ -1,9 +1,3 @@
-"""
-Query execution service for TernoDBI.
-
-Provides functions for executing SQL queries with pagination support.
-"""
-
 import io
 import math
 import csv
@@ -21,23 +15,12 @@ from terno_dbi.services.pagination import (
     PaginationConfig,
     PaginationMode,
     OrderColumn,
-    PaginatedResult,
 )
 
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# Legacy API (backward compatible)
-# =============================================================================
-
 def execute_native_sql(datasource, native_sql, page=1, per_page=50):
-    """
-    Execute SQL query with offset pagination.
-    
-    Legacy API - maintained for backward compatibility.
-    For new code, use execute_paginated_query() instead.
-    """
     try:
         connector = ConnectorFactory.create_connector(
             datasource.type,
@@ -60,10 +43,6 @@ def execute_native_sql(datasource, native_sql, page=1, per_page=50):
         }
 
 
-# =============================================================================
-# New Pagination API
-# =============================================================================
-
 def execute_paginated_query(
     datasource,
     native_sql: str,
@@ -74,32 +53,15 @@ def execute_paginated_query(
     direction: str = "forward",
     order_by: Optional[List[Dict[str, str]]] = None
 ) -> Dict[str, Any]:
-    """
-    Execute SQL query with full pagination support.
-    
-    Args:
-        datasource: DataSource model instance
-        native_sql: SQL query to execute
-        pagination_mode: "offset", "cursor", or "stream"
-        page: Page number for offset mode (1-indexed)
-        per_page: Rows per page
-        cursor: Cursor string for cursor mode
-        direction: "forward" or "backward" for cursor mode
-        order_by: List of {"column": "name", "direction": "DESC"} dicts
-    
-    Returns:
-        Dict with status, table_data (or error)
-    """
     try:
         connector = ConnectorFactory.create_connector(
             datasource.type,
             datasource.connection_str,
             credentials=datasource.connection_json
         )
-        
-        # Build pagination config
+
         mode = PaginationMode(pagination_mode)
-        
+
         order_columns = None
         if order_by:
             order_columns = [
@@ -110,7 +72,7 @@ def execute_paginated_query(
                 )
                 for o in order_by
             ]
-        
+
         config = PaginationConfig(
             mode=mode,
             page=page,
@@ -119,17 +81,14 @@ def execute_paginated_query(
             direction=direction,
             order_by=order_columns or [OrderColumn("id", "DESC")]
         )
-        
-        # Create pagination service
+
         service = PaginationService(
             connector=connector,
             dialect=datasource.dialect_name or datasource.type
         )
-        
-        # Execute paginated query
+
         result = service.paginate(native_sql, config)
-        
-        # Convert to response format
+
         table_data = {
             'columns': result.columns,
             'data': [
@@ -148,19 +107,18 @@ def execute_paginated_query(
             'next_cursor': result.next_cursor,
             'prev_cursor': result.prev_cursor,
         }
-        
+
         response = {
             'status': 'success',
             'table_data': table_data
         }
-        
+
         if result.warnings:
             response['warnings'] = result.warnings
-        
+
         return response
-        
+
     except ValueError as e:
-        # Cursor decode errors
         logger.warning(f"Pagination error: {e}")
         return {
             'status': 'error',
@@ -174,12 +132,7 @@ def execute_paginated_query(
         }
 
 
-# =============================================================================
-# Return DataFrame
-# =============================================================================
-
 def execute_native_sql_return_df(datasource, native_sql):
-    """Execute SQL and return result as base64 Parquet."""
     try:
         connector = ConnectorFactory.create_connector(
             datasource.type,
@@ -207,12 +160,7 @@ def execute_native_sql_return_df(datasource, native_sql):
         }
 
 
-# =============================================================================
-# Export (with streaming)
-# =============================================================================
-
 def export_native_sql_result(datasource, native_sql):
-    """Export SQL result to CSV file download."""
     connector = ConnectorFactory.create_connector(
         datasource.type,
         datasource.connection_str,
@@ -233,55 +181,42 @@ def export_native_sql_result(datasource, native_sql):
 
 
 def export_native_sql_streaming(datasource, native_sql):
-    """
-    Export SQL result using streaming for large datasets.
-    
-    Uses server-side cursors to minimize memory usage.
-    """
     connector = ConnectorFactory.create_connector(
         datasource.type,
         datasource.connection_str,
         credentials=datasource.connection_json
     )
-    
+
     service = PaginationService(
         connector=connector,
         dialect=datasource.dialect_name or datasource.type
     )
-    
+
     utc_time = timezone.now().strftime('%Y-%m-%d_%H-%M-%S')
     file_name = f'dbi_{datasource.display_name}_{utc_time}.csv'
-    
-    # Create streaming response
+
     def generate_csv():
-        """Generator for streaming CSV content."""
         first_batch = True
         for batch in service.stream_all(native_sql):
             buffer = io.StringIO()
             writer = csv.writer(buffer)
-            
+
             if first_batch and batch:
-                # Write header from first row's structure
                 writer.writerow([f"col_{i}" for i in range(len(batch[0]))])
                 first_batch = False
-            
+
             for row in batch:
                 writer.writerow(row)
-            
+
             yield buffer.getvalue()
-    
+
     from django.http import StreamingHttpResponse
     response = StreamingHttpResponse(generate_csv(), content_type='text/csv')
     response['Content-Disposition'] = f'attachment; filename={file_name}'
     return response
 
 
-# =============================================================================
-# Helper Functions
-# =============================================================================
-
 def _make_json_safe(value):
-    """Convert a value to be JSON serializable."""
     if value is None:
         return None
     if isinstance(value, (bytearray, bytes)):
@@ -292,12 +227,6 @@ def _make_json_safe(value):
 
 
 def _prepare_table_data(execute_result, page, per_page):
-    """
-    Prepare table data with in-memory pagination.
-    
-    Legacy function - maintained for backward compatibility.
-    New code should use PaginationService directly.
-    """
     table_data = {}
     table_data['columns'] = list(execute_result.keys())
 
@@ -323,4 +252,3 @@ def _prepare_table_data(execute_result, page, per_page):
             data[column] = _make_json_safe(row[i])
         table_data['data'].append(data)
     return table_data
-

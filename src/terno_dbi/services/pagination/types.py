@@ -4,11 +4,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 @dataclass
 class OrderColumn:
-    """Single column in ORDER BY clause."""
     column: str
-    direction: str = "DESC"  # ASC or DESC
-    nulls: str = "LAST"      # FIRST or LAST
-    
+    direction: str = "DESC"
+    nulls: str = "LAST"
+
     def inverted(self) -> "OrderColumn":
         """Return column with inverted direction for backward paging."""
         return OrderColumn(
@@ -17,38 +16,36 @@ class OrderColumn:
             nulls=self.nulls
         )
 
+
 class PaginationMode(Enum):
     """Pagination strategy modes."""
-    OFFSET = "offset"   # Traditional LIMIT/OFFSET
-    CURSOR = "cursor"   # Keyset pagination
-    STREAM = "stream"   # Server-side streaming
+    OFFSET = "offset"
+    CURSOR = "cursor"
+    STREAM = "stream"
 
 @dataclass
 class PaginationConfig:
-    """Configuration for pagination request."""
     mode: PaginationMode = PaginationMode.OFFSET
     page: int = 1
     per_page: int = 50
     cursor: Optional[str] = None
-    direction: str = "forward"  # "forward" or "backward"
-    # Composite ordering - industry standard (Stripe, Twitter, GitHub)
+    direction: str = "forward"
     order_by: List[OrderColumn] = field(default_factory=lambda: [
         OrderColumn("id", "DESC")
     ])
 
 @dataclass
 class PaginatedResult:
-    """Result of a paginated query."""
     data: List[Tuple]
     columns: List[str]
     page: int
     per_page: int
-    total_count: Optional[int]  # None for cursor mode
-    total_pages: Optional[int]  # None for cursor mode
+    total_count: Optional[int]
+    total_pages: Optional[int]
     has_next: bool
     has_prev: bool
-    next_cursor: Optional[str]  # Only for cursor mode
-    prev_cursor: Optional[str]  # Only for cursor mode
+    next_cursor: Optional[str]
+    prev_cursor: Optional[str]
     warnings: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:

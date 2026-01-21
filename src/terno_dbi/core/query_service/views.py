@@ -116,8 +116,6 @@ def list_tables(request, datasource_id):
             'column_data': column_data
         })
 
-
-
     return JsonResponse({
         'status': 'success',
         'tables': tables_list,
@@ -213,9 +211,9 @@ def list_foreign_keys(request, datasource_id):
     for fk in fks:
         fk_data.append({
             "id": fk.id,
-            "constrained_table": fk.constrained_table.public_name,  # Use public_name
+            "constrained_table": fk.constrained_table.public_name,
             "constrained_column": fk.constrained_columns.public_name if fk.constrained_columns else None,
-            "referred_table": fk.referred_table.public_name,  # Use public_name
+            "referred_table": fk.referred_table.public_name,
             "referred_column": fk.referred_columns.public_name if fk.referred_columns else None,
         })
 
@@ -291,15 +289,14 @@ def execute_query(request, datasource_id=None):
                 "status": "error",
                 "error": f"DataSource {ds_id} not found"
             }, status=404)
-        
+
         sql = body.get("sql")
         if not sql:
             return JsonResponse({
                 "status": "error",
                 "error": "Missing 'sql' in request body"
             }, status=400)
-        
-        # Pagination parameters
+
         pagination_mode = body.get("pagination_mode", "offset")
         page = body.get("page", 1)
         per_page = min(
@@ -309,8 +306,7 @@ def execute_query(request, datasource_id=None):
         cursor = body.get("cursor")
         direction = body.get("direction", "forward")
         order_by = body.get("order_by")  # List of {"column": "name", "direction": "DESC"}
-        
-        # Role-based access
+
         role_ids = body.get("roles", [])
         from django.contrib.auth.models import Group
 
@@ -329,7 +325,7 @@ def execute_query(request, datasource_id=None):
             }, status=400)
 
         native_sql = transform_result.get('native_sql', sql)
-        
+
         # Use new paginated query API
         result = execute_paginated_query(
             datasource=ds,

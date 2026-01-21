@@ -78,7 +78,9 @@ Pagination Modes:
 - offset: Traditional page-based (default). Good for UI with page numbers.
 - cursor: High-performance for large datasets. Use for infinite scroll/streaming.
 
-For very large results, use cursor mode with the returned next_cursor.""",
+For very large results, use cursor mode with the returned next_cursor.
+
+Tip: To get the total row count of a table without scanning it, use 'offset' mode with a LIMIT 1 query (e.g. SELECT * FROM table LIMIT 1). The response will include 'row_count' metadata. Do not run SELECT COUNT(*).""",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -134,20 +136,7 @@ For very large results, use cursor mode with the returned next_cursor.""",
                 "required": ["table_id"]
             }
         ),
-        Tool(
-            name="get_suggestions",
-            description="Get query suggestions for a datasource",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "datasource_id": {
-                        "type": "integer",
-                        "description": "ID of the datasource"
-                    }
-                },
-                "required": ["datasource_id"]
-            }
-        ),
+
     ]
 
 
@@ -203,14 +192,6 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             table_id = arguments["table_id"]
             rows = arguments.get("rows", 10)
             result = client.get_sample_data(table_id, rows)
-
-        elif name == "get_suggestions":
-            datasource_id = arguments["datasource_id"]
-            data = client.list_suggestions(datasource_id)
-            result = {
-                "suggestions": data.get("suggestions", []),
-                "count": len(data.get("suggestions", []))
-            }
 
         else:
             result = {"error": f"Unknown tool: {name}"}
