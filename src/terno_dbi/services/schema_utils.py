@@ -2,6 +2,7 @@ import logging
 import math
 from decimal import Decimal
 from typing import Dict, Any, List, Optional
+import reversion
 
 from sqlalchemy import MetaData, Table, select, func, text, inspect, case
 from sqlalchemy.sql.sqltypes import (
@@ -298,9 +299,8 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
         parts = conn_str.split('/')
         if len(parts) >= 5:
             target_schema = parts[-1].split('?')[0]
-    
     logger.info(f"Syncing from INFORMATION_SCHEMA (target_schema={target_schema})")
-    
+
     try:
         with connector.get_connection() as conn:
             if target_schema and target_schema.upper() not in SYSTEM_SCHEMAS:
@@ -322,6 +322,8 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
             logger.info(f"INFORMATION_SCHEMA returned {len(rows)} column rows")
 
             tables_dict = {}
+            found_table_names = set()
+
             for row in rows:
                 schema_name, table_name, column_name, data_type, _ = row
                 key = (schema_name, table_name)
@@ -335,8 +337,12 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
                 try:
                     if target_schema and schema_name.upper() == target_schema.upper():
                         full_table_name = table_name
+                    if target_schema and schema_name.upper() == target_schema.upper():
+                        full_table_name = table_name
                     else:
                         full_table_name = f"{schema_name}.{table_name}"
+
+                    found_table_names.add(full_table_name)
 
                     existing_table = models.Table.objects.filter(
                         data_source=datasource,
@@ -364,7 +370,11 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
                         result["tables_created"] += 1
                         tables_discovered += 1
 
+                        tables_discovered += 1
+
                     columns_count = 0
+                    found_column_names = set()
+
                     for col_name, data_type in columns:
                         existing_col = models.TableColumn.objects.filter(
                             table=table_model,
@@ -383,7 +393,12 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
                                 data_type=str(data_type) if data_type else 'UNKNOWN',
                             )
                             result["columns_created"] += 1
+                        found_column_names.add(col_name)
                         columns_count += 1
+
+                    models.TableColumn.objects.filter(
+                        table=table_model
+                    ).exclude(name__in=found_column_names).delete()
 
                     result["tables"].append({
                         "name": full_table_name,
@@ -398,8 +413,13 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
                     result["tables"].append({
                         "name": f"{schema_name}.{table_name}",
                         "status": "error",
+                        "status": "error",
                         "error": str(e)
                     })
+
+            models.Table.objects.filter(
+                data_source=datasource
+            ).exclude(name__in=found_table_names).delete()
 
     except Exception as e:
         logger.exception(f"Error querying INFORMATION_SCHEMA: {e}")
@@ -407,6 +427,7 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
     return tables_discovered
 
 
+@reversion.create_revision()
 def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]:
     from terno_dbi.core import models
     from terno_dbi.connectors import ConnectorFactory
@@ -433,6 +454,8 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
         "tables": []
     }
 
+    reversion.set_comment("Automatic Metadata Sync")
+
     try:
         if not datasource.dialect_name or not datasource.dialect_version:
             try:
@@ -448,16 +471,22 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
         logger.info(f"Found {len(mdb.tables)} tables in database via SQLShield")
 
         if len(mdb.tables) == 0:
-            logger.info("SQLShield found 0 tables, falling back to INFORMATION_SCHEMA")
-            tables_discovered = _sync_from_information_schema(
-                connector, datasource, result, overwrite
-            )
-            result["tables_synced"] = result["tables_created"] + result["tables_updated"]
-            result["sync_method"] = "information_schema"
-            logger.info(f"INFORMATION_SCHEMA fallback discovered {tables_discovered} tables/views")
-            return result
+            logger.info("SQLShield found 0 tables")
+
+            # Skip INFORMATION_SCHEMA fallback for SQLite and Oracle as it doesn't exist
+            if datasource.type not in ('sqlite', 'oracle'):
+                logger.info("Falling back to INFORMATION_SCHEMA")
+                tables_discovered = _sync_from_information_schema(
+                    connector, datasource, result, overwrite
+                )
+                result["tables_synced"] = result["tables_created"] + result["tables_updated"]
+                result["sync_method"] = "information_schema"
+                logger.info(f"INFORMATION_SCHEMA fallback discovered {tables_discovered} tables/views")
+                return result
 
         result["sync_method"] = "sqlshield"
+
+        found_table_names = set()
 
         for tbl_name, tbl in mdb.tables.items():
             try:
@@ -466,15 +495,6 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
                     data_source=datasource, 
                     name=actual_table_name
                 ).first()
-
-                if existing_table and not overwrite:
-                    result["tables_skipped"] += 1
-                    result["tables"].append({
-                        "name": actual_table_name, 
-                        "status": "skipped",
-                        "id": existing_table.id
-                    })
-                    continue
 
                 if existing_table:
                     table_model = existing_table
@@ -487,7 +507,10 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
                     )
                     result["tables_created"] += 1
 
+                found_table_names.add(actual_table_name)
+
                 columns_count = 0
+                found_column_names = set()
                 for col_name, col in tbl.columns.items():
                     existing_col = models.TableColumn.objects.filter(
                         table=table_model,
@@ -506,7 +529,18 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
                             data_type=str(col.type),
                         )
                         result["columns_created"] += 1
+                    found_column_names.add(col_name)
                     columns_count += 1
+
+                missing_cols = models.TableColumn.objects.filter(
+                    table=table_model
+                ).exclude(name__in=found_column_names)
+
+                if missing_cols.exists():
+                    count = missing_cols.count()
+                    missing_cols.delete()
+                    result["columns_deleted"] += count
+                    logger.info(f"Deleted {count} stale columns from {actual_table_name}")
 
                 result["tables"].append({
                     "name": actual_table_name,
@@ -576,6 +610,14 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
 
             except Exception as e:
                 logger.warning(f"Error processing FKs for table {tbl_name}: {e}")
+
+        missing_tables = models.Table.objects.filter(data_source=datasource).exclude(name__in=found_table_names)
+        if missing_tables.exists():
+            count = missing_tables.count()
+
+            missing_tables.delete()
+            result['tables_deleted'] = count
+            logger.info(f"Deleted {count} stale tables from data source {datasource.display_name}")
 
         result["tables_synced"] = result["tables_created"] + result["tables_updated"]
         return result

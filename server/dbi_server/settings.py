@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'terno_dbi.core.apps.TernoDBIConfig',
+    'reversion',
 ]
 
 MIDDLEWARE = [
@@ -105,6 +106,9 @@ elif DJANGO_PROJECT_PATH:
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': Path(DJANGO_PROJECT_PATH) / 'db.sqlite3',
+            'OPTIONS': {
+                'timeout': 20,
+            }
         }
     }
 else:
@@ -112,6 +116,9 @@ else:
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': BASE_DIR / 'db.sqlite3',
+            'OPTIONS': {
+                'timeout': 20,
+            }
         }
     }
 

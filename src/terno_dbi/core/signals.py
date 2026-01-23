@@ -31,11 +31,14 @@ def connect_cache_invalidation_signals():
         _invalidate_cache_for_datasource(instance.data_source)
 
     def invalidate_cache_on_column_change(sender, instance, **kwargs):
-        logger.debug(
-            f"Column signal fired: {instance.name} (ID: {instance.id}) - "
-            f"invalidating cache for datasource {instance.table.data_source_id}"
-        )
-        _invalidate_cache_for_datasource(instance.table.data_source)
+        try:
+            logger.debug(
+                f"Column signal fired: {instance.name} (ID: {instance.id}) - "
+                f"invalidating cache for datasource {instance.table.data_source_id}"
+            )
+            _invalidate_cache_for_datasource(instance.table.data_source)
+        except Exception as e:
+            logger.debug(f"Skipping column cache invalidation (parent table likely deleted): {e}")
 
     post_save.connect(
         invalidate_cache_on_table_change, 

@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.apps import apps
+import reversion.admin
 
 PARENT_APP_INSTALLED = apps.is_installed('terno')
 
@@ -23,9 +24,10 @@ if not PARENT_APP_INSTALLED:
         fk_name = 'constrained_table'
         extra = 0
         fields = ('constrained_columns', 'referred_table', 'referred_columns')
+        raw_id_fields = ('constrained_columns', 'referred_table', 'referred_columns')
 
     @admin.register(DataSource)
-    class DataSourceAdmin(admin.ModelAdmin):
+    class DataSourceAdmin(reversion.admin.VersionAdmin):
         list_display = ('display_name', 'type', 'enabled', 'dialect_name', 'dialect_version')
         list_filter = ('type', 'enabled', 'dialect_name')
         search_fields = ('display_name', 'description')
@@ -99,7 +101,7 @@ if not PARENT_APP_INSTALLED:
         trigger_sync_metadata.short_description = "Sync metadata (discover tables & columns)"
 
     @admin.register(Table)
-    class TableAdmin(admin.ModelAdmin):
+    class TableAdmin(reversion.admin.VersionAdmin):
         list_display = ('name', 'public_name', 'data_source', 'column_count')
         list_filter = ('data_source',)
         search_fields = ('name', 'public_name', 'description')
@@ -110,14 +112,14 @@ if not PARENT_APP_INSTALLED:
         column_count.short_description = 'Columns'
 
     @admin.register(TableColumn)
-    class TableColumnAdmin(admin.ModelAdmin):
+    class TableColumnAdmin(reversion.admin.VersionAdmin):
         list_display = ('name', 'public_name', 'table', 'data_type')
         list_filter = ('table__data_source', 'data_type')
         search_fields = ('name', 'public_name', 'description')
         raw_id_fields = ('table',)
 
     @admin.register(ForeignKey)
-    class ForeignKeyAdmin(admin.ModelAdmin):
+    class ForeignKeyAdmin(reversion.admin.VersionAdmin):
         list_display = ('constrained_table', 'constrained_columns', 'referred_table', 'referred_columns')
         list_filter = ('constrained_table__data_source',)
         raw_id_fields = ('constrained_table', 'constrained_columns', 'referred_table', 'referred_columns')
@@ -189,7 +191,6 @@ if not PARENT_APP_INSTALLED:
 
         def save_model(self, request, obj, form, change):
             if not change:
-
 
                 token, full_key = generate_service_token(
                     name=obj.name,

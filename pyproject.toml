@@ -45,6 +45,7 @@ dependencies = [
     "databricks-sqlalchemy>=2.0.8",
     "databricks-sql-connector>=2.0",
     "oracledb>=1.4",
+    "django-reversion==5.1.0",
 ]
 
 [project.optional-dependencies]
