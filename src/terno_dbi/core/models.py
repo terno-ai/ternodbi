@@ -71,7 +71,7 @@ class DataSource(models.Model):
         databricks = "databricks", _("DataBricks")
         snowflake = "snowflake", _("Snowflake")
 
-    display_name = models.CharField(max_length=40, default='Datasource 1')
+    display_name = models.CharField(max_length=40, default='Datasource 1', unique=True)
     type = models.CharField(max_length=20, choices=DBType,
                             default=DBType.default)
     is_erp = models.BooleanField(
@@ -95,7 +95,7 @@ class DataSource(models.Model):
         help_text="Auto-generated on save")
 
     class Meta:
-        db_table = 'terno_datasource'  # Keep same table for data preservation
+        db_table = 'terno_datasource'
 
     def __str__(self):
         return self.display_name

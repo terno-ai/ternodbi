@@ -34,12 +34,12 @@ async def list_tools() -> List[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "datasource_id": {
-                        "type": "integer",
-                        "description": "ID of the datasource"
+                    "datasource": {
+                        "type": "string",
+                        "description": "Datasource name or ID"
                     }
                 },
-                "required": ["datasource_id"]
+                "required": ["datasource"]
             }
         ),
         Tool(
@@ -62,12 +62,12 @@ async def list_tools() -> List[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "datasource_id": {
-                        "type": "integer",
-                        "description": "ID of the datasource"
+                    "datasource": {
+                        "type": "string",
+                        "description": "Datasource name or ID"
                     }
                 },
-                "required": ["datasource_id"]
+                "required": ["datasource"]
             }
         ),
         Tool(
@@ -84,9 +84,9 @@ Tip: To get the total row count of a table without scanning it, use 'offset' mod
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "datasource_id": {
-                        "type": "integer",
-                        "description": "ID of the datasource to query"
+                    "datasource": {
+                        "type": "string",
+                        "description": "Datasource name or ID"
                     },
                     "sql": {
                         "type": "string",
@@ -115,7 +115,7 @@ Tip: To get the total row count of a table without scanning it, use 'offset' mod
                         "description": "Direction for cursor pagination (default: forward)"
                     }
                 },
-                "required": ["datasource_id", "sql"]
+                "required": ["datasource", "sql"]
             }
         ),
         Tool(
@@ -151,8 +151,8 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 result["count"] = len(result["datasources"])
 
         elif name == "list_tables":
-            datasource_id = arguments["datasource_id"]
-            tables = client.list_tables(datasource_id)
+            datasource = arguments["datasource"]
+            tables = client.list_tables(datasource)
             result = {
                 "tables": tables,
                 "count": len(tables) if isinstance(tables, list) else 0
@@ -167,11 +167,11 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             }
 
         elif name == "get_schema":
-            datasource_id = arguments["datasource_id"]
-            result = client.get_schema(datasource_id)
+            datasource = arguments["datasource"]
+            result = client.get_schema(datasource)
 
         elif name == "execute_query":
-            datasource_id = arguments["datasource_id"]
+            datasource = arguments["datasource"]
             sql = arguments["sql"]
             pagination_mode = arguments.get("pagination_mode", "offset")
             page = arguments.get("page", 1)
@@ -179,8 +179,8 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             cursor = arguments.get("cursor")
             direction = arguments.get("direction", "forward")
             result = client.execute_query(
-                datasource_id, 
-                sql, 
+                datasource,
+                sql,
                 pagination_mode=pagination_mode,
                 page=page,
                 per_page=per_page,

@@ -14,6 +14,7 @@ from terno_dbi.services.query import (
 )
 from terno_dbi.services.shield import prepare_mdb, generate_native_sql
 from terno_dbi.services.access import get_admin_config_object
+from terno_dbi.services.resolver import resolve_datasource
 from terno_dbi.decorators import require_service_auth
 
 logger = logging.getLogger(__name__)
@@ -61,30 +62,31 @@ def list_datasources(request):
 
 @require_service_auth()
 @require_http_methods(["GET"])
-def get_datasource(request, datasource_id):
+def get_datasource(request, datasource_identifier):
     try:
-        ds = models.DataSource.objects.get(id=datasource_id, enabled=True)
+        ds = resolve_datasource(datasource_identifier)
         return JsonResponse({
             "status": "success",
+            "id": ds.id,
             "datasource_name": ds.display_name,
             "type": ds.type,
         })
-    except models.DataSource.DoesNotExist:
+    except Exception as e:
         return JsonResponse({
             "status": "error",
-            "error": f"DataSource {datasource_id} not found"
+            "error": str(e)
         }, status=404)
 
 
 @require_service_auth()
 @require_http_methods(["GET"])
-def list_tables(request, datasource_id):
+def list_tables(request, datasource_identifier):
     try:
-        ds = models.DataSource.objects.get(id=datasource_id, enabled=True)
-    except models.DataSource.DoesNotExist:
+        ds = resolve_datasource(datasource_identifier)
+    except Exception as e:
         return JsonResponse({
             "status": "error",
-            "error": f"DataSource {datasource_id} not found"
+            "error": str(e)
         }, status=404)
 
     role_ids_str = request.GET.get('roles', '')
@@ -126,7 +128,7 @@ def list_tables(request, datasource_id):
 
 @require_service_auth()
 @require_http_methods(["GET"])
-def list_columns(request, datasource_id, table_id):
+def list_columns(request, datasource_identifier, table_id):
     return get_table_columns(request, table_id)
 
 
@@ -160,11 +162,11 @@ def get_table_columns(request, table_id):
 
 @require_service_auth()
 @require_http_methods(["GET"])
-def get_schema(request, datasource_id):
+def get_schema(request, datasource_identifier):
     try:
-        datasource = models.DataSource.objects.get(id=datasource_id)
-    except models.DataSource.DoesNotExist:
-        return JsonResponse({"error": "Datasource not found"}, status=404)
+        datasource = resolve_datasource(datasource_identifier)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=404)
 
     tables = models.Table.objects.filter(data_source=datasource)
     schema = []
@@ -194,13 +196,13 @@ def get_schema(request, datasource_id):
 
 @require_service_auth()
 @require_http_methods(["GET"])
-def list_foreign_keys(request, datasource_id):
+def list_foreign_keys(request, datasource_identifier):
     try:
-        ds = models.DataSource.objects.get(id=datasource_id, enabled=True)
-    except models.DataSource.DoesNotExist:
+        ds = resolve_datasource(datasource_identifier)
+    except Exception as e:
         return JsonResponse({
             "status": "error",
-            "error": f"DataSource {datasource_id} not found"
+            "error": str(e)
         }, status=404)
 
     fks = models.ForeignKey.objects.filter(
@@ -272,22 +274,22 @@ def get_sample_data(request, table_id):
 @csrf_exempt
 @require_service_auth()
 @require_http_methods(["POST"])
-def execute_query(request, datasource_id=None):
+def execute_query(request, datasource_identifier=None):
     try:
         body = json.loads(request.body)
-        ds_id = datasource_id or body.get("datasourceId")
-        if not ds_id:
+        ds_identifier = datasource_identifier or body.get("datasource") or body.get("datasourceId")
+        if not ds_identifier:
             return JsonResponse({
                 "status": "error",
-                "error": "Datasource ID required"
+                "error": "Datasource name or ID required"
             }, status=400)
 
         try:
-            ds = models.DataSource.objects.get(id=ds_id, enabled=True)
-        except models.DataSource.DoesNotExist:
+            ds = resolve_datasource(ds_identifier)
+        except Exception as e:
             return JsonResponse({
                 "status": "error",
-                "error": f"DataSource {ds_id} not found"
+                "error": str(e)
             }, status=404)
 
         sql = body.get("sql")
@@ -355,22 +357,22 @@ def execute_query(request, datasource_id=None):
 @csrf_exempt
 @require_service_auth()
 @require_http_methods(["POST"])
-def export_query(request, datasource_id=None):
+def export_query(request, datasource_identifier=None):
     try:
         body = json.loads(request.body)
-        ds_id = datasource_id or body.get("datasourceId")
-        if not ds_id:
+        ds_identifier = datasource_identifier or body.get("datasource") or body.get("datasourceId")
+        if not ds_identifier:
             return JsonResponse({
                 "status": "error",
-                "error": "Datasource ID required"
+                "error": "Datasource name or ID required"
             }, status=400)
 
         try:
-            ds = models.DataSource.objects.get(id=ds_id, enabled=True)
-        except models.DataSource.DoesNotExist:
+            ds = resolve_datasource(ds_identifier)
+        except Exception as e:
             return JsonResponse({
                 "status": "error",
-                "error": f"DataSource {ds_id} not found"
+                "error": str(e)
             }, status=404)
 
         sql = body.get("sql")

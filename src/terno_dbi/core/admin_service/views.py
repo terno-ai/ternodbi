@@ -6,6 +6,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from terno_dbi.core import models
 from terno_dbi.services.validation import validate_datasource_input
+from terno_dbi.services.resolver import resolve_datasource
 from terno_dbi.decorators import require_service_auth
 from terno_dbi.core.models import ServiceToken
 
@@ -93,13 +94,13 @@ def create_datasource(request):
 @csrf_exempt
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["PATCH"])
-def update_datasource(request, datasource_id):
+def update_datasource(request, datasource_identifier):
     try:
-        ds = models.DataSource.objects.get(id=datasource_id)
-    except models.DataSource.DoesNotExist:
+        ds = resolve_datasource(datasource_identifier, enabled_only=False)
+    except Exception as e:
         return JsonResponse({
             "status": "error",
-            "error": f"DataSource {datasource_id} not found"
+            "error": str(e)
         }, status=404)
 
     try:
@@ -141,13 +142,13 @@ def update_datasource(request, datasource_id):
 @csrf_exempt
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["DELETE"])
-def delete_datasource(request, datasource_id):
+def delete_datasource(request, datasource_identifier):
     try:
-        ds = models.DataSource.objects.get(id=datasource_id)
-    except models.DataSource.DoesNotExist:
+        ds = resolve_datasource(datasource_identifier, enabled_only=False)
+    except Exception as e:
         return JsonResponse({
             "status": "error",
-            "error": f"DataSource {datasource_id} not found"
+            "error": str(e)
         }, status=404)
 
     name = ds.display_name
@@ -304,13 +305,13 @@ def validate_connection(request):
 @csrf_exempt
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["POST"])
-def sync_metadata(request, datasource_id):
+def sync_metadata(request, datasource_identifier):
     try:
-        ds = models.DataSource.objects.get(id=datasource_id)
-    except models.DataSource.DoesNotExist:
+        ds = resolve_datasource(datasource_identifier, enabled_only=False)
+    except Exception as e:
         return JsonResponse({
             "status": "error",
-            "error": f"DataSource {datasource_id} not found"
+            "error": str(e)
         }, status=404)
 
     try:
@@ -338,11 +339,11 @@ def sync_metadata(request, datasource_id):
 
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["GET"])
-def get_table_info(request, datasource_id, table_name):
+def get_table_info(request, datasource_identifier, table_name):
     try:
-        ds = models.DataSource.objects.get(id=datasource_id)
-    except models.DataSource.DoesNotExist:
-        return JsonResponse({"error": f"DataSource {datasource_id} not found"}, status=404)
+        ds = resolve_datasource(datasource_identifier)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=404)
 
     try:
         table = models.Table.objects.get(data_source=ds, name=table_name)
@@ -375,11 +376,11 @@ def get_table_info(request, datasource_id, table_name):
 @csrf_exempt
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["POST"])
-def get_all_tables_info(request, datasource_id):
+def get_all_tables_info(request, datasource_identifier):
     try:
-        ds = models.DataSource.objects.get(id=datasource_id)
-    except models.DataSource.DoesNotExist:
-        return JsonResponse({"error": f"DataSource {datasource_id} not found"}, status=404)
+        ds = resolve_datasource(datasource_identifier)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=404)
 
     try:
         body = json.loads(request.body)

@@ -2,9 +2,11 @@
 import os
 import requests
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 
 logger = logging.getLogger(__name__)
+
+DatasourceIdentifier = Union[int, str]
 
 
 class TernoDBIClient:
@@ -57,13 +59,13 @@ class TernoDBIClient:
         response = requests.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
-    def delete_datasource(self, datasource_id: int) -> Dict:
-        url = f"{self.base_url}/api/admin/datasources/{datasource_id}/delete/"
+    def delete_datasource(self, datasource: DatasourceIdentifier) -> Dict:
+        url = f"{self.base_url}/api/admin/datasources/{datasource}/delete/"
         response = requests.delete(url, headers=self._get_headers())
         return self._handle_response(response)
 
-    def sync_metadata(self, datasource_id: int, overwrite: bool = False) -> Dict:
-        url = f"{self.base_url}/api/admin/datasources/{datasource_id}/sync/"
+    def sync_metadata(self, datasource: DatasourceIdentifier, overwrite: bool = False) -> Dict:
+        url = f"{self.base_url}/api/admin/datasources/{datasource}/sync/"
         payload = {"overwrite": overwrite}
         response = requests.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
@@ -78,8 +80,8 @@ class TernoDBIClient:
         response = requests.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
-    def list_tables(self, datasource_id: int) -> List[Dict]:
-        url = f"{self.base_url}/api/query/datasources/{datasource_id}/tables/"
+    def list_tables(self, datasource: DatasourceIdentifier) -> List[Dict]:
+        url = f"{self.base_url}/api/query/datasources/{datasource}/tables/"
         response = requests.get(url, headers=self._get_headers())
         data = self._handle_response(response)
         return data.get("tables", [])
@@ -90,8 +92,8 @@ class TernoDBIClient:
         data = self._handle_response(response)
         return data.get("columns", [])
 
-    def get_schema(self, datasource_id: int) -> Dict:
-        url = f"{self.base_url}/api/query/datasources/{datasource_id}/schema/"
+    def get_schema(self, datasource: DatasourceIdentifier) -> Dict:
+        url = f"{self.base_url}/api/query/datasources/{datasource}/schema/"
         response = requests.get(url, headers=self._get_headers())
         return self._handle_response(response)
 
@@ -128,13 +130,13 @@ class TernoDBIClient:
         )
         return self._handle_response(response)
 
-    def get_table_info(self, datasource_id: int, table_name: str) -> Dict:
-        url = f"{self.base_url}/api/admin/datasources/{datasource_id}/tables/{table_name}/info/"
+    def get_table_info(self, datasource: DatasourceIdentifier, table_name: str) -> Dict:
+        url = f"{self.base_url}/api/admin/datasources/{datasource}/tables/{table_name}/info/"
         response = requests.get(url, headers=self._get_headers())
         return self._handle_response(response)
 
-    def get_all_tables_info(self, datasource_id: int, table_names: Optional[List[str]] = None) -> Dict:
-        url = f"{self.base_url}/api/admin/datasources/{datasource_id}/tables/info/"
+    def get_all_tables_info(self, datasource: DatasourceIdentifier, table_names: Optional[List[str]] = None) -> Dict:
+        url = f"{self.base_url}/api/admin/datasources/{datasource}/tables/info/"
         payload = {}
         if table_names:
             payload["table_names"] = table_names
@@ -143,7 +145,7 @@ class TernoDBIClient:
 
     def execute_query(
         self,
-        datasource_id: int,
+        datasource: DatasourceIdentifier,
         sql: str,
         pagination_mode: str = "offset",
         page: int = 1,
@@ -153,7 +155,7 @@ class TernoDBIClient:
         order_by: Optional[List[Dict[str, str]]] = None,
         limit: Optional[int] = None
     ) -> Dict:
-        url = f"{self.base_url}/api/query/datasources/{datasource_id}/query/"
+        url = f"{self.base_url}/api/query/datasources/{datasource}/query/"
 
         if limit is not None:
             per_page = limit
@@ -177,7 +179,7 @@ class TernoDBIClient:
 
     def iter_query(
         self,
-        datasource_id: int,
+        datasource: DatasourceIdentifier,
         sql: str,
         per_page: int = 100,
         order_by: Optional[List[Dict[str, str]]] = None
@@ -185,7 +187,7 @@ class TernoDBIClient:
         cursor = None
         while True:
             result = self.execute_query(
-                datasource_id,
+                datasource,
                 sql,
                 pagination_mode="cursor",
                 per_page=per_page,
