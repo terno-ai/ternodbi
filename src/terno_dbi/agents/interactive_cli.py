@@ -47,11 +47,11 @@ async def main():
         print("Connecting to MCP Servers (Query + Admin)...")
         async with agent:
             print("Connected! You can now ask questions about your databases.")
-            print("   Type 'exit' or 'quit' to stop.\n")
+            print("Type 'exit' or 'quit' to stop.\n")
 
             while True:
                 try:
-                    user_input = input("\n Let's Cook: ").strip()
+                    user_input = input("\nLet's Cook: ").strip()
                     if user_input.lower() in ("exit", "quit"):
                         print("Goodbye! 👋")
                         break
