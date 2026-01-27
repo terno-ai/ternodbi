@@ -51,7 +51,7 @@ async def main():
 
             while True:
                 try:
-                    user_input = input("\n👤 You: ").strip()
+                    user_input = input("\n Let's Cook: ").strip()
                     if user_input.lower() in ("exit", "quit"):
                         print("Goodbye! 👋")
                         break
