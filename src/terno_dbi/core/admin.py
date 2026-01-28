@@ -10,7 +10,7 @@ if not PARENT_APP_INSTALLED:
         PrivateTableSelector, GroupTableSelector,
         PrivateColumnSelector, GroupColumnSelector,
         GroupTableRowFilter, TableRowFilter,
-
+        CoreOrganisation, OrganisationUser, OrganisationGroup,
     )
 
     class TableColumnInline(admin.TabularInline):
@@ -173,6 +173,26 @@ if not PARENT_APP_INSTALLED:
         list_filter = ('data_source', 'group')
         raw_id_fields = ('table',)
 
+    @admin.register(CoreOrganisation)
+    class CoreOrganisationAdmin(reversion.admin.VersionAdmin):
+        list_display = ('name', 'created_at', 'updated_at')
+        search_fields = ('name',)
+        readonly_fields = ('created_at', 'updated_at')
+
+    @admin.register(OrganisationUser)
+    class OrganisationUserAdmin(admin.ModelAdmin):
+        list_display = ('user', 'organisation')
+        list_filter = ('organisation',)
+        search_fields = ('user__username', 'user__email', 'organisation__name')
+        raw_id_fields = ('user', 'organisation')
+
+    @admin.register(OrganisationGroup)
+    class OrganisationGroupAdmin(admin.ModelAdmin):
+        list_display = ('group', 'organisation')
+        list_filter = ('organisation',)
+        search_fields = ('group__name', 'organisation__name')
+        raw_id_fields = ('group', 'organisation')
+
     from terno_dbi.core.models import ServiceToken
     from django.contrib import messages
     from django.utils.html import format_html
@@ -180,22 +200,26 @@ if not PARENT_APP_INSTALLED:
 
     @admin.register(ServiceToken)
     class ServiceTokenAdmin(admin.ModelAdmin):
-        list_display = ('name', 'key_prefix', 'token_type', 'is_active', 'last_used', 'created_at')
-        list_filter = ('token_type', 'is_active', 'created_at')
-        search_fields = ('name', 'key_prefix')
+        list_display = ('name', 'key_prefix', 'token_type', 'organisation', 'is_active', 'last_used', 'created_at')
+        list_filter = ('token_type', 'is_active', 'organisation', 'created_at')
+        search_fields = ('name', 'key_prefix', 'organisation__name')
         readonly_fields = ('key_hash', 'key_prefix', 'last_used', 'created_at', 'created_by')
-        fields = ('name', 'token_type', 'datasources', 'is_active', 'expires_at', 
+        fields = ('name', 'token_type', 'organisation', 'datasources', 'is_active', 'expires_at', 
                   'key_hash', 'key_prefix', 'last_used', 'created_at', 'created_by')
 
         filter_horizontal = ('datasources',)
+        raw_id_fields = ('organisation',)
 
         def save_model(self, request, obj, form, change):
             if not change:
 
+                organisation = form.cleaned_data.get('organisation')
+
                 token, full_key = generate_service_token(
                     name=obj.name,
                     token_type=obj.token_type,
-                    created_by=request.user
+                    created_by=request.user,
+                    organisation=organisation
                 )
 
                 obj.id = token.id

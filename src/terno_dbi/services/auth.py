@@ -7,11 +7,12 @@ from terno_dbi.core.models import ServiceToken, DataSource
 
 
 def generate_service_token(
-    name: str, 
+    name: str,
     token_type: str = ServiceToken.TokenType.QUERY, 
     created_by=None,
     expires_at=None,
-    datasource_ids: Optional[List[int]] = None
+    datasource_ids: Optional[List[int]] = None,
+    organisation=None
 ) -> Tuple[ServiceToken, str]:
     random_part = secrets.token_urlsafe(32)
     prefix_type = token_type.lower()
@@ -26,6 +27,7 @@ def generate_service_token(
         key_prefix=prefix,
         key_hash=key_hash,
         created_by=created_by,
+        organisation=organisation,
         is_active=True,
         expires_at=expires_at
     )

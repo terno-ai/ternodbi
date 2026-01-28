@@ -24,6 +24,10 @@ DEFAULTS = {
     "MAX_QUERY_ROWS": 10000,
     "QUERY_TIMEOUT": 300,
     "MAX_EXPORT_ROWS": 100000,
+
+    # Access Control
+    "ALLOW_SUPERTOKEN": False,  # If True, tokens without org/DS links can access all
+    "REQUIRE_TOKEN_SCOPE": True,  # If True, tokens must have org or DS links to access anything
 }
 
 

@@ -3,12 +3,11 @@ import logging
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
-from django.shortcuts import get_object_or_404
 
 from terno_dbi.core import models
 from terno_dbi.core import conf
 from terno_dbi.services.query import (
-    execute_native_sql, 
+    execute_native_sql,
     execute_paginated_query,
     export_native_sql_result
 )
@@ -42,52 +41,39 @@ def info(request):
 @require_service_auth()
 @require_http_methods(["GET"])
 def list_datasources(request):
-    datasources = models.DataSource.objects.filter(enabled=True)
+    datasources = request.allowed_datasources
 
     data = []
     for ds in datasources:
-
         data.append({
             'id': ds.id,
             'name': ds.display_name,
             'type': ds.type,
-
         })
 
     return JsonResponse({
         "status": "success",
-        "datasources": data
+        "datasources": data,
+        "count": len(data)
     })
 
 
 @require_service_auth()
 @require_http_methods(["GET"])
 def get_datasource(request, datasource_identifier):
-    try:
-        ds = resolve_datasource(datasource_identifier)
-        return JsonResponse({
-            "status": "success",
-            "id": ds.id,
-            "datasource_name": ds.display_name,
-            "type": ds.type,
-        })
-    except Exception as e:
-        return JsonResponse({
-            "status": "error",
-            "error": str(e)
-        }, status=404)
+    ds = request.resolved_datasource
+    return JsonResponse({
+        "status": "success",
+        "id": ds.id,
+        "datasource_name": ds.display_name,
+        "type": ds.type,
+    })
 
 
 @require_service_auth()
 @require_http_methods(["GET"])
 def list_tables(request, datasource_identifier):
-    try:
-        ds = resolve_datasource(datasource_identifier)
-    except Exception as e:
-        return JsonResponse({
-            "status": "error",
-            "error": str(e)
-        }, status=404)
+    ds = request.resolved_datasource
 
     role_ids_str = request.GET.get('roles', '')
 
@@ -163,10 +149,7 @@ def get_table_columns(request, table_id):
 @require_service_auth()
 @require_http_methods(["GET"])
 def get_schema(request, datasource_identifier):
-    try:
-        datasource = resolve_datasource(datasource_identifier)
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=404)
+    datasource = request.resolved_datasource
 
     tables = models.Table.objects.filter(data_source=datasource)
     schema = []
@@ -197,13 +180,7 @@ def get_schema(request, datasource_identifier):
 @require_service_auth()
 @require_http_methods(["GET"])
 def list_foreign_keys(request, datasource_identifier):
-    try:
-        ds = resolve_datasource(datasource_identifier)
-    except Exception as e:
-        return JsonResponse({
-            "status": "error",
-            "error": str(e)
-        }, status=404)
+    ds = request.resolved_datasource
 
     fks = models.ForeignKey.objects.filter(
         constrained_table__data_source=ds
@@ -229,14 +206,8 @@ def list_foreign_keys(request, datasource_identifier):
 @require_service_auth()
 @require_http_methods(["GET"])
 def get_sample_data(request, table_id):
-    try:
-        table = models.Table.objects.get(id=table_id)
-        ds = table.data_source
-    except models.Table.DoesNotExist:
-        return JsonResponse({
-            "status": "error",
-            "error": f"Table {table_id} not found"
-        }, status=404)
+    table = request.resolved_table
+    ds = table.data_source
 
     try:
         rows = int(request.GET.get("rows", 10))
@@ -277,20 +248,30 @@ def get_sample_data(request, table_id):
 def execute_query(request, datasource_identifier=None):
     try:
         body = json.loads(request.body)
-        ds_identifier = datasource_identifier or body.get("datasource") or body.get("datasourceId")
-        if not ds_identifier:
-            return JsonResponse({
-                "status": "error",
-                "error": "Datasource name or ID required"
-            }, status=400)
 
-        try:
-            ds = resolve_datasource(ds_identifier)
-        except Exception as e:
-            return JsonResponse({
-                "status": "error",
-                "error": str(e)
-            }, status=404)
+        if datasource_identifier and hasattr(request, 'resolved_datasource'):
+            ds = request.resolved_datasource
+        else:
+            ds_identifier = body.get("datasource") or body.get("datasourceId")
+            if not ds_identifier:
+                return JsonResponse({
+                    "status": "error",
+                    "error": "Datasource name or ID required"
+                }, status=400)
+
+            try:
+                ds = resolve_datasource(ds_identifier)
+
+                if not request.allowed_datasources.filter(id=ds.id).exists():
+                    return JsonResponse({
+                        "status": "error",
+                        "error": "Access denied to datasource"
+                    }, status=403)
+            except Exception as e:
+                return JsonResponse({
+                    "status": "error",
+                    "error": str(e)
+                }, status=404)
 
         sql = body.get("sql")
         if not sql:
@@ -360,20 +341,29 @@ def execute_query(request, datasource_identifier=None):
 def export_query(request, datasource_identifier=None):
     try:
         body = json.loads(request.body)
-        ds_identifier = datasource_identifier or body.get("datasource") or body.get("datasourceId")
-        if not ds_identifier:
-            return JsonResponse({
-                "status": "error",
-                "error": "Datasource name or ID required"
-            }, status=400)
 
-        try:
-            ds = resolve_datasource(ds_identifier)
-        except Exception as e:
-            return JsonResponse({
-                "status": "error",
-                "error": str(e)
-            }, status=404)
+        if datasource_identifier and hasattr(request, 'resolved_datasource'):
+            ds = request.resolved_datasource
+        else:
+            ds_identifier = body.get("datasource") or body.get("datasourceId")
+            if not ds_identifier:
+                return JsonResponse({
+                    "status": "error",
+                    "error": "Datasource name or ID required"
+                }, status=400)
+
+            try:
+                ds = resolve_datasource(ds_identifier)
+                if not request.allowed_datasources.filter(id=ds.id).exists():
+                    return JsonResponse({
+                        "status": "error",
+                        "error": "Access denied to datasource"
+                    }, status=403)
+            except Exception as e:
+                return JsonResponse({
+                    "status": "error",
+                    "error": str(e)
+                }, status=404)
 
         sql = body.get("sql")
         if not sql:

@@ -51,6 +51,9 @@ def create_datasource(request):
                 "status": "error",
                 "error": f"Connection validation failed: {error}"
             }, status=400)
+
+        organisation = getattr(request, 'token_organisation', None)
+
         ds = models.DataSource.objects.create(
             display_name=name,
             type=db_type.lower(),
@@ -58,6 +61,7 @@ def create_datasource(request):
             connection_json=connection_json,
             description=description,
             dialect_name=db_type.lower(),
+            organisation=organisation,
             enabled=True,
         )
         from terno_dbi.services.schema_utils import sync_metadata
@@ -95,13 +99,7 @@ def create_datasource(request):
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["PATCH"])
 def update_datasource(request, datasource_identifier):
-    try:
-        ds = resolve_datasource(datasource_identifier, enabled_only=False)
-    except Exception as e:
-        return JsonResponse({
-            "status": "error",
-            "error": str(e)
-        }, status=404)
+    ds = request.resolved_datasource
 
     try:
         body = json.loads(request.body)
@@ -143,13 +141,7 @@ def update_datasource(request, datasource_identifier):
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["DELETE"])
 def delete_datasource(request, datasource_identifier):
-    try:
-        ds = resolve_datasource(datasource_identifier, enabled_only=False)
-    except Exception as e:
-        return JsonResponse({
-            "status": "error",
-            "error": str(e)
-        }, status=404)
+    ds = request.resolved_datasource
 
     name = ds.display_name
     ds.delete()
@@ -164,13 +156,7 @@ def delete_datasource(request, datasource_identifier):
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["PATCH"])
 def update_table(request, table_id):
-    try:
-        table = models.Table.objects.get(id=table_id)
-    except models.Table.DoesNotExist:
-        return JsonResponse({
-            "status": "error",
-            "error": f"Table {table_id} not found"
-        }, status=404)
+    table = request.resolved_table
 
     try:
         body = json.loads(request.body)
@@ -207,13 +193,7 @@ def update_table(request, table_id):
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["PATCH"])
 def update_column(request, column_id):
-    try:
-        column = models.TableColumn.objects.get(id=column_id)
-    except models.TableColumn.DoesNotExist:
-        return JsonResponse({
-            "status": "error",
-            "error": f"Column {column_id} not found"
-        }, status=404)
+    column = request.resolved_column
 
     try:
         body = json.loads(request.body)
@@ -234,20 +214,10 @@ def update_column(request, column_id):
             "message": f"Column updated: {', '.join(updated)}",
             "column": {
                 "id": column.id,
-                "name":column.public_name,
+                "name": column.public_name,
                 "data_type": column.data_type,
             }
         })
-
-    except json.JSONDecodeError:
-        return JsonResponse({
-            "status": "error",
-            "error": "Invalid JSON in request body"
-        }, status=400)
-
-
-
-
 
     except json.JSONDecodeError:
         return JsonResponse({
@@ -306,13 +276,7 @@ def validate_connection(request):
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["POST"])
 def sync_metadata(request, datasource_identifier):
-    try:
-        ds = resolve_datasource(datasource_identifier, enabled_only=False)
-    except Exception as e:
-        return JsonResponse({
-            "status": "error",
-            "error": str(e)
-        }, status=404)
+    ds = request.resolved_datasource
 
     try:
         body = json.loads(request.body)
@@ -340,10 +304,7 @@ def sync_metadata(request, datasource_identifier):
 @require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
 @require_http_methods(["GET"])
 def get_table_info(request, datasource_identifier, table_name):
-    try:
-        ds = resolve_datasource(datasource_identifier)
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=404)
+    ds = request.resolved_datasource
 
     try:
         table = models.Table.objects.get(data_source=ds, name=table_name)

@@ -111,6 +111,7 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "dbi_server.settings"
+pythonpath = ["server", "src"]
 python_files = ["test_*.py", "*_test.py"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')"

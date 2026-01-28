@@ -3,7 +3,72 @@ from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.models import Group, User
 
 
+class CoreOrganisation(models.Model):
+    name = models.CharField(max_length=255)
+    subdomain = models.CharField(max_length=100, unique=True)
+    owner = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='core_organisations'
+    )
+    verified = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
+
+    class Meta:
+        db_table = 'core_organisation'
+
+    def __str__(self):
+        return f"{self.name} - {self.subdomain}"
+
+
+class OrganisationUser(models.Model):
+    organisation = models.ForeignKey(
+        CoreOrganisation,
+        on_delete=models.CASCADE,
+        related_name='organisation_users'
+    )
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
+
+    class Meta:
+        db_table = 'core_organisationuser'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['organisation', 'user'],
+                name='core_unique_org_user'
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user.username}"
+
+
+class OrganisationGroup(models.Model):
+    organisation = models.ForeignKey(
+        CoreOrganisation,
+        on_delete=models.CASCADE,
+        related_name='organisation_groups'
+    )
+    group = models.ForeignKey(Group, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
+
+    class Meta:
+        db_table = 'core_organisationgroup'
+
+    def __str__(self):
+        return f"{self.group.name}"
+
+
+# =============================================================================
+# DEPRECATED ABSTRACT BASES (for backwards compatibility during migration)
+# =============================================================================
+
 class OrganisationBase(models.Model):
+    """DEPRECATED: Use CoreOrganisation instead."""
     name = models.CharField(max_length=255)
     subdomain = models.CharField(max_length=100, unique=True)
     owner = models.ForeignKey(
@@ -24,6 +89,7 @@ class OrganisationBase(models.Model):
 
 
 class OrganisationUserBase(models.Model):
+    """DEPRECATED: Use OrganisationUser instead."""
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
@@ -36,7 +102,7 @@ class OrganisationUserBase(models.Model):
 
 
 class OrganisationDataSourceBase(models.Model):
-    # Note: datasource FK must be defined in child class to avoid cross-app reference issues
+    """DEPRECATED: Use DataSource.organisation FK instead."""
     created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
     is_external = models.BooleanField(default=False)
@@ -49,6 +115,7 @@ class OrganisationDataSourceBase(models.Model):
 
 
 class OrganisationGroupBase(models.Model):
+    """DEPRECATED: Use OrganisationGroup instead."""
     group = models.ForeignKey(Group, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
@@ -93,14 +160,20 @@ class DataSource(models.Model):
     dialect_version = models.CharField(
         max_length=20, null=True, blank=True, default='',
         help_text="Auto-generated on save")
+    organisation = models.ForeignKey(
+        CoreOrganisation,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='datasources',
+        help_text="Organisation this datasource belongs to"
+    )
 
     class Meta:
         db_table = 'terno_datasource'
 
     def __str__(self):
         return self.display_name
-
-
 
 
 class Table(models.Model):
@@ -287,11 +360,21 @@ class ServiceToken(models.Model):
         default=TokenType.QUERY
     )
 
+    organisation = models.ForeignKey(
+        CoreOrganisation,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='service_tokens',
+        help_text="If set, token can access all datasources in this organisation"
+    )
+
+    # Granular datasource override
     datasources = models.ManyToManyField(
         DataSource,
         blank=True,
         related_name='service_tokens',
-        help_text="If empty, token has global access. Otherwise limited to these datasources."
+        help_text="If set, overrides org scope with explicit datasource list"
     )
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
@@ -334,8 +417,39 @@ class ServiceToken(models.Model):
         import hashlib
         return hashlib.sha256(key.encode()).hexdigest()
 
-    def has_access_to(self, datasource):
+    def get_accessible_datasources(self):
+        """
+        Returns QuerySet of datasources this token can access.
+        Priority:
+        1. Explicit datasource links (most restrictive)
+        2. Organisation scope (all DS in org)
+        3. No restrictions (supertoken - configurable)
+        """
+        from terno_dbi.core import conf
+
+        if self.datasources.exists():
+            return self.datasources.filter(enabled=True)
+        elif self.organisation:
+            return DataSource.objects.filter(
+                organisation=self.organisation,
+                enabled=True
+            )
+        else:
+            if conf.get('ALLOW_SUPERTOKEN'):
+                return DataSource.objects.filter(enabled=True)
+            else:
+                return DataSource.objects.none()
+
+    def has_access_to_datasource(self, datasource):
         """Check if token has access to a specific datasource."""
-        if not self.datasources.exists():
-            return True
-        return self.datasources.filter(id=datasource.id).exists()
+        return self.get_accessible_datasources().filter(id=datasource.id).exists()
+
+    def has_access_to_table(self, table):
+        return self.has_access_to_datasource(table.data_source)
+
+    def has_access_to_column(self, column):
+        return self.has_access_to_datasource(column.table.data_source)
+
+    def has_access_to(self, datasource):
+        """DEPRECATED: Use has_access_to_datasource instead."""
+        return self.has_access_to_datasource(datasource)
