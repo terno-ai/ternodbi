@@ -450,6 +450,7 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
         "tables_updated": 0,
         "tables_skipped": 0,
         "columns_created": 0,
+        "columns_deleted": 0,
         "foreign_keys_created": 0,
         "tables": []
     }
