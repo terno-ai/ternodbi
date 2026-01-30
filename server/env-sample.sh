@@ -48,3 +48,18 @@ export DBI_ALLOWED_HOSTS="localhost,127.0.0.1"
 # TernoDBI will create and use its own db.sqlite3 in the server directory.
 export DATABASE_ENGINE=""
 export DJANGO_PROJECT_PATH=""
+
+
+# Logging Configuration
+#==========================================
+# Control the verbosity of TernoDBI logs.
+# Available levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+# For development - show all logs including debug info:
+# export TERNODBI_LOG_LEVEL="DEBUG"
+
+# For production - show only warnings and errors (recommended):
+# export TERNODBI_LOG_LEVEL="WARNING"
+
+# Default: INFO (shows normal operations without debug details)
+export TERNODBI_LOG_LEVEL="INFO"

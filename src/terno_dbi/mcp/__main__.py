@@ -1,4 +1,7 @@
+import logging
 import sys
+
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -11,6 +14,7 @@ def main():
         sys.exit(1)
 
     server_type = sys.argv[1].lower()
+    logger.info("Starting MCP server: type='%s'", server_type)
 
     if server_type == "query":
         from terno_dbi.mcp.query_server import main as query_main
@@ -19,6 +23,7 @@ def main():
         from terno_dbi.mcp.admin_server import main as admin_main
         admin_main()
     else:
+        logger.error("Unknown MCP server type: '%s'", server_type)
         print(f"Unknown server type: {server_type}")
         print("Use 'query' or 'admin'")
         sys.exit(1)

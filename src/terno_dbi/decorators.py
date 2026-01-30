@@ -1,7 +1,10 @@
+import logging
 from functools import wraps
 from django.http import JsonResponse
 from terno_dbi.core.models import Table, TableColumn
 from terno_dbi.core import conf
+
+logger = logging.getLogger(__name__)
 
 
 def require_service_auth(allowed_types=None):
@@ -12,12 +15,17 @@ def require_service_auth(allowed_types=None):
         @wraps(view_func)
         def _wrapped_view(request, *args, **kwargs):
             if not hasattr(request, "service_token"):
+                logger.warning("Authentication required: request missing service_token")
                 return JsonResponse({"error": "Authentication required"}, status=401)
 
             token = request.service_token
 
             if allowed_types:
                 if token.token_type not in allowed_types:
+                    logger.warning(
+                        "Permission denied: token '%s' (type=%s) not in allowed_types=%s",
+                        token.name, token.token_type, allowed_types
+                    )
                     return JsonResponse(
                         {"error": f"Insufficient permissions. Token type '{token.token_type}' not allowed."},
                         status=403
@@ -30,6 +38,10 @@ def require_service_auth(allowed_types=None):
             if conf.get('REQUIRE_TOKEN_SCOPE'):
                 if not token.datasources.exists() and not token.organisation:
                     if not conf.get('ALLOW_SUPERTOKEN'):
+                        logger.warning(
+                            "Access denied: token '%s' has no datasource or organisation scope",
+                            token.name
+                        )
                         return JsonResponse(
                             {"error": "Token has no datasource or organisation scope. Access denied."},
                             status=403
@@ -46,13 +58,19 @@ def require_service_auth(allowed_types=None):
                     from terno_dbi.services.resolver import resolve_datasource
                     ds = resolve_datasource(ds_identifier)
                     if not allowed_ds.filter(id=ds.id).exists():
+                        logger.warning(
+                            "Datasource access denied: token '%s' attempted access to datasource '%s'",
+                            token.name, ds_identifier
+                        )
                         return JsonResponse(
                             {"error": "Access denied to datasource"},
                             status=403
                         )
 
                     request.resolved_datasource = ds
+                    logger.debug("Datasource resolved: %s -> id=%d", ds_identifier, ds.id)
                 except Exception as e:
+                    logger.warning("Datasource not found: %s", ds_identifier)
                     return JsonResponse({"error": f"Datasource not found: {ds_identifier}"}, status=404)
 
             table_id = kwargs.get('table_id')
@@ -60,12 +78,17 @@ def require_service_auth(allowed_types=None):
                 try:
                     table = Table.objects.select_related('data_source').get(id=table_id)
                     if not allowed_ds.filter(id=table.data_source_id).exists():
+                        logger.warning(
+                            "Table access denied: token '%s' attempted access to table_id=%s",
+                            token.name, table_id
+                        )
                         return JsonResponse(
                             {"error": "Access denied to table"},
                             status=403
                         )
                     request.resolved_table = table
                 except Table.DoesNotExist:
+                    logger.warning("Table not found: table_id=%s", table_id)
                     return JsonResponse({"error": f"Table not found: {table_id}"}, status=404)
 
             column_id = kwargs.get('column_id')
@@ -73,12 +96,17 @@ def require_service_auth(allowed_types=None):
                 try:
                     column = TableColumn.objects.select_related('table__data_source').get(id=column_id)
                     if not allowed_ds.filter(id=column.table.data_source_id).exists():
+                        logger.warning(
+                            "Column access denied: token '%s' attempted access to column_id=%s",
+                            token.name, column_id
+                        )
                         return JsonResponse(
                             {"error": "Access denied to column"},
                             status=403
                         )
                     request.resolved_column = column
                 except TableColumn.DoesNotExist:
+                    logger.warning("Column not found: column_id=%s", column_id)
                     return JsonResponse({"error": f"Column not found: {column_id}"}, status=404)
 
             return view_func(request, *args, **kwargs)

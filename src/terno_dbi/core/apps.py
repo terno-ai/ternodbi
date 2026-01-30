@@ -1,6 +1,9 @@
 """Django app configuration for Terno DBI."""
 
+import logging
 from django.apps import AppConfig
+
+logger = logging.getLogger(__name__)
 
 
 class TernoDBIConfig(AppConfig):
@@ -15,4 +18,5 @@ class TernoDBIConfig(AppConfig):
         # Connect cache invalidation signals using direct model references
         from terno_dbi.core.signals import connect_cache_invalidation_signals
         connect_cache_invalidation_signals()
+        logger.debug("TernoDBI app initialized: cache invalidation signals connected")
 

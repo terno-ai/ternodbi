@@ -1,9 +1,11 @@
-
+import logging
 from datetime import timedelta
 from django.utils import timezone
 from django.core.management.base import BaseCommand
 from terno_dbi.services.auth import generate_service_token
 from terno_dbi.core.models import ServiceToken
+
+logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -52,6 +54,11 @@ class Command(BaseCommand):
                 datasource_ids=datasource_ids
             )
             
+            logger.info(
+                "Token issued via CLI: name='%s', type='%s', expires=%s, datasources=%s",
+                name, token_type, expires_at or 'never', datasource_ids or 'global'
+            )
+            
             self.stdout.write(self.style.SUCCESS(f"Successfully issued token for '{name}'"))
             self.stdout.write("---------------------------------------------------------------")
             self.stdout.write(f"TOKEN TYPE: {token_type.upper()}")
@@ -70,4 +77,5 @@ class Command(BaseCommand):
             self.stdout.write("---------------------------------------------------------------")
             self.stdout.write(self.style.WARNING("SAVE THIS KEY NOW. It will never be shown again."))
         except Exception as e:
+            logger.error("Failed to issue token via CLI: name='%s', error=%s", name, str(e))
             self.stdout.write(self.style.ERROR(f"Error creating token: {e}"))

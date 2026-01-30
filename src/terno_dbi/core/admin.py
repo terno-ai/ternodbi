@@ -1,6 +1,9 @@
+import logging
 from django.contrib import admin
 from django.apps import apps
 import reversion.admin
+
+logger = logging.getLogger(__name__)
 
 PARENT_APP_INSTALLED = apps.is_installed('terno')
 
@@ -51,6 +54,7 @@ if not PARENT_APP_INSTALLED:
             from django.contrib import messages
 
             super().save_model(request, obj, form, change)
+            logger.info("DataSource saved via admin: id=%s, name='%s', change=%s", obj.id, obj.display_name, change)
 
             if not change and obj.enabled:
                 try:
@@ -58,6 +62,7 @@ if not PARENT_APP_INSTALLED:
                     sync_result = sync_metadata(obj.id)
 
                     if 'error' in sync_result:
+                        logger.warning("Metadata sync failed for '%s': %s", obj.display_name, sync_result['error'])
                         messages.warning(
                             request,
                             f"Datasource saved, but metadata sync failed: {sync_result['error']}"
@@ -65,11 +70,13 @@ if not PARENT_APP_INSTALLED:
                     else:
                         tables_created = sync_result.get('tables_created', 0)
                         columns_created = sync_result.get('columns_created', 0)
+                        logger.info("Metadata synced for '%s': %d tables, %d columns", obj.display_name, tables_created, columns_created)
                         messages.success(
                             request,
                             f"Metadata synced: {tables_created} tables and {columns_created} columns discovered."
                         )
                 except Exception as e:
+                    logger.error("Metadata sync exception for '%s': %s", obj.display_name, str(e))
                     messages.warning(
                         request,
                         f"Datasource saved, but metadata sync failed: {str(e)}"
@@ -77,25 +84,30 @@ if not PARENT_APP_INSTALLED:
 
         def trigger_sync_metadata(self, request, queryset):
             from django.contrib import messages
-            from terno_dbi.services.schema_utils import sync_metadata  
+            from terno_dbi.services.schema_utils import sync_metadata
+            logger.info("Metadata sync triggered via admin for %d datasources", queryset.count())
             for ds in queryset:
                 if not ds.enabled:
+                    logger.debug("Skipped disabled datasource: '%s'", ds.display_name)
                     messages.warning(request, f"Skipped '{ds.display_name}' - datasource is not enabled.")
                     continue
                 try:
                     sync_result = sync_metadata(ds.id, overwrite=False)  
                     if 'error' in sync_result:
+                        logger.error("Sync failed for '%s': %s", ds.display_name, sync_result['error'])
                         messages.error(request, f"'{ds.display_name}': {sync_result['error']}")
                     else:
                         tables_created = sync_result.get('tables_created', 0)
                         tables_updated = sync_result.get('tables_updated', 0)
                         columns_created = sync_result.get('columns_created', 0)
+                        logger.info("Sync completed for '%s': %d new tables, %d updated, %d columns", ds.display_name, tables_created, tables_updated, columns_created)
                         messages.success(
                             request,
                             f"'{ds.display_name}': Synced {tables_created} new tables, "
                             f"{tables_updated} updated, {columns_created} new columns."
                         )
                 except Exception as e:
+                    logger.exception("Sync exception for '%s'", ds.display_name)
                     messages.error(request, f"'{ds.display_name}': Sync failed - {str(e)}")
 
         trigger_sync_metadata.short_description = "Sync metadata (discover tables & columns)"

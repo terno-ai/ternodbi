@@ -1,4 +1,7 @@
+import logging
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 DEFAULTS = {
     # Pagination
@@ -33,9 +36,15 @@ DEFAULTS = {
 
 def get(key: str):
     user_settings = getattr(settings, "DBI_LAYER", {})
-    return user_settings.get(key, DEFAULTS.get(key))
+    value = user_settings.get(key, DEFAULTS.get(key))
+    if key in user_settings:
+        logger.debug("Config '%s' loaded from user settings: %s", key, value)
+    return value
 
 
 def get_all():
     user_settings = getattr(settings, "DBI_LAYER", {})
-    return {**DEFAULTS, **user_settings}
+    merged = {**DEFAULTS, **user_settings}
+    if user_settings:
+        logger.debug("Config loaded with %d user overrides", len(user_settings))
+    return merged
