@@ -336,7 +336,7 @@ class TestSyncMetadata:
         # The view is named sync_metadata, same as the service function
         from terno_dbi.core.admin_service.views import sync_metadata as sync_metadata_view
         
-        mock_sync.return_value = None  # sync_metadata returns None
+        mock_sync.return_value = {}  # sync_metadata returns dict
         
         request = request_factory.post(
             f'/api/admin/datasources/{setup_admin_data["datasource"].id}/sync/'

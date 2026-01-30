@@ -66,7 +66,11 @@ class TestDataSourceAdmin:
         
         ds1 = MagicMock(spec=DataSource, id=1, display_name="DS1", enabled=True)
         ds2 = MagicMock(spec=DataSource, id=2, display_name="DS2", enabled=False)
-        queryset = [ds1, ds2]
+        
+        # Mock QuerySet behavior
+        queryset = MagicMock()
+        queryset.__iter__.return_value = [ds1, ds2]
+        queryset.count.return_value = 2
         
         with patch('terno_dbi.services.schema_utils.sync_metadata') as mock_sync, \
              patch('django.contrib.messages.success') as mock_success, \
