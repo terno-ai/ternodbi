@@ -524,3 +524,44 @@ class TestClientErrorHandling:
         
         with pytest.raises(Exception):
             client.list_datasources()
+
+
+
+    @responses.activate
+    def test_execute_query_error_branch(self):
+        """Should return error dict without raising exception if status is error."""
+        from terno_dbi.client import TernoDBIClient
+        
+        responses.add(
+            responses.POST,
+            'https://test.com/api/query/datasources/1/query/',
+            json={'status': 'error', 'error': 'DB Error'},
+            status=200
+        )
+        
+        client = TernoDBIClient(base_url='https://test.com', api_key='key')
+        
+        result = client.execute_query(1, "SELECT")
+        assert result['status'] == 'error'
+        assert result['error'] == 'DB Error'
+
+    @responses.activate
+    def test_get_all_tables_info_payload(self):
+        """Should include table_names in payload."""
+        from terno_dbi.client import TernoDBIClient
+        
+        responses.add(
+            responses.POST,
+            'https://test.com/api/admin/datasources/1/tables/info/',
+            json={'tables': []},
+            status=200
+        )
+        
+        client = TernoDBIClient(base_url='https://test.com', api_key='key')
+        client.get_all_tables_info(1, table_names=['t1', 't2'])
+        
+        import json
+        body = json.loads(responses.calls[0].request.body)
+        assert body['table_names'] == ['t1', 't2']
+
+

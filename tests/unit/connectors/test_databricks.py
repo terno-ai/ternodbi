@@ -56,17 +56,11 @@ class TestDatabricksConnector:
             mock_inspect.return_value = mock_inspector
             mock_inspector.get_table_names.return_value = ['table1', 'table2']
             
-            # Partial fail: MetaData.reflect logic is:
-            # metadata.reflect(bind=engine, only=[table_name]...)
-            # We need to mock MetaData to raise exception for ONE table
-            
             with patch('terno_dbi.connectors.databricks.MetaData') as mock_metadata_cls:
                 mock_meta = MagicMock()
                 mock_metadata_cls.return_value = mock_meta
                 
-                # reflect side effect? 
-                # It's called in a loop.
-                # call 1: success, call 2: throw
+                # reflect side effect: success first, fail second
                 mock_meta.reflect.side_effect = [None, Exception("Table2 Fail")]
                 
                 connector._safe_reflect_metadata(mock_engine, schema='schema')
@@ -75,16 +69,16 @@ class TestDatabricksConnector:
                 assert mock_meta.reflect.call_count == 2
                 
     def test_safe_reflect_metadata_total_failure(self):
-        """Should handle top level inspection failure."""
+        """Should raise exception on top level inspection failure."""
         connector = DatabricksConnector("databricks://host/schema")
         mock_engine = MagicMock(spec=Engine)
         
         with patch('terno_dbi.connectors.databricks.inspect') as mock_inspect:
             mock_inspect.side_effect = Exception("Inspector Gadget Malfunction")
             
-            # Should not crash
-            result = connector._safe_reflect_metadata(mock_engine, schema='schema')
-            assert result is not None
+            # Should crash as user reverted safey block
+            with pytest.raises(Exception, match="Inspector Gadget Malfunction"):
+                connector._safe_reflect_metadata(mock_engine, schema='schema')
 
     def test_get_metadata_public(self):
         """Should call _safe_reflect_metadata and return MDatabase."""

@@ -166,6 +166,24 @@ class TestInfoEndpoint:
         
         assert response.status_code == 200
 
+@pytest.mark.django_db
+class TestGetDatasource:
+    """Tests for /api/query/datasources/<id>/"""
+
+    def test_returns_datasource(self, request_factory, setup_test_data):
+        """Should return datasource details."""
+        from terno_dbi.core.query_service.views import get_datasource
+        
+        request = request_factory.get(
+            f'/api/query/datasources/{setup_test_data["datasource"].id}/'
+        )
+        setup_request_for_view(request, setup_test_data['token'], datasource=setup_test_data['datasource'])
+        
+        response = get_datasource(request, setup_test_data['datasource'].id)
+        assert response.status_code == 200
+        data = json.loads(response.content)
+        assert data.get('id') == setup_test_data['datasource'].id
+
 
 @pytest.mark.django_db
 class TestListDatasources:
@@ -235,6 +253,27 @@ class TestListTables:
         assert 'tables' in data
         assert len(data['tables']) == 2  # users and orders tables
 
+    def test_list_tables_with_roles(self, request_factory, setup_test_data):
+        """Should filter tables by role."""
+        from terno_dbi.core.query_service.views import list_tables
+        
+        # We need to mock get_admin_config_object since roles query logic is complex
+        with patch('terno_dbi.core.query_service.views.get_admin_config_object') as mock_conf:
+             mock_cols = MagicMock()
+             mock_cols.filter.return_value.values.return_value = [{'public_name': 'ID', 'data_type': 'integer'}]
+             mock_conf.return_value = ([setup_test_data['table1']], mock_cols)
+             
+             request = request_factory.get(
+                f'/api/query/datasources/{setup_test_data["datasource"].id}/tables/?roles=1,2'
+             )
+             setup_request_for_view(request, setup_test_data['token'], datasource=setup_test_data['datasource'])
+             
+             response = list_tables(request, setup_test_data['datasource'].id)
+             assert response.status_code == 200
+             data = json.loads(response.content)
+             assert len(data['tables']) == 1 # Only table1 returned
+             mock_conf.assert_called()
+
     def test_unauthorized_datasource_behavior(self, request_factory, setup_test_data):
         """Test that views handle unauthorized datasources."""
         from terno_dbi.core.query_service.views import list_tables
@@ -293,6 +332,34 @@ class TestGetTableColumns:
         assert data.get('status') == 'success'
         assert 'columns' in data
         assert len(data['columns']) == 2  # id and email columns
+
+@pytest.mark.django_db
+class TestListColumns:
+    """Tests for /api/query/datasources/<id>/tables/<table_id>/columns/"""
+
+    def test_returns_columns(self, request_factory, setup_test_data):
+        """Should call get_table_columns."""
+        from terno_dbi.core.query_service.views import list_columns
+        
+        request = request_factory.get(
+            f'/api/query/datasources/{setup_test_data["datasource"].id}/tables/{setup_test_data["table1"].id}/columns/'
+        )
+        setup_request_for_view(request, setup_test_data['token'], table=setup_test_data['table1'])
+        
+        response = list_columns(request, setup_test_data['datasource'].id, setup_test_data['table1'].id)
+        assert response.status_code == 200
+        data = json.loads(response.content)
+        assert 'columns' in data
+
+    def test_get_table_columns_not_found(self, request_factory, setup_test_data):
+        """Should return 404 if table not found."""
+        from terno_dbi.core.query_service.views import get_table_columns
+        
+        request = request_factory.get('/api/query/tables/999/columns/')
+        setup_request_for_view(request, setup_test_data['token'])
+        
+        response = get_table_columns(request, 999)
+        assert response.status_code == 404
 
 
 @pytest.mark.django_db
@@ -421,3 +488,227 @@ class TestGetSampleData:
         response = get_sample_data(request, setup_test_data['table1'].id)
         
         assert response.status_code == 200
+
+    def test_get_sample_data_errors(self, request_factory, setup_test_data):
+        """Should handle errors in sample data."""
+        from terno_dbi.core.query_service.views import get_sample_data
+        
+        # Test invalid rows param
+        request = request_factory.get(
+            f'/api/query/tables/{setup_test_data["table1"].id}/sample/?rows=invalid'
+        )
+        setup_request_for_view(request, setup_test_data['token'], table=setup_test_data['table1'])
+        
+        # Mock execution error
+        with patch('terno_dbi.core.query_service.views.execute_native_sql', return_value={'status': 'error', 'error': 'DB crash'}):
+             response = get_sample_data(request, setup_test_data['table1'].id)
+             assert response.status_code == 500
+             assert 'DB crash' in response.content.decode()
+
+
+@pytest.mark.django_db
+class TestListForeignKeys:
+    """Tests for /api/query/datasources/<id>/foreign_keys/"""
+
+    def test_returns_foreign_keys(self, request_factory, setup_test_data):
+        """Should return FKs."""
+        from terno_dbi.core.query_service.views import list_foreign_keys
+        
+        request = request_factory.get(
+             f'/api/query/datasources/{setup_test_data["datasource"].id}/foreign_keys/'
+        )
+        setup_request_for_view(request, setup_test_data['token'], datasource=setup_test_data['datasource'])
+        
+        # Create FK to trigger loop
+        from terno_dbi.core.models import ForeignKey, TableColumn
+        fk = ForeignKey.objects.create(
+            constrained_table=setup_test_data['table1'],
+            referred_table=setup_test_data['table2'],
+            constrained_columns=setup_test_data['col1'],
+            referred_columns=setup_test_data['col2'] 
+        )
+        
+        response = list_foreign_keys(request, setup_test_data['datasource'].id)
+        assert response.status_code == 200
+        data = json.loads(response.content)
+        assert len(data['foreign_keys']) == 1
+        assert data['foreign_keys'][0]['constrained_table'] == 'Users'
+
+
+
+@pytest.mark.django_db
+class TestExportQuery:
+    """Tests for export_query endpoint."""
+
+    @patch('terno_dbi.core.query_service.views.export_native_sql_result')
+    @patch('terno_dbi.core.query_service.views.prepare_mdb')
+    @patch('terno_dbi.core.query_service.views.generate_native_sql')
+    def test_export_query_success(self, mock_gen, mock_prep, mock_export, request_factory, setup_test_data):
+        """Should export successfully."""
+        from terno_dbi.core.query_service.views import export_query
+        
+        mock_gen.return_value = {'status': 'success', 'native_sql': 'SELECT 1'}
+        # export_native_sql_result usually returns HttpResponse(csv_content)
+        mock_export_resp = MagicMock()
+        mock_export_resp.status_code = 200
+        mock_export.return_value = mock_export_resp
+        
+        request = request_factory.post(
+            f'/api/query/datasources/{setup_test_data["datasource"].id}/export',
+            data=json.dumps({'sql': 'SELECT * FROM users'}),
+            content_type='application/json'
+        )
+        setup_request_for_view(request, setup_test_data['token'], datasource=setup_test_data['datasource'])
+        
+        response = export_query(request, setup_test_data['datasource'].id)
+        assert response.status_code == 200
+
+    def test_export_query_validation_error(self, request_factory, setup_test_data):
+        """Should fail if SQL missing."""
+        from terno_dbi.core.query_service.views import export_query
+        
+        request = request_factory.post(
+            f'/api/query/datasources/{setup_test_data["datasource"].id}/export',
+            data=json.dumps({}),
+            content_type='application/json'
+        )
+        setup_request_for_view(request, setup_test_data['token'], datasource=setup_test_data['datasource'])
+        
+        response = export_query(request, setup_test_data['datasource'].id)
+        assert response.status_code == 400
+
+    @patch('terno_dbi.core.query_service.views.prepare_mdb')
+    @patch('terno_dbi.core.query_service.views.generate_native_sql')
+    def test_export_query_transform_error(self, mock_gen, mock_prep, request_factory, setup_test_data):
+        """Should fail if transform fails."""
+        from terno_dbi.core.query_service.views import export_query
+        
+        mock_gen.return_value = {'status': 'error', 'error': 'Invalid SQL'}
+        
+        request = request_factory.post(
+            f'/api/query/datasources/{setup_test_data["datasource"].id}/export',
+            data=json.dumps({'sql': 'bad sql'}),
+            content_type='application/json'
+        )
+        setup_request_for_view(request, setup_test_data['token'], datasource=setup_test_data['datasource'])
+        
+        response = export_query(request, setup_test_data['datasource'].id)
+        assert response.status_code == 400
+
+
+class TestExecuteQueryEdges:
+    """Additional edge cases for execute_query."""
+
+    @patch('terno_dbi.core.query_service.views.resolve_datasource')
+    def test_execute_query_permission_denied_body_ds(self, mock_resolve, request_factory, setup_test_data):
+        """Should return 403 if user lacks access to datasource in body."""
+        from terno_dbi.core.query_service.views import execute_query
+        from terno_dbi.core.models import DataSource
+
+        #ds in body
+        other_ds = MagicMock(spec=DataSource)
+        other_ds.id = 999
+        mock_resolve.return_value = other_ds
+
+        request = request_factory.post(
+            '/api/query/execute',
+            data=json.dumps({'datasource': 999, 'sql': 'SELECT 1'}),
+            content_type='application/json'
+        )
+        # Mock allow list does not include 999
+        token = setup_test_data['token']
+        # Mock token behavior
+        request.service_token = token
+        request.allowed_datasources = DataSource.objects.filter(id=setup_test_data['datasource'].id)
+
+        response = execute_query(request)
+        assert response.status_code == 403
+
+    def test_execute_query_json_error(self, request_factory, setup_test_data):
+         """Should return 400 on malformed JSON."""
+         from terno_dbi.core.query_service.views import execute_query
+         request = request_factory.post(
+             '/api/query/execute',
+             data='{invalid_json',
+             content_type='application/json'
+         )
+         setup_request_for_view(request, setup_test_data['token'])
+         
+         response = execute_query(request)
+         assert response.status_code == 400
+
+    @patch('terno_dbi.core.query_service.views.execute_paginated_query')
+    @patch('terno_dbi.core.query_service.views.prepare_mdb')
+    @patch('terno_dbi.core.query_service.views.generate_native_sql')
+    def test_execute_query_with_roles(self, mock_gen, mock_prep, mock_exec, request_factory, setup_test_data):
+        """Should handle roles in body."""
+        from terno_dbi.core.query_service.views import execute_query
+        
+        mock_gen.return_value = {'status': 'success'}
+        mock_exec.return_value = {'status': 'success'}
+        
+        request = request_factory.post(
+            '/api/query/execute',
+            data=json.dumps({'datasource': setup_test_data['datasource'].id, 'sql': 'SELECT 1', 'roles': [1]}),
+            content_type='application/json'
+        )
+        setup_request_for_view(request, setup_test_data['token'])
+        # Mock allow list
+        request.allowed_datasources = setup_test_data['token'].get_accessible_datasources()
+        
+        # We need to ensure resolve_datasource works without mocking if we pass valid ID
+        # But resolve_datasource uses DB, so it should be fine.
+        
+        response = execute_query(request)
+        assert response.status_code == 200
+
+    def test_export_query_with_body_datasource(self, request_factory, setup_test_data):
+        """Should handle datasource in body for export."""
+        from terno_dbi.core.query_service.views import export_query
+        
+        # We need to mock generating SQL to avoid actually running logic
+        with patch('terno_dbi.core.query_service.views.generate_native_sql', return_value={'status':'success', 'native_sql':'S'}), \
+             patch('terno_dbi.core.query_service.views.export_native_sql_result', return_value=MagicMock(status_code=200)):
+            
+            request = request_factory.post(
+                '/api/query/export',
+                data=json.dumps({'datasource': setup_test_data['datasource'].id, 'sql': 'SELECT 1', 'roles': [1]}),
+                content_type='application/json'
+            )
+            setup_request_for_view(request, setup_test_data['token'])
+            request.allowed_datasources = setup_test_data['token'].get_accessible_datasources()
+            
+            response = export_query(request)
+            assert response.status_code == 200
+
+    def test_export_query_json_error(self, request_factory):
+         """Should return 400 on malformed JSON for export."""
+         from terno_dbi.core.query_service.views import export_query
+         request = request_factory.post(
+             '/api/query/export',
+             data='{invalid',
+             content_type='application/json'
+         )
+         setup_request_for_view(request, MagicMock())
+         
+         response = export_query(request)
+         assert response.status_code == 400
+
+    @patch('terno_dbi.core.query_service.views.prepare_mdb')
+    @patch('terno_dbi.core.query_service.views.generate_native_sql')
+    def test_execute_query_transform_error(self, mock_gen, mock_prep, request_factory, setup_test_data):
+        """Should return 400 if transformation fails."""
+        from terno_dbi.core.query_service.views import execute_query
+        
+        mock_gen.return_value = {'status': 'error', 'error': 'Cannot transform'}
+        
+        request = request_factory.post(
+            f'/api/query/datasources/{setup_test_data["datasource"].id}/query/',
+            data=json.dumps({'sql': 'SELECT *'}),
+            content_type='application/json'
+        )
+        setup_request_for_view(request, setup_test_data['token'], datasource=setup_test_data['datasource'])
+        
+        response = execute_query(request, setup_test_data['datasource'].id)
+        assert response.status_code == 400
+        assert 'Cannot transform' in response.content.decode()

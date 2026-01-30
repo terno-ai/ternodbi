@@ -110,6 +110,29 @@ class TestConnectorFactory:
         assert 'secret_password' not in masked
         assert 'user' in masked
         assert '****' in masked
+        assert '****' in masked
+
+    def test_mask_connection_string_exception(self):
+        """Should handle non-string input gracefully."""
+        from terno_dbi.connectors import ConnectorFactory
+        
+        # Passing None or int might cause exception in _mask_connection_string string methods
+        # and trigger the except block returning '***masked***'
+        assert ConnectorFactory._mask_connection_string(None) == '***masked***'
+
+    def test_lazy_registration_on_get_supported(self):
+        """Should trigger registration if connectors empty."""
+        from terno_dbi.connectors import ConnectorFactory
+        
+        # Clear existing
+        ConnectorFactory._connectors = {}
+        
+        supported = ConnectorFactory.get_supported_databases()
+        
+        # detailed verification
+        assert 'postgres' in supported
+        assert ConnectorFactory._connectors  # Should be populated
+
 
 
 class TestBaseConnector:
@@ -166,7 +189,8 @@ class TestBaseConnector:
             'sqlite:///:memory:',
             pool_size=5,
             max_overflow=10,
-            pool_timeout=30
+            pool_timeout=30,
+            use_pool=True
         )
         
         assert connector.pool_size == 5

@@ -198,7 +198,7 @@ def list_foreign_keys(request, datasource_identifier):
 
     return JsonResponse({
         "status": "success",
-        "datasource_id": datasource_id,
+        "datasource_id": datasource_identifier,
         "foreign_keys": fk_data
     })
 

@@ -109,7 +109,45 @@ class TestOpenAIProvider:
         provider = OpenAIProvider(api_key="sk-test")
         
         # Should fail immediately on first try
+        # Should fail immediately on first try
         with pytest.raises(requests.exceptions.HTTPError):
             provider.generate([])
             
         assert mock_requests.call_count == 1
+
+    def test_generate_request_exception_4xx(self, mock_requests):
+        """Should raise immediately on 4xx error (non-429) that is NOT an HTTPError (e.g. manual raise)."""
+        provider = OpenAIProvider(api_key="test_key", max_retries=3)
+        
+        # Mock 400 Bad Request
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.text = "Bad Request"
+        # requests.post raises RequestException with response attached
+        error = requests.exceptions.RequestException("400 Error", response=mock_response)
+        
+        mock_requests.side_effect = error
+        
+        with pytest.raises(requests.exceptions.RequestException):
+            provider.generate([{"role": "user", "content": "hi"}])
+            
+        # Should verify retries did NOT happen (called once)
+        assert mock_requests.call_count == 1
+        
+        
+class TestMockLLMProvider:
+
+    def test_generate_returns_configured_responses(self):
+        """Should return responses in order."""
+        from terno_dbi.agents.llm_interface import MockLLMProvider
+        responses = ["Response 1", "Response 2"]
+        provider = MockLLMProvider(responses=responses)
+        
+        assert provider.generate([]) == "Response 1"
+        assert provider.generate([]) == "Response 2"
+        
+    def test_generate_exhausted(self):
+        """Should return fallback message when exhausted."""
+        from terno_dbi.agents.llm_interface import MockLLMProvider
+        provider = MockLLMProvider(responses=[])
+        assert provider.generate([]) == "No more mock responses configured."
