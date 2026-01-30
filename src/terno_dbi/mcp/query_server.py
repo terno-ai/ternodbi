@@ -142,6 +142,8 @@ Tip: To get the total row count of a table without scanning it, use 'offset' mod
 
 @server.call_tool()
 async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
+    logger.info("Query tool called: %s", name)
+    logger.debug("Tool arguments: %s", arguments)
     try:
         result = None
 
@@ -196,17 +198,21 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         else:
             result = {"error": f"Unknown tool: {name}"}
 
+        logger.debug("Tool %s completed successfully", name)
         return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
 
     except Exception as e:
-        logger.exception(f"Error in Query MCP tool {name}: {e}")
+        logger.exception("Error in Query MCP tool %s", name)
         return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
 
 
 async def run_server():
+    logger.info("Starting TernoDBI Query MCP Server")
+    logger.debug("API Base URL: %s", client.base_url)
     print(f"Starting TernoDBI Query MCP Server (API: {client.base_url})", file=sys.stderr)
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
+    logger.info("Query MCP Server stopped")
 
 
 def main():
