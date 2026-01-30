@@ -1,6 +1,9 @@
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.models import Group, User
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class CoreOrganisation(models.Model):
@@ -436,6 +439,7 @@ class ServiceToken(models.Model):
             )
         else:
             if conf.get('ALLOW_SUPERTOKEN'):
+                logger.warning("Supertoken access granted to token '%s' (no org/ds scope)", self.name)
                 return DataSource.objects.filter(enabled=True)
             else:
                 return DataSource.objects.none()

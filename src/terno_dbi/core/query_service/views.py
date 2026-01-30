@@ -75,6 +75,7 @@ def get_datasource(request, datasource_identifier):
 @require_http_methods(["GET"])
 def list_tables(request, datasource_identifier):
     ds = request.resolved_datasource
+    logger.debug("List tables requested: datasource='%s'", ds.display_name)
 
     role_ids_str = request.GET.get('roles', '')
 
@@ -183,6 +184,7 @@ def get_schema(request, datasource_identifier):
 @require_http_methods(["GET"])
 def list_foreign_keys(request, datasource_identifier):
     ds = request.resolved_datasource
+    logger.debug("List foreign keys requested: datasource='%s'", ds.display_name)
 
     fks = models.ForeignKey.objects.filter(
         constrained_table__data_source=ds
