@@ -4,11 +4,12 @@ import logging
 import asyncio
 
 # Add src to path to allow direct running from examples folder if package not installed
-sys.path.append(os.path.join(os.path.dirname(__file__), "../src"))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
 
-from terno_dbi.agents.agent import ChainOfThoughtAgent
-from terno_dbi.agents.llm_interface import OpenAIProvider
-from terno_dbi.agents.mcp_config import get_default_server_params
+
+from terno_dbi.examples.agents.agent import ChainOfThoughtAgent
+from terno_dbi.examples.agents.llm_interface import OpenAIProvider
+from terno_dbi.examples.agents.mcp_config import get_default_server_params
 
 logging.basicConfig(
     level=os.environ.get('TERNODBI_LOG_LEVEL', 'INFO'),

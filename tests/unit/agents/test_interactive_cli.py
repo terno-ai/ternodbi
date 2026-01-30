@@ -16,12 +16,12 @@ def mock_env():
 
 class TestInteractiveCLI:
 
-    @patch('terno_dbi.agents.interactive_cli.ChainOfThoughtAgent')
-    @patch('terno_dbi.agents.interactive_cli.OpenAIProvider')
+    @patch('terno_dbi.examples.agents.interactive_cli.ChainOfThoughtAgent')
+    @patch('terno_dbi.examples.agents.interactive_cli.OpenAIProvider')
     @patch('builtins.print')
     def test_main_input_flow(self, mock_print, mock_llm_cls, mock_agent_cls, mock_env):
         """Should handle input loop: empty -> query -> exit."""
-        from terno_dbi.agents.interactive_cli import main
+        from terno_dbi.examples.agents.interactive_cli import main
         
         os.environ['OPENAI_API_KEY'] = 'sk-test'
         os.environ['TERNODBI_QUERY_KEY'] = 'q-key'
@@ -41,11 +41,11 @@ class TestInteractiveCLI:
              mock_agent.run.assert_called_once()
              assert "Verified." in str(mock_print.call_args_list)
 
-    @patch('terno_dbi.agents.interactive_cli.getpass.getpass')
+    @patch('terno_dbi.examples.agents.interactive_cli.getpass.getpass')
     @patch('builtins.input', side_effect=["exit"])
     def test_main_getpass_flow(self, mock_input, mock_getpass, mock_env):
         """Should prompt for missing keys via getpass."""
-        from terno_dbi.agents.interactive_cli import main
+        from terno_dbi.examples.agents.interactive_cli import main
         
         # Explicitly remove keys to trigger getpass
         del os.environ['OPENAI_API_KEY']
@@ -55,7 +55,7 @@ class TestInteractiveCLI:
         # Missing all keys -> prompts
         mock_getpass.side_effect = ['sk-test', 'q-key', 'a-key']
         
-        with patch('terno_dbi.agents.interactive_cli.ChainOfThoughtAgent') as mock_agent_cls:
+        with patch('terno_dbi.examples.agents.interactive_cli.ChainOfThoughtAgent') as mock_agent_cls:
              mock_agent = AsyncMock()
              mock_agent.__aenter__.return_value = mock_agent
              mock_agent.__aexit__.return_value = None
@@ -67,10 +67,10 @@ class TestInteractiveCLI:
              assert os.environ['TERNODBI_QUERY_KEY'] == 'q-key'
              assert os.environ['TERNODBI_ADMIN_KEY'] == 'a-key'
 
-    @patch('terno_dbi.agents.interactive_cli.getpass.getpass', return_value="")
+    @patch('terno_dbi.examples.agents.interactive_cli.getpass.getpass', return_value="")
     def test_main_missing_openai_key_exit(self, mock_getpass, mock_env):
         """Should exit if OpenAI key not provided."""
-        from terno_dbi.agents.interactive_cli import main
+        from terno_dbi.examples.agents.interactive_cli import main
         
         # Force missing key
         if 'OPENAI_API_KEY' in os.environ:
@@ -80,11 +80,11 @@ class TestInteractiveCLI:
              asyncio.run(main())
              mock_print.assert_any_call("OpenAI API Key is required.")
 
-    @patch('terno_dbi.agents.interactive_cli.ChainOfThoughtAgent')
-    @patch('terno_dbi.agents.interactive_cli.OpenAIProvider')
+    @patch('terno_dbi.examples.agents.interactive_cli.ChainOfThoughtAgent')
+    @patch('terno_dbi.examples.agents.interactive_cli.OpenAIProvider')
     def test_keyboard_interrupt(self, mock_llm, mock_agent, mock_env):
         """Should handle KeyboardInterrupt gracefully."""
-        from terno_dbi.agents.interactive_cli import main
+        from terno_dbi.examples.agents.interactive_cli import main
         
         os.environ['OPENAI_API_KEY'] = 'sk-test'
         os.environ['TERNODBI_QUERY_KEY'] = 'q'
@@ -105,11 +105,11 @@ class TestInteractiveCLI:
                  
     def test_main_exception_safety(self, mock_env):
         """Should catch top-level exceptions."""
-        from terno_dbi.agents.interactive_cli import main
+        from terno_dbi.examples.agents.interactive_cli import main
         
         os.environ['OPENAI_API_KEY'] = 'sk-test'
         
-        with patch('terno_dbi.agents.interactive_cli.ChainOfThoughtAgent', side_effect=Exception("Explosion")):
+        with patch('terno_dbi.examples.agents.interactive_cli.ChainOfThoughtAgent', side_effect=Exception("Explosion")):
              with patch('builtins.print') as mock_print:
                   asyncio.run(main())
                   args, _ = mock_print.call_args

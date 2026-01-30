@@ -2,19 +2,19 @@ import pytest
 import os
 import requests
 from unittest.mock import MagicMock, patch
-from terno_dbi.agents.llm_interface import OpenAIProvider, LLMProvider
+from terno_dbi.examples.agents.llm_interface import OpenAIProvider, LLMProvider
 
 class TestOpenAIProvider:
 
     @pytest.fixture
     def mock_requests(self):
-        with patch("terno_dbi.agents.llm_interface.requests.post") as mock_post:
+        with patch("terno_dbi.examples.agents.llm_interface.requests.post") as mock_post:
             yield mock_post
 
     def test_init_no_api_key(self):
         """Test initialization warning when missing API key."""
         with patch.dict(os.environ, {}, clear=True):
-            with patch("terno_dbi.agents.llm_interface.logger.warning") as mock_warn:
+            with patch("terno_dbi.examples.agents.llm_interface.logger.warning") as mock_warn:
                 provider = OpenAIProvider(api_key=None)
                 mock_warn.assert_called_with("OpenAI API key not provided. Agent will likely fail.")
                 assert provider.api_key is None
@@ -56,7 +56,7 @@ class TestOpenAIProvider:
 
         mock_requests.side_effect = [resp_429, resp_429, resp_200]
 
-        with patch("terno_dbi.agents.llm_interface.time.sleep") as mock_sleep:
+        with patch("terno_dbi.examples.agents.llm_interface.time.sleep") as mock_sleep:
             provider = OpenAIProvider(api_key="sk-test", max_retries=3)
             result = provider.generate([{"role": "user", "content": "hi"}])
 
@@ -73,7 +73,7 @@ class TestOpenAIProvider:
 
         mock_requests.side_effect = [requests.exceptions.ConnectionError("Fail"), resp_200]
 
-        with patch("terno_dbi.agents.llm_interface.time.sleep") as mock_sleep:
+        with patch("terno_dbi.examples.agents.llm_interface.time.sleep") as mock_sleep:
             provider = OpenAIProvider(api_key="sk-test", max_retries=3)
             result = provider.generate([{"role": "user", "content": "hi"}])
 
@@ -84,7 +84,7 @@ class TestOpenAIProvider:
         """Test failure after max retries."""
         mock_requests.side_effect = requests.exceptions.Timeout("Timeout")
 
-        with patch("terno_dbi.agents.llm_interface.time.sleep"):
+        with patch("terno_dbi.examples.agents.llm_interface.time.sleep"):
             provider = OpenAIProvider(api_key="sk-test", max_retries=2)
             with pytest.raises(requests.exceptions.Timeout):
                 provider.generate([])
@@ -139,7 +139,7 @@ class TestMockLLMProvider:
 
     def test_generate_returns_configured_responses(self):
         """Should return responses in order."""
-        from terno_dbi.agents.llm_interface import MockLLMProvider
+        from terno_dbi.examples.agents.llm_interface import MockLLMProvider
         responses = ["Response 1", "Response 2"]
         provider = MockLLMProvider(responses=responses)
         
@@ -148,6 +148,6 @@ class TestMockLLMProvider:
         
     def test_generate_exhausted(self):
         """Should return fallback message when exhausted."""
-        from terno_dbi.agents.llm_interface import MockLLMProvider
+        from terno_dbi.examples.agents.llm_interface import MockLLMProvider
         provider = MockLLMProvider(responses=[])
         assert provider.generate([]) == "No more mock responses configured."

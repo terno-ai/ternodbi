@@ -6,10 +6,10 @@ import getpass # Import actual getpass module
 from unittest.mock import MagicMock, patch, AsyncMock
 
 # Import directly
-from terno_dbi.agents import interactive_cli as cli_mod
-from terno_dbi.agents import agent_usage_demo as demo_mod
-from terno_dbi.agents.interactive_cli import main as cli_main
-from terno_dbi.agents.agent_usage_demo import main as demo_main
+from terno_dbi.examples.agents import interactive_cli as cli_mod
+from terno_dbi.examples.agents import agent_usage_demo as demo_mod
+from terno_dbi.examples.agents.interactive_cli import main as cli_main
+from terno_dbi.examples.agents.agent_usage_demo import main as demo_main
 
 class TestAgentUsageDemo:
     
@@ -21,9 +21,9 @@ class TestAgentUsageDemo:
 
     @patch.dict(os.environ, {"OPENAI_API_KEY": "test"}, clear=True)
     def test_run_success(self):
-        with patch('terno_dbi.agents.agent_usage_demo.ChainOfThoughtAgent') as mock_agent_cls, \
-             patch('terno_dbi.agents.agent_usage_demo.get_default_server_params'), \
-             patch('terno_dbi.agents.agent_usage_demo.OpenAIProvider'):
+        with patch('terno_dbi.examples.agents.agent_usage_demo.ChainOfThoughtAgent') as mock_agent_cls, \
+             patch('terno_dbi.examples.agents.agent_usage_demo.get_default_server_params'), \
+             patch('terno_dbi.examples.agents.agent_usage_demo.OpenAIProvider'):
              
              mock_agent = AsyncMock()
              mock_agent.__aenter__.return_value = mock_agent

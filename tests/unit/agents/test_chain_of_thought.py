@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, AsyncMock
 from mcp import Tool
 from mcp.types import CallToolResult, TextContent
 
-from terno_dbi.agents.agent import ChainOfThoughtAgent
-from terno_dbi.agents.llm_interface import MockLLMProvider
+from terno_dbi.examples.agents.agent import ChainOfThoughtAgent
+from terno_dbi.examples.agents.llm_interface import MockLLMProvider
 
 
 class TestChainOfThoughtAgent:

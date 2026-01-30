@@ -2,7 +2,7 @@ import pytest
 import os
 import sys
 from unittest.mock import patch
-from terno_dbi.agents.mcp_config import get_default_server_params
+from terno_dbi.examples.agents.mcp_config import get_default_server_params
 
 class TestMCPConfig:
 

@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, AsyncMock, patch
 from mcp import Tool, ClientSession
 from mcp.types import CallToolResult, TextContent, ImageContent
 
-from terno_dbi.agents.agent import ChainOfThoughtAgent
-from terno_dbi.agents.llm_interface import MockLLMProvider
+from terno_dbi.examples.agents.agent import ChainOfThoughtAgent
+from terno_dbi.examples.agents.llm_interface import MockLLMProvider
 
 class TestAgentEdgeCases:
     
@@ -20,8 +20,8 @@ class TestAgentEdgeCases:
         """Test __aenter__ and __aexit__ logic."""
         
         # We need to mock stdio_client and ClientSession inside __aenter__
-        with patch('terno_dbi.agents.agent.stdio_client') as mock_stdio, \
-             patch('terno_dbi.agents.agent.ClientSession') as mock_session_cls:
+        with patch('terno_dbi.examples.agents.agent.stdio_client') as mock_stdio, \
+             patch('terno_dbi.examples.agents.agent.ClientSession') as mock_session_cls:
             
             mock_stdio.return_value.__aenter__.return_value = (MagicMock(), MagicMock())
             mock_session_instance = AsyncMock()
@@ -50,7 +50,7 @@ class TestAgentEdgeCases:
     def test_context_manager_connection_failure(self):
         """Test __aenter__ handling connection failures."""
         
-        with patch('terno_dbi.agents.agent.stdio_client', side_effect=Exception("Connection failed")):
+        with patch('terno_dbi.examples.agents.agent.stdio_client', side_effect=Exception("Connection failed")):
             params = MagicMock()
             params.command = "bad_server"
             

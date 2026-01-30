@@ -11,11 +11,11 @@ def mock_env():
 
 class TestAgentUsageDemo:
 
-    @patch('terno_dbi.agents.agent_usage_demo.ChainOfThoughtAgent')
-    @patch('terno_dbi.agents.agent_usage_demo.OpenAIProvider')
+    @patch('terno_dbi.examples.agents.agent_usage_demo.ChainOfThoughtAgent')
+    @patch('terno_dbi.examples.agents.agent_usage_demo.OpenAIProvider')
     def test_main_success(self, mock_llm_cls, mock_agent_cls, mock_env):
         """Should run agent successfully given correct env."""
-        from terno_dbi.agents.agent_usage_demo import main
+        from terno_dbi.examples.agents.agent_usage_demo import main
         
         # Setup env
         os.environ['OPENAI_API_KEY'] = 'sk-test'
@@ -42,7 +42,7 @@ class TestAgentUsageDemo:
 
     def test_main_no_api_key(self, mock_env):
         """Should exit if OPENAI_API_KEY missing."""
-        from terno_dbi.agents.agent_usage_demo import main
+        from terno_dbi.examples.agents.agent_usage_demo import main
         
         f = io.StringIO()
         with contextlib.redirect_stdout(f):
@@ -52,11 +52,11 @@ class TestAgentUsageDemo:
         output = f.getvalue()
         assert "Error: OPENAI_API_KEY environment variable is not set" in output
 
-    @patch('terno_dbi.agents.agent_usage_demo.ChainOfThoughtAgent')
-    @patch('terno_dbi.agents.agent_usage_demo.OpenAIProvider')
+    @patch('terno_dbi.examples.agents.agent_usage_demo.ChainOfThoughtAgent')
+    @patch('terno_dbi.examples.agents.agent_usage_demo.OpenAIProvider')
     def test_main_warnings_missing_keys(self, mock_llm, mock_agent_cls, mock_env):
         """Should warn if Terno keys missing."""
-        from terno_dbi.agents.agent_usage_demo import main
+        from terno_dbi.examples.agents.agent_usage_demo import main
         
         os.environ['OPENAI_API_KEY'] = 'sk-test'
         # No TERNODBI keys
