@@ -19,6 +19,8 @@ class TernoDBIClient:
 
         if not self.base_url:
             logger.warning("No TERNODBI_API_URL provided. Client strictly in offline mode??")
+        else:
+            logger.debug("TernoDBIClient initialized: base_url=%s", self.base_url)
 
     def _get_headers(self) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -36,6 +38,7 @@ class TernoDBIClient:
                 error_msg = error_data.get("error", str(e))
             except (ValueError, requests.exceptions.JSONDecodeError):
                 error_msg = str(e)
+            logger.error("API request failed: %s %s -> %s", response.request.method, response.url, error_msg)
             raise Exception(f"API Error: {error_msg}")
 
     def list_datasources(self) -> List[Dict]:
@@ -48,6 +51,7 @@ class TernoDBIClient:
                           connection_str: str,
                           connection_json: Optional[Dict] = None,
                           description: str = "") -> Dict:
+        logger.info("Creating datasource: %s (type=%s)", display_name, db_type)
         url = f"{self.base_url}/api/admin/datasources/"
         payload = {
             "display_name": display_name,
@@ -60,11 +64,13 @@ class TernoDBIClient:
         return self._handle_response(response)
 
     def delete_datasource(self, datasource: DatasourceIdentifier) -> Dict:
+        logger.info("Deleting datasource: %s", datasource)
         url = f"{self.base_url}/api/admin/datasources/{datasource}/delete/"
         response = requests.delete(url, headers=self._get_headers())
         return self._handle_response(response)
 
     def sync_metadata(self, datasource: DatasourceIdentifier, overwrite: bool = False) -> Dict:
+        logger.info("Syncing metadata for datasource: %s (overwrite=%s)", datasource, overwrite)
         url = f"{self.base_url}/api/admin/datasources/{datasource}/sync/"
         payload = {"overwrite": overwrite}
         response = requests.post(url, json=payload, headers=self._get_headers())

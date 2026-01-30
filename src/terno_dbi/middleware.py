@@ -20,6 +20,7 @@ class ServiceTokenMiddleware:
 
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
+            logger.warning("Missing or invalid Authorization header for %s %s", request.method, request.path)
             return JsonResponse(
                 {"error": "Missing or invalid Authorization header. Expected 'Bearer <token>'."}, 
                 status=401
@@ -29,9 +30,10 @@ class ServiceTokenMiddleware:
 
         token = verify_token(token_str)
         if not token:
-            logger.warning(f"Invalid or inactive token used: {token_str[:15]}...")
+            logger.warning("Invalid or inactive token used: %s...", token_str[:15])
             return JsonResponse({"error": "Invalid or expired Service Token"}, status=401)
 
+        logger.debug("Token verified: name='%s', type=%s", token.name, token.token_type)
         request.service_token = token
 
         update_token_usage(token)

@@ -8,10 +8,12 @@ logger = logging.getLogger(__name__)
 
 
 def landing_page(request):
+    logger.debug("Landing page visited")
     return render(request, 'terno_dbi/landing.html')
 
 
 def health(request):
+    logger.debug("Health check requested")
     return JsonResponse({
         "status": "ok",
         "service": "terno_dbi",
@@ -20,6 +22,7 @@ def health(request):
 
 
 def info(request):
+    logger.debug("Info endpoint requested")
     supported_dbs = ConnectorFactory.get_supported_databases()
 
     return JsonResponse({
@@ -49,7 +52,10 @@ def doc_view(request, page="setup"):
     file_path = docs_dir / f"{page}.md"
 
     if not file_path.exists():
+        logger.warning("Documentation page not found: %s", page)
         raise Http404("Documentation not found")
+
+    logger.info("Serving documentation page: %s", page)
 
     with open(file_path, "r") as f:
         md_content = f.read()

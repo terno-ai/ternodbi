@@ -24,6 +24,8 @@ def create_datasource(request):
         connection_json = body.get("connection_json")
         description = body.get("description", "")
 
+        logger.info("Create datasource request: name='%s', type='%s'", name, db_type)
+
         if not name or not db_type or not connection_str:
             return JsonResponse({
                 "status": "error",
@@ -64,6 +66,8 @@ def create_datasource(request):
             organisation=organisation,
             enabled=True,
         )
+        logger.info("Datasource created: id=%d, name='%s', type='%s'", ds.id, ds.display_name, ds.type)
+        
         from terno_dbi.services.schema_utils import sync_metadata
         sync_result = sync_metadata(ds.id)
 
@@ -100,6 +104,7 @@ def create_datasource(request):
 @require_http_methods(["PATCH"])
 def update_datasource(request, datasource_identifier):
     ds = request.resolved_datasource
+    logger.info("Update datasource request: id=%d, name='%s'", ds.id, ds.display_name)
 
     try:
         body = json.loads(request.body)
@@ -142,6 +147,7 @@ def update_datasource(request, datasource_identifier):
 @require_http_methods(["DELETE"])
 def delete_datasource(request, datasource_identifier):
     ds = request.resolved_datasource
+    logger.info("Delete datasource request: id=%d, name='%s'", ds.id, ds.display_name)
 
     name = ds.display_name
     ds.delete()
@@ -157,6 +163,7 @@ def delete_datasource(request, datasource_identifier):
 @require_http_methods(["PATCH"])
 def update_table(request, table_id):
     table = request.resolved_table
+    logger.info("Update table request: id=%d, name='%s'", table.id, table.public_name)
 
     try:
         body = json.loads(request.body)
@@ -194,6 +201,7 @@ def update_table(request, table_id):
 @require_http_methods(["PATCH"])
 def update_column(request, column_id):
     column = request.resolved_column
+    logger.info("Update column request: id=%d, name='%s'", column.id, column.public_name)
 
     try:
         body = json.loads(request.body)
@@ -237,6 +245,8 @@ def validate_connection(request):
         db_type = body.get("type")
         conn_str = body.get("connection_str") or body.get("connection_string")
         conn_json = body.get("connection_json")
+        
+        logger.debug("Validate connection request: type='%s'", db_type)
 
         if not db_type or not conn_str:
             return JsonResponse({
@@ -286,7 +296,9 @@ def sync_metadata(request, datasource_identifier):
 
     try:
         from terno_dbi.services.schema_utils import sync_metadata
+        logger.info("Starting metadata sync: datasource_id=%d, overwrite=%s", ds.id, overwrite)
         sync_result = sync_metadata(ds.id, overwrite)
+        logger.info("Metadata sync completed: datasource_id=%d, tables=%d", ds.id, sync_result.get('tables_created', 0))
 
         return JsonResponse({
             "status": "success",
@@ -305,6 +317,7 @@ def sync_metadata(request, datasource_identifier):
 @require_http_methods(["GET"])
 def get_table_info(request, datasource_identifier, table_name):
     ds = request.resolved_datasource
+    logger.debug("Get table info: datasource='%s', table='%s'", ds.display_name, table_name)
 
     try:
         table = models.Table.objects.get(data_source=ds, name=table_name)
@@ -340,6 +353,7 @@ def get_table_info(request, datasource_identifier, table_name):
 def get_all_tables_info(request, datasource_identifier):
     try:
         ds = resolve_datasource(datasource_identifier)
+        logger.debug("Get all tables info: datasource='%s'", ds.display_name)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=404)
 

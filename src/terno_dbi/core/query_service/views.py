@@ -42,6 +42,7 @@ def info(request):
 @require_http_methods(["GET"])
 def list_datasources(request):
     datasources = request.allowed_datasources
+    logger.debug("List datasources requested: count=%d", len(datasources))
 
     data = []
     for ds in datasources:
@@ -150,6 +151,7 @@ def get_table_columns(request, table_id):
 @require_http_methods(["GET"])
 def get_schema(request, datasource_identifier):
     datasource = request.resolved_datasource
+    logger.debug("Schema requested for datasource: %s", datasource.display_name)
 
     tables = models.Table.objects.filter(data_source=datasource)
     schema = []
@@ -208,6 +210,7 @@ def list_foreign_keys(request, datasource_identifier):
 def get_sample_data(request, table_id):
     table = request.resolved_table
     ds = table.data_source
+    logger.info("Sample data requested: table='%s', datasource='%s'", table.public_name, ds.display_name)
 
     try:
         rows = int(request.GET.get("rows", 10))
@@ -299,6 +302,7 @@ def execute_query(request, datasource_identifier=None):
             roles = Group.objects.none()
 
         mDb = prepare_mdb(ds, roles)
+        logger.info("Execute query: datasource='%s', pagination=%s", ds.display_name, pagination_mode)
         transform_result = generate_native_sql(mDb, sql, ds.dialect_name)
 
         if transform_result.get('status') == 'error':
@@ -308,6 +312,7 @@ def execute_query(request, datasource_identifier=None):
             }, status=400)
 
         native_sql = transform_result.get('native_sql', sql)
+        logger.debug("Resolved Native SQL: %s", native_sql)
 
         # Use new paginated query API
         result = execute_paginated_query(
@@ -389,6 +394,7 @@ def export_query(request, datasource_identifier=None):
             }, status=400)
 
         native_sql = transform_result.get('native_sql', sql)
+        logger.info("Export query: datasource='%s'", ds.display_name)
         return export_native_sql_result(ds, native_sql)
 
     except json.JSONDecodeError:
