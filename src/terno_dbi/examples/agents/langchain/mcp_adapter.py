@@ -7,7 +7,8 @@ It dynamically converts MCP tools discovered from a ClientSession into LangChain
 
 import logging
 import json
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Type
+from pydantic import create_model, Field, BaseModel
 from mcp import ClientSession
 from langchain_core.tools import StructuredTool
 
@@ -64,13 +65,42 @@ async def load_mcp_tools(session: ClientSession) -> List[StructuredTool]:
             # Create the async function for this specific tool
             tool_func = await create_tool_func(session, tool_name)
             
-            # Convert MCP JSON schema to LangChain StructuredTool
-            # LangChain expects the args_schema to be a Pydantic model or dict
+            # Convert JSON schema to Pydantic model
+            fields = {}
+            properties = input_schema.get("properties", {})
+            required_fields = input_schema.get("required", [])
+            
+            for prop_name, prop_def in properties.items():
+                # Map JSON types to Python types
+                json_type = prop_def.get("type", "string")
+                python_type = str
+                if json_type == "integer":
+                    python_type = int
+                elif json_type == "boolean":
+                    python_type = bool
+                elif json_type == "number":
+                    python_type = float
+                elif json_type == "array":
+                    python_type = list
+                elif json_type == "object":
+                    python_type = dict
+                
+                # Create Field definition
+                description = prop_def.get("description", "")
+                
+                if prop_name in required_fields:
+                    fields[prop_name] = (python_type, Field(description=description))
+                else:
+                    fields[prop_name] = (python_type | None, Field(default=None, description=description))
+            
+            # Create the Pydantic model
+            pydantic_model = create_model(f"{tool_name}Schema", **fields)
+            
             langchain_tool = StructuredTool.from_function(
                 coroutine=tool_func,
                 name=tool_name,
                 description=tool_description,
-                args_schema=input_schema.get("properties", {}),
+                args_schema=pydantic_model,
             )
             
             tools.append(langchain_tool)
