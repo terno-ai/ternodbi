@@ -83,9 +83,15 @@ dev = [
 
 # Agent Frameworks
 agents = [
-    "langchain>=0.1.0",
-    "langchain-openai>=0.0.1",
-    "langchain-core>=0.1.0",
+    "langchain>=0.3.7",
+    "langchain-core>=0.3.15",
+    "langchain-openai>=0.2.5",
+    "langgraph==1.0.7",
+    "langgraph-checkpoint>=4.0.0",
+    "langgraph-prebuilt>=1.0.7",
+    "langgraph-sdk>=0.3.3",
+    "crewai>=0.28.0",
+    "pyautogen<0.4",
 ]
 
 [project.urls]
