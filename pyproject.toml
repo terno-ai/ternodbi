@@ -81,6 +81,13 @@ dev = [
     "ruff>=0.1",
 ]
 
+# Agent Frameworks
+agents = [
+    "langchain>=0.1.0",
+    "langchain-openai>=0.0.1",
+    "langchain-core>=0.1.0",
+]
+
 [project.urls]
 "Homepage" = "https://github.com/ternoai/ternodbi"
 "Repository" = "https://github.com/ternoai/ternodbi"
