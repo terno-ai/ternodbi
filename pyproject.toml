@@ -132,7 +132,7 @@ markers = [
 addopts = "--strict-markers"
 
 [tool.coverage.run]
-source = ["src/terno_dbi/services/pagination"]
+source = ["src/terno_dbi"]
 branch = true
 omit = ["*/tests/*", "*/__pycache__/*"]
 
