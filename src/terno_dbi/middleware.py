@@ -2,6 +2,7 @@
 from django.http import JsonResponse
 from django.utils.functional import SimpleLazyObject
 from terno_dbi.services.auth import verify_token, update_token_usage
+from terno_dbi.core import conf
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,7 +13,10 @@ class ServiceTokenMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        if not (request.path.startswith("/api/admin/") or request.path.startswith("/api/query/")):
+        protected_prefixes = conf.get("PROTECTED_PATH_PREFIXES")
+        is_protected = any(request.path.startswith(prefix) for prefix in protected_prefixes)
+        
+        if not is_protected:
             return self.get_response(request)
 
         if "/health/" in request.path or "/info/" in request.path:

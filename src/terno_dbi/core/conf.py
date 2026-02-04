@@ -31,6 +31,7 @@ DEFAULTS = {
     # Access Control
     "ALLOW_SUPERTOKEN": False,  # If True, tokens without org/DS links can access all
     "REQUIRE_TOKEN_SCOPE": True,  # If True, tokens must have org or DS links to access anything
+    "PROTECTED_PATH_PREFIXES": ["/api/admin/", "/api/query/"],
 }
 
 
