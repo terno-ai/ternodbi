@@ -39,38 +39,40 @@ def create_org_tables_if_needed(apps, schema_editor):
 def add_datasource_org_fk(apps, schema_editor):
     """
     Add organisation FK to DataSource table if it doesn't exist.
+    Uses schema_editor for cross-database compatibility (SQLite, PostgreSQL, MySQL).
     """
-    # Check if column exists
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Check if column exists using Django's cross-database introspection API
     with connection.cursor() as cursor:
-        if connection.vendor == 'sqlite':
-            cursor.execute("PRAGMA table_info(terno_datasource);")
-            columns = [row[1] for row in cursor.fetchall()]
-        else:
-            cursor.execute("""
-                SELECT column_name FROM information_schema.columns 
-                WHERE table_name = 'terno_datasource' AND column_name = 'organisation_id'
-            """)
-            columns = [row[0] for row in cursor.fetchall()]
+        columns = [
+            col.name for col in
+            connection.introspection.get_table_description(cursor, 'terno_datasource')
+        ]
     
     if 'organisation_id' in columns:
-        print("  ✓ Column 'organisation_id' exists in terno_datasource, skipping")
-    else:
-        print("  → Adding 'organisation_id' column to terno_datasource")
-        if connection.vendor == 'sqlite':
-            cursor = connection.cursor()
-            cursor.execute("""
-                ALTER TABLE terno_datasource 
-                ADD COLUMN organisation_id BIGINT NULL 
-                REFERENCES core_organisation(id) ON DELETE CASCADE
-            """)
-        else:
-            cursor = connection.cursor()
-            cursor.execute("""
-                ALTER TABLE terno_datasource 
-                ADD COLUMN organisation_id BIGINT NULL,
-                ADD CONSTRAINT fk_datasource_org 
-                FOREIGN KEY (organisation_id) REFERENCES core_organisation(id) ON DELETE CASCADE
-            """)
+        logger.info("Column 'organisation_id' exists in terno_datasource, skipping")
+        return
+    
+    logger.info("Adding 'organisation_id' column to terno_datasource")
+    
+    # Use schema_editor.add_field() - Django handles SQL dialect automatically
+    DataSource = apps.get_model('core', 'DataSource')
+    CoreOrganisation = apps.get_model('core', 'CoreOrganisation')
+    
+    field = models.ForeignKey(
+        CoreOrganisation,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='datasources',
+        db_column='organisation_id'
+    )
+    field.set_attributes_from_name('organisation')
+    schema_editor.add_field(DataSource, field)
+    
+    logger.info("Successfully added 'organisation_id' column")
 
 
 class Migration(migrations.Migration):

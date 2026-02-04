@@ -8,8 +8,11 @@
 # - Update Django's state (knows about models)
 # - Conditionally create database tables (only if they don't exist)
 
+import logging
 from django.db import migrations, models, connection
 import django.db.models.deletion
+
+logger = logging.getLogger(__name__)
 
 
 def table_exists(table_name):
@@ -43,35 +46,15 @@ def create_tables_if_needed(apps, schema_editor):
     
     for model_name, table_name in creation_order:
         if table_exists(table_name):
-            print(f"  ✓ Table '{table_name}' exists, skipping creation")
+            logger.info("Table '%s' exists, skipping creation", table_name)
         else:
-            print(f"  → Creating table '{table_name}'")
+            logger.info("Creating table '%s'", table_name)
             try:
                 model = apps.get_model('core', model_name)
                 schema_editor.create_model(model)
             except Exception as e:
-                print(f"  ✗ Error creating {table_name}: {e}")
+                logger.error("Error creating %s: %s", table_name, e)
                 raise
-
-
-def add_constraints_if_needed(apps, schema_editor):
-    """Add constraints if they don't already exist."""
-    from django.db import connection
-    
-    constraints_to_add = [
-        ('terno_table', 'unique_table_public_name_per_datasource'),
-        ('terno_tablecolumn', 'unique_column_public_name_per_table'),
-    ]
-    
-    for table_name, constraint_name in constraints_to_add:
-        # Check if constraint already exists (SQLite-specific check)
-        try:
-            with connection.cursor() as cursor:
-                # For SQLite, constraints are embedded in table schema
-                # For other DBs, you'd check information_schema
-                pass  # Constraints are created when create_model is called
-        except Exception:
-            pass
 
 
 class Migration(migrations.Migration):
@@ -148,8 +131,6 @@ class Migration(migrations.Migration):
                     ],
                     options={'db_table': 'terno_tablecolumn'},
                 ),
-                
-
                 
                 # ForeignKey
                 migrations.CreateModel(
