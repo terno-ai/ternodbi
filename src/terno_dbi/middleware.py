@@ -12,7 +12,7 @@ class ServiceTokenMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        if not request.path.startswith("/api/"):
+        if not (request.path.startswith("/api/admin/") or request.path.startswith("/api/query/")):
             return self.get_response(request)
 
         if "/health/" in request.path or "/info/" in request.path:
