@@ -14,7 +14,8 @@ def generate_service_token(
     created_by=None,
     expires_at=None,
     datasource_ids: Optional[List[int]] = None,
-    organisation=None
+    organisation=None,
+    scopes: Optional[List[str]] = None
 ) -> Tuple[ServiceToken, str]:
     random_part = secrets.token_urlsafe(32)
     prefix_type = token_type.lower()
@@ -31,7 +32,8 @@ def generate_service_token(
         created_by=created_by,
         organisation=organisation,
         is_active=True,
-        expires_at=expires_at
+        expires_at=expires_at,
+        scopes=scopes or []
     )
 
     if datasource_ids:

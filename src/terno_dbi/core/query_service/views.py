@@ -50,6 +50,10 @@ def list_datasources(request):
             'id': ds.id,
             'name': ds.display_name,
             'type': ds.type,
+            'description': ds.description,
+            'is_erp': ds.is_erp,
+            'dialect_name': ds.dialect_name,
+            'dialect_version': ds.dialect_version,
         })
 
     return JsonResponse({
@@ -141,7 +145,8 @@ def get_table_columns(request, table_id):
             {
                 'id': c.id,
                 'name': c.public_name,
-                'data_type': c.data_type
+                'data_type': c.data_type,
+                'description': c.description or ""
             }
             for c in columns
         ]
@@ -167,7 +172,8 @@ def get_schema(request, datasource_identifier):
                 {
                     "id": c.id,
                     "name": c.public_name,
-                    "type": c.data_type
+                    "type": c.data_type,
+                    "description": c.description or ""
                 }
                 for c in columns
             ]

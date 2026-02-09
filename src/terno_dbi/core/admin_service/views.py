@@ -7,13 +7,14 @@ from django.views.decorators.csrf import csrf_exempt
 from terno_dbi.core import models
 from terno_dbi.services.validation import validate_datasource_input
 from terno_dbi.services.resolver import resolve_datasource
-from terno_dbi.decorators import require_service_auth
+from terno_dbi.decorators import require_service_auth, require_scope
 from terno_dbi.core.models import ServiceToken
 
 logger = logging.getLogger(__name__)
 
 @csrf_exempt
-@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
+@require_service_auth()
+@require_scope('admin:write')
 @require_http_methods(["POST"])
 def create_datasource(request):
     try:
@@ -100,7 +101,8 @@ def create_datasource(request):
 
 
 @csrf_exempt
-@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
+@require_service_auth()
+@require_scope('admin:write')
 @require_http_methods(["PATCH"])
 def update_datasource(request, datasource_identifier):
     ds = request.resolved_datasource
@@ -143,7 +145,8 @@ def update_datasource(request, datasource_identifier):
 
 
 @csrf_exempt
-@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
+@require_service_auth()
+@require_scope('admin:write')
 @require_http_methods(["DELETE"])
 def delete_datasource(request, datasource_identifier):
     ds = request.resolved_datasource
@@ -159,7 +162,8 @@ def delete_datasource(request, datasource_identifier):
 
 
 @csrf_exempt
-@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
+@require_service_auth()
+@require_scope('admin:write')
 @require_http_methods(["PATCH"])
 def update_table(request, table_id):
     table = request.resolved_table
@@ -197,7 +201,8 @@ def update_table(request, table_id):
 
 
 @csrf_exempt
-@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
+@require_service_auth()
+@require_scope('admin:write')
 @require_http_methods(["PATCH"])
 def update_column(request, column_id):
     column = request.resolved_column
@@ -237,7 +242,8 @@ def update_column(request, column_id):
 
 
 @csrf_exempt
-@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
+@require_service_auth()
+@require_scope('admin:write')
 @require_http_methods(["POST"])
 def validate_connection(request):
     try:
@@ -283,7 +289,8 @@ def validate_connection(request):
 
 
 @csrf_exempt
-@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
+@require_service_auth()
+@require_scope('admin:sync')
 @require_http_methods(["POST"])
 def sync_metadata(request, datasource_identifier):
     ds = request.resolved_datasource
@@ -313,7 +320,8 @@ def sync_metadata(request, datasource_identifier):
         }, status=500)
 
 
-@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
+@require_service_auth()
+@require_scope('admin:read')
 @require_http_methods(["GET"])
 def get_table_info(request, datasource_identifier, table_name):
     ds = request.resolved_datasource
@@ -348,7 +356,8 @@ def get_table_info(request, datasource_identifier, table_name):
 
 
 @csrf_exempt
-@require_service_auth(allowed_types=[ServiceToken.TokenType.ADMIN])
+@require_service_auth()
+@require_scope('admin:read')
 @require_http_methods(["POST"])
 def get_all_tables_info(request, datasource_identifier):
     try:

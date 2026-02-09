@@ -112,3 +112,48 @@ def require_service_auth(allowed_types=None):
             return view_func(request, *args, **kwargs)
         return _wrapped_view
     return decorator
+
+
+def require_scope(*required_scopes):
+    """
+    Decorator to enforce that the service token has specific scope(s).
+    
+    Usage:
+        @require_service_auth()
+        @require_scope('query:execute')
+        def execute_query(request):
+            ...
+        
+        # Multiple scopes (requires ALL):
+        @require_service_auth()
+        @require_scope('admin:read', 'admin:write')
+        def admin_action(request):
+            ...
+    
+    Note: This decorator must be used AFTER @require_service_auth().
+    """
+    def decorator(view_func):
+        @wraps(view_func)
+        def _wrapped_view(request, *args, **kwargs):
+            if not hasattr(request, "service_token"):
+                logger.warning("require_scope: Missing service_token on request")
+                return JsonResponse({"error": "Authentication required"}, status=401)
+
+            token = request.service_token
+            
+            # Check all required scopes
+            for scope in required_scopes:
+                if not token.has_scope(scope):
+                    logger.warning(
+                        "Scope denied: token '%s' lacks scope '%s' (has: %s)",
+                        token.name, scope, token.scopes
+                    )
+                    return JsonResponse(
+                        {"error": f"Insufficient scope. Required: '{scope}'"},
+                        status=403
+                    )
+            
+            return view_func(request, *args, **kwargs)
+        return _wrapped_view
+    return decorator
+

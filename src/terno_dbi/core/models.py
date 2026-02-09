@@ -362,6 +362,11 @@ class ServiceToken(models.Model):
         choices=TokenType.choices,
         default=TokenType.QUERY
     )
+    scopes = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of scopes this token grants. E.g. ['query:read', 'query:execute', 'admin:read']"
+    )
 
     organisation = models.ForeignKey(
         CoreOrganisation,
@@ -457,3 +462,33 @@ class ServiceToken(models.Model):
     def has_access_to(self, datasource):
         """DEPRECATED: Use has_access_to_datasource instead."""
         return self.has_access_to_datasource(datasource)
+
+    def has_scope(self, required_scope: str) -> bool:
+        """
+        Check if the token has a required scope.
+        Supports wildcard matching, e.g. 'query:*' matches 'query:read'.
+        
+        Args:
+            required_scope: The scope to check, e.g. 'query:execute'
+        
+        Returns:
+            True if token has the scope (or a wildcard that covers it).
+        """
+        if not self.scopes:
+            # Legacy tokens without scopes: fall back to token_type check
+            if required_scope.startswith('query:') and self.token_type == self.TokenType.QUERY:
+                return True
+            if required_scope.startswith('admin:') and self.token_type == self.TokenType.ADMIN:
+                return True
+            return False
+        
+        for scope in self.scopes:
+            if scope == required_scope:
+                return True
+            # Wildcard support: 'query:*' matches 'query:read'
+            if scope.endswith(':*'):
+                prefix = scope[:-1]  # 'query:'
+                if required_scope.startswith(prefix):
+                    return True
+        return False
+
