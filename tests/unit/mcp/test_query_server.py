@@ -18,7 +18,8 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
         expected_tools = [
             "list_datasources",
             "list_tables",
-            "list_columns",
+            "list_tables",
+            "list_table_columns",
             "get_schema",
             "execute_query",
             "get_sample_data"
@@ -59,10 +60,10 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             await call_tool("list_tables", {"datasource": "ds1"})
             mock_client.list_tables.assert_called_with("ds1")
 
-            # 4. list_columns
-            mock_client.list_columns.return_value = ["c1"]
-            await call_tool("list_columns", {"table_id": 9})
-            mock_client.list_columns.assert_called_with(9)
+            # 4. list_table_columns
+            mock_client.list_table_columns.return_value = ["c1"]
+            await call_tool("list_table_columns", {"datasource": "ds1", "table": "t1"})
+            mock_client.list_table_columns.assert_called_with("ds1", "t1")
 
             # 5. get_schema
             mock_client.get_schema.return_value = {}

@@ -127,19 +127,19 @@ class TestClientMethods:
         assert isinstance(result, list)
 
     @responses.activate
-    def test_list_columns(self):
-        """Should call list columns endpoint."""
+    def test_list_table_columns(self):
+        """Should call list table columns endpoint."""
         from terno_dbi.client import TernoDBIClient
         
         responses.add(
             responses.GET,
-            'https://test.com/api/query/tables/1/columns/',
+            'https://test.com/api/query/datasources/1/tables/users/columns/',
             json={'status': 'success', 'columns': [{'name': 'id'}]},
             status=200
         )
         
         client = TernoDBIClient(base_url='https://test.com', api_key='key')
-        result = client.list_columns(table_id=1)
+        result = client.list_table_columns(datasource=1, table='users')
         
         assert isinstance(result, list)
 

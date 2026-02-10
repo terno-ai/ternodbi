@@ -334,19 +334,19 @@ class TestGetTableColumns:
         assert len(data['columns']) == 2  # id and email columns
 
 @pytest.mark.django_db
-class TestListColumns:
+class TestListTableColumns:
     """Tests for /api/query/datasources/<id>/tables/<table_id>/columns/"""
 
     def test_returns_columns(self, request_factory, setup_test_data):
         """Should call get_table_columns."""
-        from terno_dbi.core.query_service.views import list_columns
+        from terno_dbi.core.query_service.views import list_table_columns
         
         request = request_factory.get(
             f'/api/query/datasources/{setup_test_data["datasource"].id}/tables/{setup_test_data["table1"].id}/columns/'
         )
-        setup_request_for_view(request, setup_test_data['token'], table=setup_test_data['table1'])
+        setup_request_for_view(request, setup_test_data['token'], datasource=setup_test_data['datasource'], table=setup_test_data['table1'])
         
-        response = list_columns(request, setup_test_data['datasource'].id, setup_test_data['table1'].id)
+        response = list_table_columns(request, setup_test_data['datasource'].id, setup_test_data['table1'].id)
         assert response.status_code == 200
         data = json.loads(response.content)
         assert 'columns' in data

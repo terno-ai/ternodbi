@@ -92,8 +92,8 @@ class TernoDBIClient:
         data = self._handle_response(response)
         return data.get("tables", [])
 
-    def list_columns(self, table_id: int) -> List[Dict]:
-        url = f"{self.base_url}/api/query/tables/{table_id}/columns/"
+    def list_table_columns(self, datasource: DatasourceIdentifier, table: Union[int, str]) -> List[Dict]:
+        url = f"{self.base_url}/api/query/datasources/{datasource}/tables/{table}/columns/"
         response = requests.get(url, headers=self._get_headers())
         data = self._handle_response(response)
         return data.get("columns", [])

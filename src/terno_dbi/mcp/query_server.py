@@ -43,17 +43,21 @@ async def list_tools() -> List[Tool]:
             }
         ),
         Tool(
-            name="list_columns",
+            name="list_table_columns",
             description="List all columns for a table with their public names and types",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "table_id": {
-                        "type": "integer",
-                        "description": "ID of the table"
+                    "datasource": {
+                        "type": "string",
+                        "description": "Datasource name or ID"
+                    },
+                    "table": {
+                        "type": "string",
+                        "description": "Table name or ID"
                     }
                 },
-                "required": ["table_id"]
+                "required": ["datasource", "table"]
             }
         ),
         Tool(
@@ -160,9 +164,10 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 "count": len(tables) if isinstance(tables, list) else 0
             }
 
-        elif name == "list_columns":
-            table_id = arguments["table_id"]
-            columns = client.list_columns(table_id)
+        elif name == "list_table_columns":
+            datasource = arguments["datasource"]
+            table = arguments["table"]
+            columns = client.list_table_columns(datasource, table)
             result = {
                 "columns": columns,
                 "count": len(columns)
