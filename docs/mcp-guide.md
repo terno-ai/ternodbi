@@ -11,6 +11,7 @@ We expose two separate MCP servers to separate concerns:
 *   **Tools Provided**:
     *   `list_datasources`: See available databases.
     *   `list_tables`: See tables in a database.
+    *   `list_table_columns`: Get columns for a specific table.
     *   `get_schema`: Get DDL/Schema for specific tables.
     *   `execute_query`: Run `SELECT` queries with advanced pagination.
         *   Supports `offset` (page-based) and `cursor` (infinite scroll) modes.
