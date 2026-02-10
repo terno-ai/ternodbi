@@ -120,8 +120,36 @@ def list_tables(request, datasource_identifier):
 
 @require_service_auth()
 @require_http_methods(["GET"])
-def list_columns(request, datasource_identifier, table_id):
-    return get_table_columns(request, table_id)
+def list_table_columns(request, datasource_identifier, table_identifier):
+    ds = request.resolved_datasource
+
+    try:
+        table = models.Table.objects.get(id=int(table_identifier), data_source=ds)
+    except (ValueError, models.Table.DoesNotExist):
+        try:
+            table = models.Table.objects.get(public_name=table_identifier, data_source=ds)
+        except models.Table.DoesNotExist:
+            return JsonResponse({
+                "status": "error",
+                "error": f"Table '{table_identifier}' not found"
+            }, status=404)
+
+    columns = models.TableColumn.objects.filter(table=table)
+
+    return JsonResponse({
+        "status": "success",
+        "table_id": table.id,
+        "table_name": table.public_name,
+        "columns": [
+            {
+                'id': c.id,
+                'name': c.public_name,
+                'data_type': c.data_type,
+                'description': c.description or ""
+            }
+            for c in columns
+        ]
+    })
 
 
 @require_service_auth()
