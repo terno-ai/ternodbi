@@ -66,70 +66,6 @@ class OrganisationGroup(models.Model):
         return f"{self.group.name}"
 
 
-# =============================================================================
-# DEPRECATED ABSTRACT BASES (for backwards compatibility during migration)
-# =============================================================================
-
-class OrganisationBase(models.Model):
-    """DEPRECATED: Use CoreOrganisation instead."""
-    name = models.CharField(max_length=255)
-    subdomain = models.CharField(max_length=100, unique=True)
-    owner = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name='organisation'
-    )
-    verified = models.BooleanField(default=True)
-    is_active = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
-    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
-
-    class Meta:
-        abstract = True
-
-    def __str__(self):
-        return f"{self.name} - {self.subdomain}"
-
-
-class OrganisationUserBase(models.Model):
-    """DEPRECATED: Use OrganisationUser instead."""
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
-    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
-
-    class Meta:
-        abstract = True
-
-    def __str__(self):
-        return f"{self.user.username}"
-
-
-class OrganisationDataSourceBase(models.Model):
-    """DEPRECATED: Use DataSource.organisation FK instead."""
-    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
-    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
-    is_external = models.BooleanField(default=False)
-
-    class Meta:
-        abstract = True
-
-    def __str__(self):
-        return f"OrganisationDataSource {self.id}"
-
-
-class OrganisationGroupBase(models.Model):
-    """DEPRECATED: Use OrganisationGroup instead."""
-    group = models.ForeignKey(Group, on_delete=models.CASCADE)
-    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
-    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
-
-    class Meta:
-        abstract = True
-
-    def __str__(self):
-        return f"{self.group.name}"
-
-
 class DataSource(models.Model):
 
     class DBType(models.TextChoices):
@@ -459,20 +395,10 @@ class ServiceToken(models.Model):
     def has_access_to_column(self, column):
         return self.has_access_to_datasource(column.table.data_source)
 
-    def has_access_to(self, datasource):
-        """DEPRECATED: Use has_access_to_datasource instead."""
-        return self.has_access_to_datasource(datasource)
-
     def has_scope(self, required_scope: str) -> bool:
         """
         Check if the token has a required scope.
         Supports wildcard matching, e.g. 'query:*' matches 'query:read'.
-        
-        Args:
-            required_scope: The scope to check, e.g. 'query:execute'
-        
-        Returns:
-            True if token has the scope (or a wildcard that covers it).
         """
         if not self.scopes:
             # Legacy tokens without scopes: fall back to token_type check
@@ -481,7 +407,7 @@ class ServiceToken(models.Model):
             if required_scope.startswith('admin:') and self.token_type == self.TokenType.ADMIN:
                 return True
             return False
-        
+
         for scope in self.scopes:
             if scope == required_scope:
                 return True
@@ -491,4 +417,3 @@ class ServiceToken(models.Model):
                 if required_scope.startswith(prefix):
                     return True
         return False
-
