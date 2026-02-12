@@ -23,7 +23,6 @@ class TestAdminServer(unittest.IsolatedAsyncioTestCase):
             "add_datasource",
             "delete_datasource",
             "get_table_info",
-            "get_all_tables_info",
             "update_column_description",
             "sync_metadata"
         ]
@@ -88,12 +87,7 @@ class TestAdminServer(unittest.IsolatedAsyncioTestCase):
             await call_tool("get_table_info", {"datasource_id": 1, "table_name": "t"})
             mock_client.get_table_info.assert_called()
 
-            # 9. get_all_tables_info
-            mock_client.get_all_tables_info.return_value = []
-            await call_tool("get_all_tables_info", {"datasource_id": 1, "table_names": ["t"]})
-            mock_client.get_all_tables_info.assert_called()
-
-            # 10. update_column_description
+            # 9. update_column_description
             mock_client.update_column.reset_mock()
             await call_tool("update_column_description", {"column_id": 3, "description": "D"})
             mock_client.update_column.assert_called_with(3, description="D")

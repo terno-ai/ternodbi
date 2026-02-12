@@ -161,25 +161,6 @@ async def list_tools() -> List[Tool]:
             }
         ),
         Tool(
-            name="get_all_tables_info",
-            description="Get info for all tables (or specific tables) in a datasource. Use for batch description generation.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "datasource_id": {
-                        "type": "integer",
-                        "description": "ID of the datasource"
-                    },
-                    "table_names": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Optional list of specific table names to get info for"
-                    }
-                },
-                "required": ["datasource_id"]
-            }
-        ),
-        Tool(
             name="update_column_description",
             description="Update the description of a column",
             inputSchema={
@@ -265,11 +246,6 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             datasource_id = arguments["datasource_id"]
             table_name = arguments["table_name"]
             result = client.get_table_info(datasource_id, table_name)
-
-        elif name == "get_all_tables_info":
-            datasource_id = arguments["datasource_id"]
-            table_names = arguments.get("table_names")
-            result = client.get_all_tables_info(datasource_id, table_names)
 
         elif name == "update_column_description":
             column_id = arguments["column_id"]

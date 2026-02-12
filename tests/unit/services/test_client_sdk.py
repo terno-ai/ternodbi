@@ -351,23 +351,6 @@ class TestClientMethods:
         assert 'table' in result
 
     @responses.activate
-    def test_get_all_tables_info(self):
-        """Should get all tables info."""
-        from terno_dbi.client import TernoDBIClient
-        
-        responses.add(
-            responses.POST,
-            'https://test.com/api/admin/datasources/1/tables/info/',
-            json={'tables': []},
-            status=200
-        )
-        
-        client = TernoDBIClient(base_url='https://test.com', api_key='key')
-        result = client.get_all_tables_info(datasource=1)
-        
-        assert 'tables' in result
-
-    @responses.activate
     def test_get_sample_data(self):
         """Should get sample data from table."""
         from terno_dbi.client import TernoDBIClient
@@ -544,24 +527,5 @@ class TestClientErrorHandling:
         result = client.execute_query(1, "SELECT")
         assert result['status'] == 'error'
         assert result['error'] == 'DB Error'
-
-    @responses.activate
-    def test_get_all_tables_info_payload(self):
-        """Should include table_names in payload."""
-        from terno_dbi.client import TernoDBIClient
-        
-        responses.add(
-            responses.POST,
-            'https://test.com/api/admin/datasources/1/tables/info/',
-            json={'tables': []},
-            status=200
-        )
-        
-        client = TernoDBIClient(base_url='https://test.com', api_key='key')
-        client.get_all_tables_info(1, table_names=['t1', 't2'])
-        
-        import json
-        body = json.loads(responses.calls[0].request.body)
-        assert body['table_names'] == ['t1', 't2']
 
 

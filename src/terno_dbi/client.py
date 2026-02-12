@@ -141,13 +141,6 @@ class TernoDBIClient:
         response = requests.get(url, headers=self._get_headers())
         return self._handle_response(response)
 
-    def get_all_tables_info(self, datasource: DatasourceIdentifier, table_names: Optional[List[str]] = None) -> Dict:
-        url = f"{self.base_url}/api/admin/datasources/{datasource}/tables/info/"
-        payload = {}
-        if table_names:
-            payload["table_names"] = table_names
-        response = requests.post(url, json=payload, headers=self._get_headers())
-        return self._handle_response(response)
 
     def execute_query(
         self,

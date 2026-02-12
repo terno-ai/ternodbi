@@ -5,7 +5,7 @@ Tests all endpoints in admin_service/views.py including:
 - create_datasource, update_datasource, delete_datasource
 - update_table, update_column
 - validate_connection, sync_metadata
-- get_table_info, get_all_tables_info
+- get_table_info
 """
 import pytest
 import json
@@ -379,14 +379,3 @@ class TestGetTableInfo:
         data = json.loads(response.content)
         assert 'columns' in data or 'table' in data
 
-
-@pytest.mark.django_db
-class TestGetAllTablesInfo:
-    """Tests for POST /api/admin/datasources/<id>/tables/info/"""
-
-    def test_endpoint_exists(self, request_factory, setup_admin_data):
-        """Verify endpoint exists and is callable."""
-        from terno_dbi.core.admin_service.views import get_all_tables_info
-        
-        # Just verify the view exists and is callable
-        assert callable(get_all_tables_info)

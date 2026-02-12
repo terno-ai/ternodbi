@@ -13,7 +13,6 @@ from terno_dbi.core.admin_service.views import (
     validate_connection,
     sync_metadata,
     get_table_info,
-    get_all_tables_info
 )
 from terno_dbi.core.models import DataSource, Table, TableColumn, CoreOrganisation
 
@@ -352,33 +351,4 @@ class TestGetTableInfoEdgeCases:
             data = json.loads(response.content)
             assert data['table']['sample_rows'] == []
 
-class TestGetAllTablesInfoEdgeCases:
-    def test_datasource_resolution_error(self, req_factory):
-        request = req_factory.post('/', data={}, content_type='application/json')
-        func = get_all_tables_info
-        while hasattr(func, '__wrapped__'):
-            func = func.__wrapped__
-        
-        with patch('terno_dbi.core.admin_service.views.resolve_datasource', side_effect=Exception("DS Not Found")):
-            response = func(request, 999)
-            assert response.status_code == 404
-            assert "DS Not Found" in json.loads(response.content)['error']
 
-    def test_bad_json_ignored(self, req_factory):
-        # The view swallows JSON errors for body parsing (defaults to empty table_names)
-        request = req_factory.post('/', data="{bad", content_type='application/json')
-        ds = MagicMock(spec=DataSource)
-        
-        func = get_all_tables_info
-        while hasattr(func, '__wrapped__'):
-            func = func.__wrapped__
-        
-        with patch('terno_dbi.core.admin_service.views.resolve_datasource', return_value=ds):
-            # Also patch Table.objects.filter to return empty list or mock
-            with patch('terno_dbi.core.models.Table.objects.filter') as mock_filter:
-                mock_filter.return_value.prefetch_related.return_value = []
-                
-                response = func(request, 1)
-                assert response.status_code == 200
-                data = json.loads(response.content)
-                assert isinstance(data['tables'], list)

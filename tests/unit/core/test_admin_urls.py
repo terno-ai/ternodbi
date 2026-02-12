@@ -45,6 +45,3 @@ class TestAdminURLs(SimpleTestCase):
         url = reverse('admin_service:get_table_info', args=[1, 'users'])
         assert url == '/api/admin/datasources/1/tables/users/info/'
 
-    def test_get_all_tables_info_url(self):
-        url = reverse('admin_service:get_all_tables_info', args=[1])
-        assert url == '/api/admin/datasources/1/tables/info/'

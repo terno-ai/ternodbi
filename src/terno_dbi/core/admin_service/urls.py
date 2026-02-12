@@ -12,5 +12,4 @@ urlpatterns = [
     path("validate/", views.validate_connection, name="validate_connection"),
     path("datasources/<str:datasource_identifier>/sync/", views.sync_metadata, name="sync_metadata"),
     path("datasources/<str:datasource_identifier>/tables/<str:table_name>/info/", views.get_table_info, name="get_table_info"),
-    path("datasources/<str:datasource_identifier>/tables/info/", views.get_all_tables_info, name="get_all_tables_info"),
 ]
