@@ -63,17 +63,6 @@ def list_datasources(request):
     })
 
 
-@require_service_auth()
-@require_http_methods(["GET"])
-def get_datasource(request, datasource_identifier):
-    ds = request.resolved_datasource
-    return JsonResponse({
-        "status": "success",
-        "id": ds.id,
-        "datasource_name": ds.display_name,
-        "type": ds.type,
-    })
-
 
 @require_service_auth()
 @require_http_methods(["GET"])
@@ -151,67 +140,6 @@ def list_table_columns(request, datasource_identifier, table_identifier):
         ]
     })
 
-
-@require_service_auth()
-@require_http_methods(["GET"])
-def get_table_columns(request, table_id):
-    try:
-        table = models.Table.objects.get(id=table_id)
-    except models.Table.DoesNotExist:
-        return JsonResponse({
-            "status": "error",
-            "error": f"Table {table_id} not found"
-        }, status=404)
-
-    columns = models.TableColumn.objects.filter(table=table)
-
-    return JsonResponse({
-        "status": "success",
-        "table_id": table_id,
-        "table_name": table.public_name,
-        "columns": [
-            {
-                'id': c.id,
-                'name': c.public_name,
-                'data_type': c.data_type,
-                'description': c.description or ""
-            }
-            for c in columns
-        ]
-    })
-
-
-@require_service_auth()
-@require_http_methods(["GET"])
-def get_schema(request, datasource_identifier):
-    datasource = request.resolved_datasource
-    logger.debug("Schema requested for datasource: %s", datasource.display_name)
-
-    tables = models.Table.objects.filter(data_source=datasource)
-    schema = []
-
-    for table in tables:
-        columns = models.TableColumn.objects.filter(table=table)
-        schema.append({
-            "id": table.id,
-            "table_name": table.public_name,
-            "description": table.description or "",
-            "columns": [
-                {
-                    "id": c.id,
-                    "name": c.public_name,
-                    "type": c.data_type,
-                    "description": c.description or ""
-                }
-                for c in columns
-            ]
-        })
-
-    return JsonResponse({
-        "datasource": datasource.display_name,
-        "schema": schema,
-        "table_count": len(schema)
-    })
 
 
 @require_service_auth()

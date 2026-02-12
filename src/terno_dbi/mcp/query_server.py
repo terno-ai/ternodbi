@@ -61,20 +61,6 @@ async def list_tools() -> List[Tool]:
             }
         ),
         Tool(
-            name="get_schema",
-            description="Get the full schema (tables and columns) for a datasource",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "datasource": {
-                        "type": "string",
-                        "description": "Datasource name or ID"
-                    }
-                },
-                "required": ["datasource"]
-            }
-        ),
-        Tool(
             name="execute_query",
             description="""Execute a SQL query with pagination support.
 
@@ -173,9 +159,6 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 "count": len(columns)
             }
 
-        elif name == "get_schema":
-            datasource = arguments["datasource"]
-            result = client.get_schema(datasource)
 
         elif name == "execute_query":
             datasource = arguments["datasource"]

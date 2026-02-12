@@ -98,10 +98,6 @@ class TernoDBIClient:
         data = self._handle_response(response)
         return data.get("columns", [])
 
-    def get_schema(self, datasource: DatasourceIdentifier) -> Dict:
-        url = f"{self.base_url}/api/query/datasources/{datasource}/schema/"
-        response = requests.get(url, headers=self._get_headers())
-        return self._handle_response(response)
 
     def update_table(
         self,
