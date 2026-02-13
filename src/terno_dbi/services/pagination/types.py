@@ -30,9 +30,7 @@ class PaginationConfig:
     per_page: int = 50
     cursor: Optional[str] = None
     direction: str = "forward"
-    order_by: List[OrderColumn] = field(default_factory=lambda: [
-        OrderColumn("id", "DESC")
-    ])
+    order_by: List[OrderColumn] = field(default_factory=list)
 
 @dataclass
 class PaginatedResult:

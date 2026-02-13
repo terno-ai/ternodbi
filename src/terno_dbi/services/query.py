@@ -73,13 +73,23 @@ def execute_paginated_query(
                 for o in order_by
             ]
 
+        # Defense-in-depth: clamp per_page regardless of caller
+        per_page = min(per_page, 500)
+
+        if mode == PaginationMode.CURSOR and not order_columns:
+            logger.info(
+                f"Cursor pagination requested without order_by for datasource={datasource.id}. "
+                "Auto-falling back to offset mode."
+            )
+            mode = PaginationMode.OFFSET
+
         config = PaginationConfig(
             mode=mode,
             page=page,
             per_page=per_page,
             cursor=cursor,
             direction=direction,
-            order_by=order_columns or [OrderColumn("id", "DESC")]
+            order_by=order_columns if order_columns else []
         )
 
         service = PaginationService(

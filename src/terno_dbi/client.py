@@ -137,7 +137,6 @@ class TernoDBIClient:
         response = requests.get(url, headers=self._get_headers())
         return self._handle_response(response)
 
-
     def execute_query(
         self,
         datasource: DatasourceIdentifier,
