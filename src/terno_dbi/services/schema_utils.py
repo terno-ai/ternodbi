@@ -269,6 +269,45 @@ def get_datasource_tables_info(datasource_id: int, table_names: Optional[List[st
 SYSTEM_SCHEMAS = {'INFORMATION_SCHEMA', 'information_schema', 'pg_catalog', 'pg_toast'}
 
 
+def build_row_counts_lookup(raw_counts: Dict[str, int]) -> Dict[str, int]:
+    """
+    Build a flexible lookup map from connector row-count results.
+
+    Connectors may return keys as unqualified ("orders") or qualified
+    ("public.orders"), and in varying cases.  This function normalises
+    every key to lowercase *and* stores an extra entry for the
+    unqualified (last-dot-segment) form so both look-ups succeed.
+    """
+    lookup: Dict[str, int] = {}
+    for key, count in raw_counts.items():
+        lower_key = key.lower()
+        lookup[lower_key] = count
+        base = lower_key.rsplit('.', 1)[-1]
+        if base != lower_key:
+            # Only overwrite if not already present (first wins)
+            lookup.setdefault(base, count)
+    return lookup
+
+
+def resolve_row_count(
+    table_name: str, counts_map: Dict[str, int]
+) -> int | None:
+    """
+    Try to find a match for *table_name* inside *counts_map*.
+
+    Attempts (in order):
+    1. Exact lowercased match  ("public.orders" -> "public.orders")
+    2. Unqualified match       ("public.orders" -> "orders")
+    """
+    lower = table_name.lower()
+    if lower in counts_map:
+        return counts_map[lower]
+    base = lower.rsplit('.', 1)[-1]
+    if base in counts_map:
+        return counts_map[base]
+    return None
+
+
 def _sync_from_information_schema(connector, datasource, result, overwrite=False):
     """
     Fallback sync using INFORMATION_SCHEMA when SQLAlchemy/SQLShield reflection fails.
@@ -483,9 +522,44 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
                 result["tables_synced"] = result["tables_created"] + result["tables_updated"]
                 result["sync_method"] = "information_schema"
                 logger.info(f"INFORMATION_SCHEMA fallback discovered {tables_discovered} tables/views")
+
+                # Fetch row counts for fallback tables
+                try:
+                    from terno_dbi.core import models
+                    found_tables = [t for t in result["tables"] if t.get("status") in ("created", "updated", "skipped")]
+                    if found_tables:
+                        table_names_list = [t["name"] for t in found_tables]
+                        logger.info(f"Fetching row counts for {len(table_names_list)} fallback tables")
+
+                        raw_counts = connector.get_table_row_counts(tables=table_names_list)
+                        counts_map = build_row_counts_lookup(raw_counts)
+
+                        updates_count = 0
+                        for t_info in found_tables:
+                            t_name = t_info["name"]
+                            count = resolve_row_count(t_name, counts_map)
+                            if count is not None:
+                                models.Table.objects.filter(id=t_info["id"]).update(
+                                    estimated_row_count=count
+                                )
+                                updates_count += 1
+                        logger.info(f"Updated row counts for {updates_count} fallback tables")
+
+                except Exception as e:
+                    logger.warning(f"Fallback row stats warning: {e}")
+
                 return result
 
         result["sync_method"] = "sqlshield"
+
+        row_counts_map = {}
+        try:
+            table_names_list = list(mdb.tables.keys())
+            raw_counts = connector.get_table_row_counts(tables=table_names_list)
+            row_counts_map = build_row_counts_lookup(raw_counts)
+            logger.info(f"Fetched row counts for {len(row_counts_map)} tables")
+        except Exception as e:
+            logger.warning(f"Failed to fetch row counts (skipping stats): {e}")
 
         found_table_names = set()
 
@@ -507,6 +581,11 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
                         public_name=actual_table_name,
                     )
                     result["tables_created"] += 1
+
+                count = resolve_row_count(actual_table_name, row_counts_map)
+                if count is not None:
+                    table_model.estimated_row_count = count
+                    table_model.save(update_fields=['estimated_row_count'])
 
                 found_table_names.add(actual_table_name)
 

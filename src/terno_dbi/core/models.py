@@ -126,6 +126,10 @@ class Table(models.Model):
     )
     category = models.CharField(max_length=255, null=True, blank=True)
     sample_rows = models.JSONField(null=True, blank=True)
+    estimated_row_count = models.BigIntegerField(
+        null=True, blank=True,
+        help_text="Approximate row count fetched during metadata sync."
+    )
     description_updated_at = models.DateTimeField(blank=True, null=True)
 
     class Meta:

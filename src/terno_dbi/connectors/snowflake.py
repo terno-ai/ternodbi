@@ -1,5 +1,6 @@
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 import sqlalchemy
+from sqlalchemy import text
 from sqlshield.models import MDatabase
 from .base import BaseConnector, DEFAULT_POOL_SIZE, DEFAULT_MAX_OVERFLOW, DEFAULT_POOL_TIMEOUT, DEFAULT_POOL_RECYCLE
 import logging
@@ -29,3 +30,33 @@ class SnowflakeConnector(BaseConnector):
             dialect_version = str(engine.dialect.server_version_info)
 
         return (dialect_name, dialect_version)
+
+    def get_table_row_counts(
+        self, schema: Optional[str] = None, tables: Optional[List[str]] = None
+    ) -> Dict[str, int]:
+        engine = self.get_engine()
+        if not schema:
+            db_part = engine.url.database or ""
+            parts = db_part.split("/")
+            if len(parts) >= 2 and parts[-1]:
+                schema = parts[-1]
+
+        with self.get_connection() as conn:
+            # Fall back to the session's current schema
+            if not schema:
+                try:
+                    schema = conn.execute(text("SELECT CURRENT_SCHEMA()")).scalar()
+                except Exception as e:
+                    logger.warning(f"Could not determine Snowflake schema: {e}")
+                    return {}
+            if not schema:
+                return {}
+
+            query = text(
+                "SELECT TABLE_NAME, ROW_COUNT "
+                "FROM INFORMATION_SCHEMA.TABLES "
+                "WHERE TABLE_SCHEMA = :schema "
+                "  AND TABLE_TYPE IN ('BASE TABLE', 'VIEW')"
+            )
+            rows = conn.execute(query, {"schema": schema.upper()}).fetchall()
+        return {row[0]: int(row[1]) for row in rows if row[1] is not None}

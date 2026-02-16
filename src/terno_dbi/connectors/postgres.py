@@ -1,5 +1,6 @@
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 import sqlalchemy
+from sqlalchemy import text
 from sqlshield.models import MDatabase
 from .base import BaseConnector, DEFAULT_POOL_SIZE, DEFAULT_MAX_OVERFLOW, DEFAULT_POOL_TIMEOUT, DEFAULT_POOL_RECYCLE
 import logging
@@ -33,3 +34,46 @@ class PostgresConnector(BaseConnector):
             dialect_name = 'postgres'
 
         return (dialect_name, dialect_version)
+
+    def get_table_row_counts(
+        self, schema: Optional[str] = None, tables: Optional[List[str]] = None
+    ) -> Dict[str, int]:
+        with self.get_connection() as conn:
+            if not schema:
+                try:
+                    schema = conn.execute(text("SELECT current_schema()")).scalar()
+                except Exception as e:
+                    logger.warning(
+                        f"Could not determine current schema, defaulting to public: {e}"
+                    )
+                    schema = "public"
+
+            if tables:
+                bare_names = []
+                for t in tables:
+                    parts = t.rsplit('.', 1)
+                    bare_names.append(parts[-1])
+
+                query = text(
+                    "SELECT c.relname, c.reltuples::bigint "
+                    "FROM pg_class c "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE c.relkind IN ('r', 'v', 'm') "
+                    "  AND n.nspname = :schema "
+                    "  AND c.relname = ANY(:tables)"
+                )
+                rows = conn.execute(
+                    query, {"schema": schema, "tables": bare_names}
+                ).fetchall()
+            else:
+                query = text(
+                    "SELECT c.relname, c.reltuples::bigint "
+                    "FROM pg_class c "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE c.relkind IN ('r', 'v', 'm') "
+                    "  AND n.nspname = :schema"
+                )
+                rows = conn.execute(query, {"schema": schema}).fetchall()
+
+        # reltuples is -1 for tables never analyzed; skip those
+        return {row[0]: int(row[1]) for row in rows if int(row[1]) >= 0}

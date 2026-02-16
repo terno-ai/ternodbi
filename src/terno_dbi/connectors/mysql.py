@@ -1,5 +1,6 @@
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 import sqlalchemy
+from sqlalchemy import text
 from sqlshield.models import MDatabase
 from .base import BaseConnector, DEFAULT_POOL_SIZE, DEFAULT_MAX_OVERFLOW, DEFAULT_POOL_TIMEOUT, DEFAULT_POOL_RECYCLE
 import logging
@@ -30,3 +31,28 @@ class MySQLConnector(BaseConnector):
             dialect_version = str(engine.dialect.server_version_info)
 
         return (dialect_name, dialect_version)
+
+    def get_table_row_counts(
+        self, schema: Optional[str] = None, tables: Optional[List[str]] = None
+    ) -> Dict[str, int]:
+        engine = self.get_engine()
+        schema = schema or engine.url.database
+
+        with self.get_connection() as conn:
+            if not schema:
+                try:
+                    schema = conn.execute(text("SELECT DATABASE()")).scalar()
+                except Exception as e:
+                    logger.warning(f"Could not determine MySQL database: {e}")
+                    return {}
+            if not schema:
+                return {}
+
+            query = text(
+                "SELECT TABLE_NAME, TABLE_ROWS "
+                "FROM INFORMATION_SCHEMA.TABLES "
+                "WHERE TABLE_SCHEMA = :schema "
+                "  AND TABLE_TYPE IN ('BASE TABLE', 'VIEW')"
+            )
+            rows = conn.execute(query, {"schema": schema}).fetchall()
+        return {row[0]: int(row[1]) for row in rows if row[1] is not None}

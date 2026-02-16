@@ -86,7 +86,8 @@ def list_tables(request, datasource_identifier):
         tables_list.append({
             'id': table.id,
             'name': table.public_name,
-            'description': table.description or ""
+            'description': table.description or "",
+            'estimated_row_count': table.estimated_row_count
         })
 
     table_data = []

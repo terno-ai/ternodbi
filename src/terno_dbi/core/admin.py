@@ -114,7 +114,7 @@ if not PARENT_APP_INSTALLED:
 
     @admin.register(Table)
     class TableAdmin(reversion.admin.VersionAdmin):
-        list_display = ('name', 'public_name', 'data_source', 'column_count')
+        list_display = ('name', 'public_name', 'data_source', 'estimated_row_count', 'column_count')
         list_filter = ('data_source',)
         search_fields = ('name', 'public_name', 'description')
         inlines = [TableColumnInline, ForeignKeyInline]

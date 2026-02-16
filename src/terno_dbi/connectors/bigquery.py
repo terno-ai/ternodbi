@@ -1,5 +1,6 @@
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 import sqlalchemy
+from sqlalchemy import text
 from sqlalchemy.pool import QueuePool, NullPool
 from sqlshield.models import MDatabase
 from .base import BaseConnector, DEFAULT_POOL_SIZE, DEFAULT_MAX_OVERFLOW, DEFAULT_POOL_TIMEOUT, DEFAULT_POOL_RECYCLE
@@ -55,3 +56,37 @@ class BigQueryConnector(BaseConnector):
             dialect_version = str(getattr(engine.dialect, 'server_version_info', ('unknown',)))
 
         return (dialect_name, dialect_version)
+
+    def get_table_row_counts(
+        self, schema: Optional[str] = None, tables: Optional[List[str]] = None
+    ) -> Dict[str, int]:
+        engine = self.get_engine()
+        project = engine.url.host or ""
+        dataset = schema or engine.url.database or ""
+        if not project or not dataset:
+            logger.warning(
+                f"BigQuery row counts skipped: project='{project}', dataset='{dataset}'"
+            )
+            return {}
+
+        try:
+            from google.cloud import bigquery as bq
+            from google.oauth2 import service_account
+
+            creds = service_account.Credentials.from_service_account_info(
+                self.credentials
+            )
+            billing_project = self.credentials.get("project_id", project)
+            client = bq.Client(credentials=creds, project=billing_project)
+
+            query = (
+                f"SELECT table_id, row_count "
+                f"FROM `{project}.{dataset}.__TABLES__`"
+            )
+            rows = client.query_and_wait(query)
+            result = {row.table_id: int(row.row_count) for row in rows if row.row_count is not None}
+            logger.info(f"BigQuery row counts: {len(result)} tables from {project}.{dataset}")
+            return result
+        except Exception as e:
+            logger.warning(f"BigQuery row counts failed: {e}")
+            return {}

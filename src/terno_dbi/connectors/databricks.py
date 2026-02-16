@@ -1,5 +1,6 @@
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 import sqlalchemy
+from sqlalchemy import text
 from sqlalchemy import MetaData, inspect
 from sqlalchemy.engine.url import make_url
 from sqlshield.models import MDatabase
@@ -63,3 +64,29 @@ class DatabricksConnector(BaseConnector):
             logger.error(f"Error during metadata inspection: {e}")
 
         return metadata
+
+    # Databricks DESCRIBE DETAIL is per-table and too slow (~10s each).
+    def get_table_row_counts(
+        self, schema: Optional[str] = None, tables: Optional[List[str]] = None
+    ) -> Dict[str, int]:
+        return {}
+
+        # if not tables:
+        #     return {}
+        # schema = schema or self._schema
+        # counts: Dict[str, int] = {}
+        # with self.get_connection() as conn:
+        #     for table_name in tables:
+        #         try:
+        #             qualified = f"`{schema}`.`{table_name}`"
+        #             result = conn.execute(text(f"DESCRIBE DETAIL {qualified}"))
+        #             row = result.fetchone()
+        #             if row:
+        #                 col_names = list(result.keys())
+        #                 row_dict = dict(zip(col_names, row))
+        #                 num_rows = row_dict.get("numRows")
+        #                 if num_rows is not None:
+        #                     counts[table_name] = int(num_rows)
+        #         except Exception as e:
+        #             logger.warning(f"Could not get row count for {table_name}: {e}")
+        # return counts

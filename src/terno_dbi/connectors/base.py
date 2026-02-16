@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Tuple, Optional, Dict, Any, Generator
+from typing import Tuple, Optional, Dict, Any, Generator, List
 from contextlib import contextmanager
 import sqlalchemy
 from sqlalchemy.pool import QueuePool, NullPool
@@ -66,6 +66,11 @@ class BaseConnector(ABC):
     @abstractmethod
     def get_dialect_info(self) -> Tuple[str, str]:
         pass
+
+    def get_table_row_counts(
+        self, schema: Optional[str] = None, tables: Optional[List[str]] = None
+    ) -> Dict[str, int]:
+        return {}
 
     def close(self):
         if self._engine:
