@@ -65,7 +65,7 @@ class DatabricksConnector(BaseConnector):
 
         return metadata
 
-    # Databricks DESCRIBE DETAIL is per-table and too slow (~10s each).
+    # skippng row count for databricks for now as Databricks DESCRIBE DETAIL is per-table and too slow (~10s each).
     def get_table_row_counts(
         self, schema: Optional[str] = None, tables: Optional[List[str]] = None
     ) -> Dict[str, int]:
