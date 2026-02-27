@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('core', '0002_organization_support'),
+        ('core', '0002b_deduplicate_display_names'),
     ]
 
     operations = [

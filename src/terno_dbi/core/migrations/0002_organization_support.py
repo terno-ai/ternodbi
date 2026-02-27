@@ -76,6 +76,7 @@ def add_datasource_org_fk(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    atomic = False
     
     dependencies = [
         ('auth', '0012_alter_user_first_name_max_length'),

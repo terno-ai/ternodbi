@@ -60,6 +60,7 @@ def create_tables_if_needed(apps, schema_editor):
 class Migration(migrations.Migration):
     
     initial = True
+    atomic = False
     
     dependencies = [
         ('auth', '0012_alter_user_first_name_max_length'),
