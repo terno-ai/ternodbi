@@ -153,6 +153,7 @@ class TableColumn(models.Model):
     data_type = models.CharField(max_length=50, blank=True)
     description = models.CharField(max_length=300, null=True, blank=True)
     unique_categories = models.JSONField(default=dict, null=True, blank=True)
+    primary_key = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'terno_tablecolumn'
