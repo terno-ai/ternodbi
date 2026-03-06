@@ -1,18 +1,17 @@
 import os
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# This file lives in src/terno_dbi/server/settings.py
+# We want the db to be placed in the user's home directory by default
+# to avoid writing to the site-packages directory.
+DEFAULT_DBI_HOME = Path.home() / '.ternodbi'
 
 import terno_dbi
-
 TERNO_DBI_PATH = Path(terno_dbi.__file__).resolve().parent
 
 SECRET_KEY = os.environ.get('DBI_SECRET_KEY', 'django-insecure-change-me-in-production')
-
 DEBUG = os.environ.get('DBI_DEBUG', 'True').lower() == 'true'
-
-ALLOWED_HOSTS = os.environ.get('DBI_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
-
+ALLOWED_HOSTS = os.environ.get('DBI_ALLOWED_HOSTS', '*').split(',')
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -36,7 +35,7 @@ MIDDLEWARE = [
     'terno_dbi.middleware.ServiceTokenMiddleware',
 ]
 
-ROOT_URLCONF = 'dbi_server.urls'
+ROOT_URLCONF = 'terno_dbi.server.urls'
 
 TEMPLATES = [
     {
@@ -56,21 +55,9 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'dbi_server.wsgi.application'
-
+WSGI_APPLICATION = 'terno_dbi.server.wsgi.application'
 
 # Database Configuration
-# ======================
-# Options:
-# 1. DATABASE_ENGINE=MYSQL (production MySQL)
-# 2. DATABASE_ENGINE=POSTGRESQL (production PostgreSQL)
-# 3. DJANGO_PROJECT_PATH=/path/to/project (SQLite only - share with another Django project)
-# 4. Default: standalone SQLite
-#
-# To share database with your existing Django project, use options 1, 2, or 3:
-#   - For SQLite: set DJANGO_PROJECT_PATH to your Django project directory
-#   - For MySQL/PostgreSQL: use the same MYSQL_* or POSTGRES_* credentials as your Django project
-#   - Note: SQLite DB path is constructed relative to the PROJECT_PATH if provided, otherwise BASE_DIR
 DJANGO_PROJECT_PATH = os.environ.get('DJANGO_PROJECT_PATH', '')
 
 if os.environ.get('DATABASE_ENGINE') == 'MYSQL':
@@ -112,10 +99,12 @@ elif DJANGO_PROJECT_PATH:
         }
     }
 else:
+    # Ensure the default terno_dbi home directory exists
+    DEFAULT_DBI_HOME.mkdir(parents=True, exist_ok=True)
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
+            'NAME': DEFAULT_DBI_HOME / 'db.sqlite3',
             'OPTIONS': {
                 'timeout': 20,
             }
@@ -138,7 +127,7 @@ STATIC_URL = '/static/'
 STATICFILES_DIRS = [
     TERNO_DBI_PATH / 'core' / 'frontend' / 'static',
 ]
-STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATIC_ROOT = DEFAULT_DBI_HOME / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

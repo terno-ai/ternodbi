@@ -50,26 +50,23 @@ TernoDBI works out-of-the-box with SQLite, but production use requires configuri
 
 ## Running the Server
 
-1.  **Migrate**: Initialize the database schema.
+1.  **Start the Server**: 
     ```bash
-    python manage.py migrate
+    ternodbi start
     ```
+    This single command automatically runs database migrations, creates a default admin user, and starts the API server.
 
-2.  **Start Server**: Run the API server.
-    ```bash
-    python manage.py runserver 0.0.0.0:8000
-    ```
-    *   The Health Check will be available at: `http://localhost:8000/api/query/health/`
-    *   The Admin Console will be at: `http://localhost:8000/admin/`
+    *   The Health Check will be available at: `http://localhost:8376/api/query/health/`
+    *   The Admin Console will be at: `http://localhost:8376/admin/`
 
 ## Creating Your First User & Token
 
-1.  **Create Superuser** (for Admin Console):
+1.  **Create Superuser** (if you don't want to use the default `admin/admin`):
     ```bash
-    python manage.py createsuperuser
+    ternodbi manage createsuperuser
     ```
 
 2.  **Issue API Token** (for Agents):
     ```bash
-    python manage.py issue_token --name "MyFirstAgent" --type query
+    ternodbi manage issue_token --name "MyFirstAgent" --type query
     ```

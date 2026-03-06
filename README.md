@@ -51,12 +51,7 @@ pip install -e .
 
 ## Configuration
 
-Copy the sample environment file to start:
-
-```bash
-cp server/env-sample.sh server/env.sh
-source server/env.sh
-```
+There are no manual configuration files to copy. Simply install the package and run it. The CLI handles environment setup and database initialization automatically.
 
 ### Essential Variables
 
@@ -79,10 +74,12 @@ source server/env.sh
 ### 1. Running the API Server
 
 ```bash
-cd server
-python manage.py migrate
-python manage.py runserver 0.0.0.0:8000
+ternodbi start
 ```
+This command automatically:
+1. Runs all required database migrations.
+2. Creates a default admin user (username: `admin`, password: `admin`) on first boot.
+3. Starts the server securely on `127.0.0.1:8376`.
 
 ### 2. Management Commands (CLI)
 
@@ -90,13 +87,13 @@ Use the built-in CLI to manage access tokens for your agents:
 
 ```bash
 # General Query Token
-python manage.py issue_token --name "Claude Agent" --type query --expires 30
+ternodbi manage issue_token --name "Claude Agent" --type query --expires 30
 
 # Admin Token (Full Access)
-python manage.py issue_token --name "System Admin" --type admin
+ternodbi manage issue_token --name "System Admin" --type admin
 
 # Scoped Token (Specific Datasource)
-python manage.py issue_token --name "Finance Data Only" --type query --datasource 1
+ternodbi manage issue_token --name "Finance Data Only" --type query --datasource 1
 ```
 
 ### 3. Query API & Pagination
@@ -153,7 +150,7 @@ Add the following configuration to your `claude_desktop_config.json`:
       "command": "/path/to/your/venv/bin/dbi-mcp",
       "args": ["admin"],
       "env": {
-        "TERNODBI_API_URL": "http://127.0.0.1:8000",
+        "TERNODBI_API_URL": "http://127.0.0.1:8376",
         "TERNODBI_API_KEY": "dbi_admin_..."
       }
     },
@@ -161,15 +158,15 @@ Add the following configuration to your `claude_desktop_config.json`:
       "command": "/path/to/your/venv/bin/dbi-mcp",
       "args": ["query"],
       "env": {
-        "TERNODBI_API_URL": "http://127.0.0.1:8000",
+        "TERNODBI_API_URL": "http://127.0.0.1:8376",
         "TERNODBI_API_KEY": "dbi_query_..."
       }
     }
   }
 }
 ```
-> [!TIP]
-> Run `which dbi-mcp` in your terminal to find the absolute path to use in the configuration above.
+> **Note:** Run `ternodbi mcp-config` in your terminal to automatically generate the exact absolute paths and environment variables for your current installation.
+
 **Production (UVX):**
 ```json
 {
