@@ -107,7 +107,7 @@ TernoDBI exposes Model Context Protocol (MCP) servers to effortlessly plug into 
 
 **Provided MCP Tools:**
 * **Query Service:** `list_datasource`, `list_tables`, `list_table_columns`, `execute_query` (restricted securely via SQLShield).
-* **Admin Service:** `add_datasource`, `delete_datasource`, `update_datasource`, `validate_connection`, `sync_metadata`, `rename_table`, `rename_columns`, `update_table_description`, `update_column_description`.
+* **Admin Service:** `add_datasource`, `delete_datasource`, `validate_connection`, `sync_metadata`, `rename_table`, `rename_column`, `update_table_description`, `update_column_description`, `get_table_info`.
 
 ### Example: Connecting Claude Desktop
 

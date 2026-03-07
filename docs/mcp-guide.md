@@ -16,14 +16,19 @@ We expose two separate MCP servers to separate concerns:
     *   `execute_query`: Run `SELECT` queries with advanced pagination.
         *   Supports `offset` (page-based) and `cursor` (infinite scroll) modes.
         *   Security: All cursors are HMAC-signed to prevent tampering.
-    *   `search_context`: Semantic search over table descriptions (if vector store enabled).
 
 ### 2. Admin Server (`ternodbi-admin`)
 *   **Purpose**: Management and Curation.
 *   **Tools Provided**:
-    *   `rename_table`: Change the public-facing name of a table.
-    *   `update_table_description`: Add documentation to a table.
+    *   `add_datasource`: Safely connect a new database.
+    *   `delete_datasource`: Remove a connection.
+    *   `validate_connection`: Test credentials before saving.
     *   `sync_metadata`: Sync schemas from the database.
+    *   `rename_table`: Change the public-facing name of a table.
+    *   `rename_column`: Change the public-facing name of a column.
+    *   `update_table_description`: Add documentation to a table.
+    *   `update_column_description`: Add documentation to a column.
+    *   `get_table_info`: Fetch detailed context for AI curation.
 
 ## Connecting to Claude Desktop
 
