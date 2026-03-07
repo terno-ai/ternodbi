@@ -12,7 +12,7 @@ We expose two separate MCP servers to separate concerns:
     *   `list_datasources`: See available databases.
     *   `list_tables`: See tables in a database.
     *   `list_table_columns`: Get columns for a specific table.
-    *   `get_schema`: Get DDL/Schema for specific tables.
+    *   `get_sample_data`: Get sample rows from a table.
     *   `execute_query`: Run `SELECT` queries with advanced pagination.
         *   Supports `offset` (page-based) and `cursor` (infinite scroll) modes.
         *   Security: All cursors are HMAC-signed to prevent tampering.
@@ -22,8 +22,8 @@ We expose two separate MCP servers to separate concerns:
 *   **Purpose**: Management and Curation.
 *   **Tools Provided**:
     *   `rename_table`: Change the public-facing name of a table.
-    *   `update_description`: Add documentation to tables/columns.
-    *   `hide_table`: Hide sensitive tables from the Query Server.
+    *   `update_table_description`: Add documentation to a table.
+    *   `sync_metadata`: Sync schemas from the database.
 
 ## Connecting to Claude Desktop
 
@@ -39,7 +39,7 @@ This uses `uvx` to download and run the latest version of TernoDBI automatically
       "command": "uvx",
       "args": ["--from", "terno-dbi", "dbi-mcp", "query"],
       "env": {
-        "TERNODBI_API_URL": "http://localhost:8000",
+        "TERNODBI_API_URL": "http://127.0.0.1:8376",
         "TERNODBI_API_KEY": "dbi_query_..."
       }
     },
@@ -47,7 +47,7 @@ This uses `uvx` to download and run the latest version of TernoDBI automatically
       "command": "uvx",
       "args": ["--from", "terno-dbi", "dbi-mcp", "admin"],
       "env": {
-        "TERNODBI_API_URL": "http://localhost:8000",
+        "TERNODBI_API_URL": "http://127.0.0.1:8376",
         "TERNODBI_API_KEY": "dbi_admin_..."
       }
     }
@@ -65,7 +65,7 @@ Use this if you are modifying TernoDBI code locally.
       "command": "/absolute/path/to/venv/bin/dbi-mcp",
       "args": ["query"],
       "env": {
-        "TERNODBI_API_URL": "http://localhost:8000",
+        "TERNODBI_API_URL": "http://127.0.0.1:8376",
         "TERNODBI_API_KEY": "dbi_query_..."
       }
     }

@@ -31,14 +31,14 @@ TernoDBI uses a custom implementation of API Key authentication (`ServiceToken`)
 Tokens can be restricted to specific Datasource IDs.
 ```python
 # Only allow access to Financial DB (ID: 5)
-python manage.py issue_token --name "FinBot" --type query --datasource 5
+ternodbi manage issue_token --name "FinBot" --type query --datasource 5
 ```
 
 ### Expiration
 Tokens can be set to auto-expire.
 ```python
 # Valid for 24 hours
-python manage.py issue_token --name "TempAccess" --expires 1
+ternodbi manage issue_token --name "TempAccess" --expires 1
 ```
 
 ## 3. Best Practices

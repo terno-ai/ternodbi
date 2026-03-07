@@ -94,14 +94,14 @@ Once integrated, you are no longer limited to the REST API. You can import Terno
 ### Example: Programmatically fetching schema context for an LLM
 ```python
 from terno_dbi.core.models import DataSource
-from terno_dbi.core.services.schema_service import generate_optimized_schema
+from terno_dbi.services.schema_utils import get_datasource_tables_info
 
 def my_custom_agent_view(request):
     # Retrieve the configured Snowflake connection
     datasource = DataSource.objects.get(name="Production Snowflake")
     
     # Retrieve context-optimized schema (applies Role filters and Column privacy)
-    schema_context = generate_optimized_schema(datasource)
+    schema_context = get_datasource_tables_info(datasource.id)
     
     # Inject directly into your Langchain or LlamaIndex prompt!
     prompt = f"Given this schema:\n{schema_context}\nWrite a SQL query for..."

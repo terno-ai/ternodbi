@@ -53,8 +53,8 @@ graph TD
 ### 1. The MCP Layer
 TernoDBI exposes two distinct servers via the [Model Context Protocol](https://modelcontextprotocol.io/):
 
-*   **Query Server**: Read-only. Exposes tools like `list_tables`, `get_schema`, and `execute_sql`. Designed for safety.
-*   **Admin Server**: Write-access. Exposes tools like `rename_table`, `update_description`. Designed for human-in-the-loop curation.
+*   **Query Server**: Read-only. Exposes tools like `list_tables`, `list_table_columns`, and `execute_query`. Designed for safety.
+*   **Admin Server**: Write-access. Exposes tools like `rename_table`, `update_table_description`, and `validate_connection`. Designed for human-in-the-loop curation.
 
 ### 2. SQLShield
 The security engine. It parses every incoming SQL query into an Abstract Syntax Tree (AST) using `sqlglot`.
