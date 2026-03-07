@@ -174,7 +174,7 @@ If you already have a mature Django infrastructure, TernoDBI can be integrated d
 4. Run `python manage.py migrate` to apply the TernoDBI schema alongside your existing tables.
 5. You can now use TernoDBI's internal models, query optimizers, and services directly programmatically inside your Django views or Celery tasks!
 
-*(Refer to our comprehensive Django Integration documentation for advanced overriding and customization).*
+*(Refer to our comprehensive [Django Integration Guide](docs/django-integration.md) for advanced overriding and customization).*
 
 ### Integrating with Custom AI Agents (LangChain, LlamaIndex, Python)
 TernoDBI's uniform REST API allows any custom agent architecture to ingest data securely without needing an MCP host.
@@ -198,6 +198,8 @@ Detailed guides for setting up and mastering TernoDBI:
 * [System Architecture](docs/architecture.md)
 * [MCP Integration](docs/mcp-guide.md)
 * [Security & SQLShield](docs/security.md)
+* [Django Integration](docs/django-integration.md)
+
 
 
 
