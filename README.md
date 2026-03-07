@@ -1,104 +1,83 @@
-# TernoDBI: Database Interface Layer
+# TernoDBI: Database Intelligence Layer
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![Django](https://img.shields.io/badge/django-4.2%2B-green)](https://www.djangoproject.com/)
-[![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)](tests/unit/services/pagination/)
 
-**TernoDBI** is a database interface layer designed for Security and Accuracy, bridging the gap between **AI Agents** and **Enterprise Data**. It provides a unified, secure API for interacting with warehouse-scale databases while enforcing strict access controls and optimizing schema context for LLMs.
+**TernoDBI** is a database intelligence layer designed for **Security** and **Accuracy**, bridging the gap between **AI Agents** and **Enterprise Data**. It acts as a powerful standalone **Model Context Protocol (MCP)** server, or it can be directly embedded into your existing **Django** projects. Either way, it provides a unified, secure API for interacting with warehouse-scale databases while enforcing strict access controls and optimizing the database schema context for LLMs.
 
----
+
+
+## Quick Start: Chat with your DB in 5 Minutes
+
+The easiest way to get started is to run TernoDBI locally and connect your favorite AI agent.
+
+1. **Install TernoDBI**
+   ```bash
+   pip install terno-dbi
+   ```
+2. **Start the Server**
+   ```bash
+   ternodbi start
+   ```
+   *(This automatically runs migrations, creates a default `admin`/`admin` user, and starts the server securely on `127.0.0.1:8376`)*
+3. **Configure your Database**
+   Open the admin panel at [http://127.0.0.1:8376/admin](http://127.0.0.1:8376/admin) and add your datasource connections.
+4. **Generate an Access Token**
+   Generate a token from the Admin UI or via the CLI:
+   ```bash
+   ternodbi manage issue_token --name "My Agent" --type query
+   ```
+5. **Configure MCP** (See [MCP Integration](#-ternodbi-as-an-mcp-server) below)
+6. **Start chatting with your enterprise data!**
+
+
 
 ## Key Features
 
-*   **Multi-Database Support**: Unified connection handling for **Postgres, MySQL, Snowflake, BigQuery, Databricks, Oracle, and SQLite**.
-*   **Split MCP Architecture**:
-    *   **Query Server**: Read-only operations (list tables, schema info, execute SELECT queries) optimized for agents.
-    *   **Admin Server**: Write/Management operations (rename tables, update metadata, manage descriptions) for human-in-the-loop workflows.
-*   **Enterprise Security**:
-    *   **Row Level Security (RLS)**: Define strict SQL-based filters (e.g., `department_id = 5`) automatically injected into every query.
-    *   **Privacy-by-Default**: Hide sensitive tables/columns from LLM context unless explicitly exposed to specific Roles.
-    *   **SQLShield**: Automatic AST-based SQL validation preventing injection and destructive operations.
-*   **LLM-Ready Schema Enrichment**:
-    *   **Semantic Metadata**: Decouple physical DB names (`t_users_v2`) from user-facing semantic names (`Customers`).
-    *   **Statistical Profiling**: Automatic cardinality and distribution stats to help LLMs generate correct filters.
-*   **High-Performance Pagination**:
-    *   **Cursor-Based**: **O(1) performance** (HMAC-signed). Benchmarks show **~28x speedup** over offset pagination.
-    *   **Streaming**: Server-side cursor support for exporting millions of rows.
+* **Multi-Database Support:** Out-of-the-box unified connection handling for Postgres, MySQL, Snowflake, BigQuery, Databricks, Oracle, and SQLite.
+* **Split MCP Architecture:**
+  * **Query Server:** Read-only operations (list tables, schema info, execute SELECT queries) highly optimized for AI agents.
+  * **Admin Server:** Write/Management operations (rename tables, update metadata, manage descriptions) designed for human-in-the-loop workflows.
+* **Enterprise-Grade Security:**
+  * **Row-Level Security (RLS):** Define strict SQL-based filters (e.g., `department_id = 5`) that are automatically injected into every executed query.
+  * **Privacy-by-Default:** Hide sensitive tables or columns from the LLM's context window unless explicitly exposed to specific Roles.
+  * **SQLShield:** Automatic AST-based SQL validation preventing prompt injection and destructive operations.
+* **LLM-Ready Schema Enrichment:**
+  * **Semantic Metadata:** Decouple physical database names (e.g., `t_users_v2_fnl`) from clean, user-facing semantic names (`Customers`).
+  * **Statistical Profiling:** Automatic cardinality and distribution statistics injection to help LLMs consistently generate correct SQL filters.
+* **High-Performance Pagination:**
+  * **Cursor-Based (HMAC):** $O(1)$ performance. Benchmarks demonstrate a ~28x speedup over offset pagination.
+  * **Server-Side Streaming:** Effortlessly export millions of rows via server-side cursors.
 
----
 
-## Documentation
 
-Detailed guides for setting up and using TernoDBI:
+## Usage & Core APIs
 
-*   **[Setup Guide](docs/setup.md)**: Installation, Environment Variables, and Server Startup.
-*   **[Architecture](docs/architecture.md)**: System design, request flow, and component breakdown.
-*   **[MCP Integration](docs/mcp-guide.md)**: How to connect agents (Claude Desktop, Terno Agents).
-*   **[Security & SQLShield](docs/security.md)**: Deep dive into our security model and token system.
-
----
-
-## Installation
-
-```bash
-pip install terno-dbi
-# OR for local development
-pip install -e .
-```
-
----
-
-## Configuration
-
-There are no manual configuration files to copy. Simply install the package and run it. The CLI handles environment setup and database initialization automatically.
-
-### Essential Variables
-
-| Variable | Description | Default |
-| :--- | :--- | :--- |
-| `DBI_SECRET_KEY` | Cryptographic key for signing cursors/tokens. | Unsafe Default |
-| `DBI_DEBUG` | Toggle debug mode. | `True` |
-| `DATABASE_ENGINE` | `MYSQL`, `POSTGRESQL`, or empty for SQLite. | `SQLite` |
-
-### Database Setup Scenarios
-
-*   **Standalone SQLite**: Set `DATABASE_ENGINE=` (empty). DB created in `server/db.sqlite3`.
-*   **Shared SQLite (Embedded)**: Set `DJANGO_PROJECT_PATH=/path/to/other/django`. TernoDBI will attach to that project's database.
-*   **Production (Postgres/MySQL)**: Set `DATABASE_ENGINE=POSTGRESQL` and provide `POSTGRES_DB`, `POSTGRES_USER`, etc.
-
----
-
-## Usage
-
-### 1. Running the API Server
-
+### Running the API Server
 ```bash
 ternodbi start
 ```
-This command automatically:
-1. Runs all required database migrations.
-2. Creates a default admin user (username: `admin`, password: `admin`) on first boot.
-3. Starts the server securely on `127.0.0.1:8376`.
 
-### 2. Management Commands (CLI)
-
-Use the built-in CLI to manage access tokens for your agents:
+### Management Commands (CLI)
+Automate your credential and access management simply via the built-in CLI:
 
 ```bash
-# General Query Token
+# General Query Token (For standard AI Assistants)
 ternodbi manage issue_token --name "Claude Agent" --type query --expires 30
 
-# Admin Token (Full Access)
+# Admin Token (Full System Access)
 ternodbi manage issue_token --name "System Admin" --type admin
 
-# Scoped Token (Specific Datasource)
+# Scoped Token (Restricted to a Specific Datasource)
 ternodbi manage issue_token --name "Finance Data Only" --type query --datasource 1
 ```
 
-### 3. Query API & Pagination
+### Query API & Pagination
 
-**Offset Mode (Default)** - Best for UI.
+TernoDBI provides versatile REST endpoints.
+
+**Offset Mode (Default)** - Best for standard UI implementations.
 ```json
 POST /api/query/datasources/1/query/
 {
@@ -109,7 +88,7 @@ POST /api/query/datasources/1/query/
 }
 ```
 
-**Cursor Mode (High Performance)** - Best for Agents & Data Export.
+**Cursor Mode (High Performance)** - Best for headless Agents & large Data Exports.
 ```json
 POST /api/query/datasources/1/query/
 {
@@ -120,102 +99,126 @@ POST /api/query/datasources/1/query/
 }
 ```
 
----
 
-## MCP Server Integration
 
-### Claude Desktop Setup
+## TernoDBI as an MCP Server
 
-#### Step 1: Download & Install Claude Desktop
+TernoDBI exposes Model Context Protocol (MCP) servers to effortlessly plug into MCP-compatible clients.
 
-Download Claude Desktop from [https://claude.ai/download](https://claude.ai/download) and install it on your machine.
+**Provided MCP Tools:**
+* **Query Service:** `list_datasource`, `list_tables`, `list_table_columns`, `execute_query` (restricted securely via SQLShield).
+* **Admin Service:** `add_datasource`, `delete_datasource`, `update_datasource`, `validate_connection`, `sync_metadata`, `rename_table`, `rename_columns`, `update_table_description`, `update_column_description`.
 
-#### Step 2: Open Configuration
+### Example: Connecting Claude Desktop
 
-1.  Launch Claude Desktop
-2.  Go to **Account** → **Settings**
-3.  Navigate to **Developer** section
-4.  Click **Edit Config** to open `claude_desktop_config.json`
-![Claude Desktop Settings](assets/config.png)
+1. Download and install [Claude Desktop](https://claude.ai/download).
+2. Open Claude Desktop, navigate to **Account → Settings → Developer**.
+3. Click **Edit Config** to open your `claude_desktop_config.json`.
+4. Paste the following configuration:
 
-#### Step 3: Add MCP Server Configuration
-
-Add the following configuration to your `claude_desktop_config.json`:
-
-**Local Development:**
-```json
-{
-  "mcpServers": {
-    "ternodbi-admin": {
-      "command": "/path/to/your/venv/bin/dbi-mcp",
-      "args": ["admin"],
-      "env": {
-        "TERNODBI_API_URL": "http://127.0.0.1:8376",
-        "TERNODBI_API_KEY": "dbi_admin_..."
-      }
-    },
-    "ternodbi-query": {
-      "command": "/path/to/your/venv/bin/dbi-mcp",
-      "args": ["query"],
-      "env": {
-        "TERNODBI_API_URL": "http://127.0.0.1:8376",
-        "TERNODBI_API_KEY": "dbi_query_..."
-      }
-    }
-  }
-}
-```
-> **Note:** Run `ternodbi mcp-config` in your terminal to automatically generate the exact absolute paths and environment variables for your current installation.
-
-**Production (UVX):**
 ```json
 {
   "mcpServers": {
     "ternodbi-query": {
       "command": "uvx",
-      "args": ["--from", "terno-dbi", "dbi-mcp", "query"],
+      "args": [
+        "--from",
+        "terno-dbi",
+        "dbi-mcp",
+        "query"
+      ],
       "env": {
-        "TERNODBI_API_URL": "https://dbi.yourdomain.com",
-        "TERNODBI_API_KEY": "dbi_query_..."
+        "TERNODBI_API_URL": "http://127.0.0.1:8376",
+        "TERNODBI_API_KEY": "dbi_query_YOUR_TOKEN_HERE"
+      }
+    },
+    "ternodbi-admin": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "terno-dbi",
+        "dbi-mcp",
+        "admin"
+      ],
+      "env": {
+        "TERNODBI_API_URL": "http://127.0.0.1:8376",
+        "TERNODBI_API_KEY": "dbi_admin_YOUR_TOKEN_HERE"
       }
     }
   }
 }
 ```
+5. **Restart Claude Desktop.** You can now prompt Claude: *"Show me the available datasources."*
 
-#### Step 4: Restart & Verify
 
-1.  Save and close the `claude_desktop_config.json` file.
-2.  **Completely quit** Claude Desktop (not just close the window).
-3.  Reopen Claude Desktop.
-4.  Ask Claude: *"Show me all datasources"*.
 
----
+## Advanced Integrations
 
-## Security Deep Dive
+### Integrating TernoDBI inside a Custom Django Project
+If you already have a mature Django infrastructure, TernoDBI can be integrated directly as a Django App.
 
-### Row Level Security (RLS)
-RLS filters (`TableRowFilter`) are injected into the AST of every query via `sqlshield`.
-*   **Logic**: `Global Filters AND (Role A Filter OR Role B Filter)`.
-*   **Example**: `region = 'US'` is automatically appended if the user is in the "US Region" group.
+**Step-by-Step Integration:**
+1. Install the package in your Django environment: `pip install terno-dbi`
+2. Add the core apps to your `INSTALLED_APPS` in `settings.py`:
+   ```python
+   INSTALLED_APPS = [
+       ...
+       'terno_dbi.core',
+       # Optional: include query or admin apps based on your needs
+   ]
+   ```
+3. Include TernoDBI's URL configurations in your root `urls.py`:
+   ```python
+   path('api/terno/', include('terno_dbi.server.urls')), # Or mount specific apps
+   ```
+4. Run `python manage.py migrate` to apply the TernoDBI schema alongside your existing tables.
+5. You can now use TernoDBI's internal models, query optimizers, and services directly programmatically inside your Django views or Celery tasks!
 
-### Privacy & Column Hiding
-*   **PrivateColumnSelector**: Columns marked as private (e.g., `salary`) are removed from the schema context sent to the LLM.
-*   **Access**: Only roles explicitly granted permission in `GroupColumnSelector` will see these columns.
+*(Refer to our comprehensive Django Integration documentation for advanced overriding and customization).*
 
----
+### Integrating with Custom AI Agents (LangChain, LlamaIndex, Python)
+TernoDBI's uniform REST API allows any custom agent architecture to ingest data securely without needing an MCP host.
 
-## Testing & Quality
+**Step-by-Step Integration:**
+1. Provision a specific `query` token for your custom script using the CLI.
+2. In your Agent implementation, define a tool to call `/api/query/datasources/` to discover connections.
+3. Your Agent flow should dictate:
+   - Call `/api/query/datasources/{id}/schema/` to fetch the context-optimized tables and columns.
+   - Inject this highly structured schema context into your LLM prompt.
+   - Send the LLM's generated `sql` string payload via `POST` to `/api/query/datasources/{id}/query/`.
+   - Iterate based on the response structure or SQLShield validation errors gracefully.
 
-*   **Coverage**: **99%** unit test coverage for core services.
-*   **Benchmarks**: Validated performance gains (~28x) for large datasets.
+*(Refer to our Custom Agent SDK examples for reference implementations in Python and TypeScript).*
 
-To run tests:
-```bash
-pytest tests/unit/services/pagination/
-```
 
----
+
+## Documentation
+Detailed guides for setting up and mastering TernoDBI:
+* [Setup Guide](docs/setup.md)
+* [System Architecture](docs/architecture.md)
+* [MCP Integration](docs/mcp-guide.md)
+* [Security & SQLShield](docs/security.md)
+
+
+
+## Contributing
+We welcome contributions.
+
+1. **Fork the repo.**
+2. **Create a feature branch:** `git checkout -b feat/your-feature`
+3. **Add tests & docs.**
+4. **Open a PR** describing your change.
+
+Please follow the repo's code style (Black/flake8) and include unit tests for security-critical logic.
+
+
+## Community & Support
+If you need help, have a question, or want to discuss a new feature:
+* Open an [Issue](https://github.com/terno-ai/ternodbi/issues) for bug reports and feature requests.
+* Start a [Discussion](https://github.com/terno-ai/ternodbi/discussions) for general questions or architectural feedback.
 
 ## License
-Apache 2.0 - See [LICENSE](LICENSE) for details.
+TernoDBI is proudly open-source and released under the **Apache 2.0 License**. See the [LICENSE](LICENSE) file for more details.
+
+
+*Built with precision for the next generation of Enterprise AI.*
