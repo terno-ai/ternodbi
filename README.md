@@ -169,7 +169,7 @@ If you already have a mature Django infrastructure, TernoDBI can be integrated d
    ```
 3. Include TernoDBI's URL configurations in your root `urls.py`:
    ```python
-   path('api/terno/', include('terno_dbi.server.urls')), # Or mount specific apps
+   path('api/terno/', include('terno_dbi.core.urls')), # Mounts the core API endpoints
    ```
 4. Run `python manage.py migrate` to apply the TernoDBI schema alongside your existing tables.
 5. You can now use TernoDBI's internal models, query optimizers, and services directly programmatically inside your Django views or Celery tasks!

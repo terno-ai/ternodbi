@@ -29,7 +29,7 @@ TernoDBI works out-of-the-box with SQLite, but production use requires configuri
 | :--- | :--- | :--- |
 | `DBI_SECRET_KEY` | Django cryptographic signing key. **Change this in prod!** | `django-insecure-change-me-in-production` |
 | `DBI_DEBUG` | Enable debug mode (detailed errors). | `True` |
-| `DBI_ALLOWED_HOSTS` | Comma-separated list of allowed hostnames. | `localhost,127.0.0.1` |
+| `DBI_ALLOWED_HOSTS` | Comma-separated list of allowed hostnames. | `*` |
 | `DATABASE_ENGINE` | Primary backend DB: `MYSQL`, `POSTGRESQL`, or empty (SQLite). | `SQLite` |
 
 ### Database Specific Configuration
