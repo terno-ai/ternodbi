@@ -1,18 +1,18 @@
 import os
 import sys
 import json
-from pathlib import Path
+
 
 def print_welcome_message(port):
     server_url = f"http://127.0.0.1:{port}"
     admin_url = f"{server_url}/admin"
-    
+
     print("\n" + "="*60)
     print("TernoDBI Server Started Successfully!")
     print("="*60)
     print(f"\nAPI Server:  {server_url}")
     print(f"Admin Panel: {admin_url}")
-    
+
     print("-" * 60)
     print("Next Steps")
     print("-" * 60)
@@ -29,7 +29,7 @@ def create_default_superuser():
     django.setup()
     from django.contrib.auth import get_user_model
     User = get_user_model()
-    
+
     if not User.objects.filter(is_superuser=True).exists():
         print("\nFirst Boot Detected: Creating default admin user...")
         # Create a default superuser
@@ -40,7 +40,7 @@ def create_default_superuser():
 
 def main():
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'terno_dbi.server.settings')
-    
+
     if len(sys.argv) < 2:
         print("Usage: ternodbi <command>")
         print("\nAvailable commands:")
@@ -53,15 +53,15 @@ def main():
 
     if command == "start":
         from django.core.management import execute_from_command_line
-        
+
         # 1. Run Migrations automatically and silently
         print("Initializing TernoDBI Database (this may take a moment)...")
         execute_from_command_line(['manage.py', 'migrate', '--verbosity', '0'])
         print("Database ready.")
-        
+
         # 2. Check and create default superuser
         create_default_superuser()
-        
+
         # 3. Start the server on port 8376
         port = "8376"
         print_welcome_message(port)
@@ -104,6 +104,7 @@ def main():
     else:
         print(f"Unknown command: {command}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

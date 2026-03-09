@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.models import Group, User
 import logging
@@ -106,6 +107,10 @@ class DataSource(models.Model):
         blank=True,
         related_name='datasources',
         help_text="Organisation this datasource belongs to"
+    )
+    is_global = models.BooleanField(
+        default=False,
+        help_text="If True, this datasource is accessible by all organisations (read-only)."
     )
 
     class Meta:
@@ -380,7 +385,7 @@ class ServiceToken(models.Model):
             return self.datasources.filter(enabled=True)
         elif self.organisation:
             return DataSource.objects.filter(
-                organisation=self.organisation,
+                Q(organisation=self.organisation) | Q(is_global=True),
                 enabled=True
             )
         else:
