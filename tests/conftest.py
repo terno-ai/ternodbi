@@ -6,11 +6,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 
 def pytest_configure(config):
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dbi_server.settings')
-
-    server_path = os.path.join(os.path.dirname(__file__), '..', 'server')
-    if server_path not in sys.path:
-        sys.path.insert(0, server_path)
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'terno_dbi.server.settings')
 
     import django
     django.setup()

@@ -257,6 +257,7 @@ def execute_query(request, datasource_identifier=None):
         cursor = body.get("cursor")
         direction = body.get("direction", "forward")
         order_by = body.get("order_by")  # List of {"column": "name", "direction": "DESC"}
+        include_count = body.get("include_count", False)
 
         role_ids = body.get("roles", [])
         from django.contrib.auth.models import Group
@@ -288,7 +289,8 @@ def execute_query(request, datasource_identifier=None):
             per_page=per_page,
             cursor=cursor,
             direction=direction,
-            order_by=order_by
+            order_by=order_by,
+            include_count=include_count
         )
         return JsonResponse(result)
 

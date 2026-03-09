@@ -20,6 +20,46 @@ from terno_dbi.services.pagination import (
 logger = logging.getLogger(__name__)
 
 
+_sqlglot_warned = False
+
+
+def _infer_order_from_sql(sql: str) -> List:
+    """
+    Extract ORDER BY columns from SQL using sqlglot.
+    Returns empty list if parsing fails, no ORDER BY found,
+    or query contains GROUP BY (aggregation results are not
+    suitable for keyset/cursor pagination).
+    """
+    global _sqlglot_warned
+    try:
+        import sqlglot
+        parsed = sqlglot.parse_one(sql)
+        # GROUP BY queries produce small, non-deterministic result sets
+        # that are better served by offset pagination.
+        if parsed.find(sqlglot.exp.Group):
+            return []
+        order = parsed.find(sqlglot.exp.Order)
+        if not order:
+            return []
+        return [
+            OrderColumn(
+                column=expr.this.alias_or_name,
+                direction="DESC" if expr.args.get("desc") else "ASC"
+            )
+            for expr in order.expressions
+        ]
+    except ImportError:
+        if not _sqlglot_warned:
+            logger.warning(
+                "sqlglot is not installed; ORDER BY auto-detection disabled. "
+                "Cursor mode will fall back to offset when no explicit order_by is provided."
+            )
+            _sqlglot_warned = True
+        return []
+    except Exception:
+        return []
+
+
 def execute_native_sql(datasource, native_sql, page=1, per_page=50):
     try:
         connector = ConnectorFactory.create_connector(
@@ -51,7 +91,8 @@ def execute_paginated_query(
     per_page: int = 50,
     cursor: Optional[str] = None,
     direction: str = "forward",
-    order_by: Optional[List[Dict[str, str]]] = None
+    order_by: Optional[List[Dict[str, str]]] = None,
+    include_count: bool = False
 ) -> Dict[str, Any]:
     try:
         connector = ConnectorFactory.create_connector(
@@ -77,11 +118,18 @@ def execute_paginated_query(
         per_page = min(per_page, 500)
 
         if mode == PaginationMode.CURSOR and not order_columns:
-            logger.info(
-                f"Cursor pagination requested without order_by for datasource={datasource.id}. "
-                "Auto-falling back to offset mode."
-            )
-            mode = PaginationMode.OFFSET
+            order_columns = _infer_order_from_sql(native_sql)
+            if order_columns:
+                logger.info(
+                    "Cursor mode: auto-detected ORDER BY from SQL: %s",
+                    [(o.column, o.direction) for o in order_columns]
+                )
+            else:
+                logger.info(
+                    "Cursor mode: no ORDER BY found in SQL for datasource=%s, "
+                    "falling back to offset.", datasource.id
+                )
+                mode = PaginationMode.OFFSET
 
         config = PaginationConfig(
             mode=mode,
@@ -89,7 +137,8 @@ def execute_paginated_query(
             per_page=per_page,
             cursor=cursor,
             direction=direction,
-            order_by=order_columns if order_columns else []
+            order_by=order_columns if order_columns else [],
+            include_count=include_count
         )
 
         service = PaginationService(
@@ -120,7 +169,8 @@ def execute_paginated_query(
 
         response = {
             'status': 'success',
-            'table_data': table_data
+            'table_data': table_data,
+            'pagination_mode_used': config.mode.value
         }
 
         if result.warnings:

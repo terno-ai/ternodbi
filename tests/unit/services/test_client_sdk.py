@@ -208,23 +208,6 @@ class TestClientMethods:
         assert request_body['per_page'] == 100
 
     @responses.activate
-    def test_get_schema(self):
-        """Should retrieve full schema for datasource."""
-        from terno_dbi.client import TernoDBIClient
-        
-        responses.add(
-            responses.GET,
-            'https://test.com/api/query/datasources/1/schema/',
-            json={'datasource': 'test', 'schema': []},
-            status=200
-        )
-        
-        client = TernoDBIClient(base_url='https://test.com', api_key='key')
-        result = client.get_schema(datasource=1)
-        
-        assert 'schema' in result
-
-    @responses.activate
     def test_create_datasource(self):
         """Should create new datasource via admin API."""
         from terno_dbi.client import TernoDBIClient

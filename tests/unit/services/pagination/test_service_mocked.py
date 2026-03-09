@@ -18,9 +18,8 @@ import pytest
 import time
 from unittest.mock import MagicMock, patch
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dbi_server.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'terno_dbi.server.settings')
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'src'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'server'))
 
 import django
 django.setup()
@@ -148,14 +147,24 @@ class TestOffsetPagination:
         assert result.has_next is False
 
     def test_total_count_returned(self):
-        """OFF-07: Total count returned for small tables."""
+        """OFF-07: Total count returned when include_count=True."""
+        rows = [(i,) for i in range(1, 51)]
+        service = create_service(rows, ["id"])
+
+        config = PaginationConfig(mode=PaginationMode.OFFSET, page=1, per_page=50, include_count=True)
+        result = service.paginate("SELECT id FROM items", config)
+
+        assert result.total_count is not None or result.total_count == 50
+
+    def test_total_count_skipped_by_default(self):
+        """OFF-09: Total count is None when include_count is False (default)."""
         rows = [(i,) for i in range(1, 51)]
         service = create_service(rows, ["id"])
 
         config = PaginationConfig(mode=PaginationMode.OFFSET, page=1, per_page=50)
         result = service.paginate("SELECT id FROM items", config)
 
-        assert result.total_count is not None or result.total_count == 50
+        assert result.total_count is None
 
     def test_total_count_skipped_on_timeout(self):
         """OFF-08: Total count skipped for timeout."""

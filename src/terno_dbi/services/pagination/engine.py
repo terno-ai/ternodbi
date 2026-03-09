@@ -95,7 +95,7 @@ class PaginationService:
         has_next = len(rows) > config.per_page
         data = rows[:config.per_page]
 
-        total = self._get_total_count(sql)
+        total = self._get_total_count(sql) if config.include_count else None
         total_pages = None
         if total is not None:
             total_pages = (total + config.per_page - 1) // config.per_page

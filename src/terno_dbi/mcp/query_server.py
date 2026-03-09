@@ -65,12 +65,12 @@ async def list_tools() -> List[Tool]:
             description="""Execute a SQL query with pagination support.
 
 Pagination Modes:
-- offset: Traditional page-based (default). Good for UI with page numbers.
-- cursor: High-performance for large datasets. Use for infinite scroll/streaming.
+- offset: Traditional page-based (default). Returns has_next/has_prev.
+- cursor: High-performance keyset pagination for large datasets. Requires ORDER BY in the SQL or an explicit order_by parameter.
 
-For very large results, use cursor mode with the returned next_cursor.
+The response includes pagination_mode_used to indicate which mode was actually applied. If cursor mode is requested but no ordering can be determined, the system auto-falls back to offset mode.
 
-Tip: To get the total row count of a table without scanning it, use 'offset' mode with a LIMIT 1 query (e.g. SELECT * FROM table LIMIT 1). The response will include 'row_count' metadata. Do not run SELECT COUNT(*).""",
+To get total row count, set include_count=true (off by default for performance).""",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -103,6 +103,22 @@ Tip: To get the total row count of a table without scanning it, use 'offset' mod
                         "type": "string",
                         "enum": ["forward", "backward"],
                         "description": "Direction for cursor pagination (default: forward)"
+                    },
+                    "order_by": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "column": {"type": "string"},
+                                "direction": {"type": "string", "enum": ["ASC", "DESC"]}
+                            },
+                            "required": ["column"]
+                        },
+                        "description": "Explicit ordering columns for cursor mode. If omitted, ORDER BY is auto-detected from the SQL."
+                    },
+                    "include_count": {
+                        "type": "boolean",
+                        "description": "If true, includes total row_count in response (default: false). Expensive on large tables."
                     }
                 },
                 "required": ["datasource", "sql"]
@@ -168,6 +184,8 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             per_page = arguments.get("per_page", 50)
             cursor = arguments.get("cursor")
             direction = arguments.get("direction", "forward")
+            order_by = arguments.get("order_by")
+            include_count = arguments.get("include_count", False)
             result = client.execute_query(
                 datasource,
                 sql,
@@ -175,7 +193,9 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 page=page,
                 per_page=per_page,
                 cursor=cursor,
-                direction=direction
+                direction=direction,
+                order_by=order_by,
+                include_count=include_count
             )
 
         elif name == "get_sample_data":

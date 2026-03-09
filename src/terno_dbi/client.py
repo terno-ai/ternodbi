@@ -11,7 +11,7 @@ DatasourceIdentifier = Union[int, str]
 
 class TernoDBIClient:
     def __init__(self, base_url: Optional[str] = None, api_key: Optional[str] = None):
-        self.base_url = base_url or os.environ.get("TERNODBI_API_URL") or "http://127.0.0.1:8000"
+        self.base_url = base_url or os.environ.get("TERNODBI_API_URL") or "http://127.0.0.1:8376"
         self.api_key = api_key or os.environ.get("TERNODBI_API_KEY")
 
         if self.base_url and self.base_url.endswith("/"):
@@ -147,7 +147,8 @@ class TernoDBIClient:
         cursor: Optional[str] = None,
         direction: str = "forward",
         order_by: Optional[List[Dict[str, str]]] = None,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        include_count: bool = False
     ) -> Dict:
         url = f"{self.base_url}/api/query/datasources/{datasource}/query/"
 
@@ -158,7 +159,8 @@ class TernoDBIClient:
             "sql": sql,
             "pagination_mode": pagination_mode,
             "page": page,
-            "per_page": min(per_page, 500)
+            "per_page": min(per_page, 500),
+            "include_count": include_count,
         }
 
         if cursor:

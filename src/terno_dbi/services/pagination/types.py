@@ -31,6 +31,7 @@ class PaginationConfig:
     cursor: Optional[str] = None
     direction: str = "forward"
     order_by: List[OrderColumn] = field(default_factory=list)
+    include_count: bool = False
 
 @dataclass
 class PaginatedResult:
