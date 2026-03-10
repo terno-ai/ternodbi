@@ -16,7 +16,7 @@ def print_welcome_message(port):
     print("-" * 60)
     print("Next Steps")
     print("-" * 60)
-    print("1. Open the Admin Panel and login using the credentials above.")
+    print("1. Open the Admin Panel and login.(default Username: admin, Password: admin)")
     print("2. Add your Datasource connection in the Admin UI.")
     print("3. To connect AI agents (Claude Desktop, Cursor) via MCP,")
     print("   open a new terminal tab and run:")
