@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Architecture - TernoDBI</title>
+    <link rel="icon" type="image/png" href="static/terno_dbi/img/logo-icon.png">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="static/terno_dbi/css/main.css">
+</head>
+
+<body>
+    <header>
+        <div class="container header-content">
+            <a href="index.html" class="logo">
+                <img src="static/terno_dbi/img/logo.png" alt="TernoDBI"
+                    style="height: 40px; width: auto; object-fit: contain;">
+                <span class="logo-text">TernoDBI</span>
+            </a>
+            <nav>
+                <ul>
+                    <li><a href="setup.html">Doc<span class="hide-mobile">umentation</span></a></li>
+                    <li><a href="https://github.com/terno-ai/ternodbi" target="_blank">GitHub</a></li>
+                    <li><a href="https://pypi.org/project/terno-dbi/" target="_blank">PyPI</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <div class="docs-layout">
+            <aside class="docs-sidebar">
+                <h3>Documentation</h3>
+                <ul class="docs-nav">
+                    <li><a href="setup.html">Setup & Installation</a></li>
+                    <li><a href="architecture.html" class="active">Architecture</a></li>
+                    <li><a href="mcp-guide.html">MCP Integration</a></li>
+                    <li><a href="security.html">Security & Tokens</a></li>
+                    <li><a href="api.html">API Reference</a></li>
+                </ul>
+            </aside>
+
+            <article class="docs-content">
+                <h1>TernoDBI Architecture</h1>
+                <p>TernoDBI acts as an intelligence and security layer between AI agents and your databases. It
+                    translates high-level requests into secure, optimized SQL.</p>
+
+                <h2>1. Model Context Protocol (MCP) Interface</h2>
+                <p>TernoDBI natively supports MCP, providing standardized tools for agents like Claude and Cursor.</p>
+                <ul>
+                    <li><strong>Query Server</strong>: Provides read-only access to data.</li>
+                    <li><strong>Admin Server</strong>: Allows agents to explore and enrich schema metadata.</li>
+                </ul>
+
+                <h2>2. SQLShield Engine</h2>
+                <p>The core security component that inspects every query before execution.</p>
+                <ul>
+                    <li><strong>Validation</strong>: Rejects mutations like INSERT, DROP, or ALTER.</li>
+                    <li><strong>Transformation</strong>: Can rewrite queries to apply RLS or force LIMITs.</li>
+                    <li><strong>Dialect Translation</strong>: Handles differences between Postgres, MySQL, Snowflake,
+                        etc.</li>
+                </ul>
+
+                <h2>3. Unified Connector System</h2>
+                <p>A factory-based abstraction over SQLAlchemy and native drivers, providing a single interface for all
+                    supported databases.</p>
+
+                <h2>4. Service Token Authentication</h2>
+                <p>Custom authentication designed for agents, with scoped access and expiration auditing.</p>
+            </article>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container footer-content">
+            <p>&copy; 2026 TernoAI Inc. All rights reserved.</p>
+            <p>TernoDBI v0.1.0 • Apache 2.0 License</p>
+        </div>
+    </footer>
+</body>
+
+</html>

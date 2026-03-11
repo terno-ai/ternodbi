@@ -18,13 +18,16 @@
     <header>
         <div class="container header-content">
             <a href="/" class="logo">
-                <img src="{% static 'terno_dbi/img/logo.png' %}" alt="TernoDBI" height="128">
+                <img src="{% static 'terno_dbi/img/logo.png' %}" alt="TernoDBI"
+                    style="height: 40px; width: auto; object-fit: contain;">
+                <span class="logo-text">TernoDBI</span>
             </a>
             <nav>
                 <ul>
-                    <li><a href="/docs/setup/">Documentation</a></li>
+                    <li><a href="https://terno-ai.github.io/ternodbi/setup.html" target="_blank">Doc<span
+                                class="hide-mobile">umentation</span></a></li>
+                    <li><a href="/admin/">Admin</a></li>
                     <li><a href="https://github.com/terno-ai/ternodbi" target="_blank">GitHub</a></li>
-                    <li><a href="/admin/">Admin Console</a></li>
                 </ul>
             </nav>
         </div>

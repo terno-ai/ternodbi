@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Integration - TernoDBI</title>
+    <link rel="icon" type="image/png" href="static/terno_dbi/img/logo-icon.png">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="static/terno_dbi/css/main.css">
+</head>
+
+<body>
+    <header>
+        <div class="container header-content">
+            <a href="index.html" class="logo">
+                <img src="static/terno_dbi/img/logo.png" alt="TernoDBI"
+                    style="height: 40px; width: auto; object-fit: contain;">
+                <span class="logo-text">TernoDBI</span>
+            </a>
+            <nav>
+                <ul>
+                    <li><a href="setup.html">Doc<span class="hide-mobile">umentation</span></a></li>
+                    <li><a href="https://github.com/terno-ai/ternodbi" target="_blank">GitHub</a></li>
+                    <li><a href="https://pypi.org/project/terno-dbi/" target="_blank">PyPI</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <div class="docs-layout">
+            <aside class="docs-sidebar">
+                <h3>Documentation</h3>
+                <ul class="docs-nav">
+                    <li><a href="setup.html">Setup & Installation</a></li>
+                    <li><a href="architecture.html">Architecture</a></li>
+                    <li><a href="mcp-guide.html" class="active">MCP Integration</a></li>
+                    <li><a href="security.html">Security & Tokens</a></li>
+                    <li><a href="api.html">API Reference</a></li>
+                </ul>
+            </aside>
+
+            <article class="docs-content">
+                <h1>MCP Integration</h1>
+                <p>TernoDBI is built from the ground up to support the Model Context Protocol (MCP). This allows AI
+                    agents like Claude Desktop to interact with your data seamlessly.</p>
+
+                <h2>Using the CLI</h2>
+                <p>TernoDBI provides a dedicated command to output your MCP configuration snippet.</p>
+                <pre><code>ternodbi mcp-config</code></pre>
+
+                <h2>Claude Desktop Configuration</h2>
+                <p>Add the following to your <code>claude_desktop_config.json</code>:</p>
+                <pre><code>{
+  "mcpServers": {
+    "ternodbi": {
+      "command": "uvx",
+      "args": ["--from", "terno-dbi", "dbi-mcp", "query"],
+      "env": {
+        "TERNODBI_API_URL": "http://localhost:8376",
+        "TERNODBI_API_KEY": "YOUR_TOKEN"
+      }
+    }
+  }
+}</code></pre>
+
+                <h2>Tools Provided</h2>
+                <ul>
+                    <li><strong>list_tables</strong>: List tables available to the agent.</li>
+                    <li><strong>describe_table</strong>: Get columns and metadata for a table.</li>
+                    <li><strong>execute_query</strong>: Run a secure SQL query.</li>
+                </ul>
+            </article>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container footer-content">
+            <p>&copy; 2026 TernoAI Inc. All rights reserved.</p>
+            <p>TernoDBI v0.1.0 • Apache 2.0 License</p>
+        </div>
+    </footer>
+</body>
+
+</html>

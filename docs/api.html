@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Reference - TernoDBI</title>
+    <link rel="icon" type="image/png" href="static/terno_dbi/img/logo-icon.png">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="static/terno_dbi/css/main.css">
+</head>
+
+<body>
+    <header>
+        <div class="container header-content">
+            <a href="index.html" class="logo">
+                <img src="static/terno_dbi/img/logo.png" alt="TernoDBI"
+                    style="height: 40px; width: auto; object-fit: contain;">
+                <span class="logo-text">TernoDBI</span>
+            </a>
+            <nav>
+                <ul>
+                    <li><a href="setup.html">Doc<span class="hide-mobile">umentation</span></a></li>
+                    <li><a href="https://github.com/terno-ai/ternodbi" target="_blank">GitHub</a></li>
+                    <li><a href="https://pypi.org/project/terno-dbi/" target="_blank">PyPI</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <div class="docs-layout">
+            <aside class="docs-sidebar">
+                <h3>Documentation</h3>
+                <ul class="docs-nav">
+                    <li><a href="setup.html">Setup & Installation</a></li>
+                    <li><a href="architecture.html">Architecture</a></li>
+                    <li><a href="mcp-guide.html">MCP Integration</a></li>
+                    <li><a href="security.html">Security & Tokens</a></li>
+                    <li><a href="api.html" class="active">API Reference</a></li>
+                </ul>
+            </aside>
+
+            <article class="docs-content">
+                <h1>API Reference</h1>
+                <p>The TernoDBI API is RESTful and designed for easy consumption by AI agents.</p>
+
+                <h2>Query Service</h2>
+                <div class="api-table-wrapper">
+                    <table class="api-table">
+                        <thead>
+                            <tr>
+                                <th>Method</th>
+                                <th>Endpoint</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><span class="method get">GET</span></td>
+                                <td><code>/api/query/health/</code></td>
+                                <td>Service health check</td>
+                            </tr>
+                            <tr>
+                                <td><span class="method get">GET</span></td>
+                                <td><code>/api/query/datasources/</code></td>
+                                <td>List available datasources</td>
+                            </tr>
+                            <tr>
+                                <td><span class="method post">POST</span></td>
+                                <td><code>/api/query/datasources/{id}/query/</code></td>
+                                <td>Execute a SQL query</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <h2>Admin Service</h2>
+                <div class="api-table-wrapper">
+                    <table class="api-table">
+                        <thead>
+                            <tr>
+                                <th>Method</th>
+                                <th>Endpoint</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><span class="method post">POST</span></td>
+                                <td><code>/api/admin/datasources/</code></td>
+                                <td>Add a new datasource</td>
+                            </tr>
+                            <tr>
+                                <td><span class="method get">GET</span></td>
+                                <td><code>/api/admin/datasources/{id}/sync/</code></td>
+                                <td>Triger metadata sync</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </article>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container footer-content">
+            <p>&copy; 2026 TernoAI Inc. All rights reserved.</p>
+            <p>TernoDBI v0.1.0 • Apache 2.0 License</p>
+        </div>
+    </footer>
+</body>
+
+</html>

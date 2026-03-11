@@ -8,6 +8,7 @@ DEFAULT_DBI_HOME = Path.home() / '.ternodbi'
 
 import terno_dbi
 TERNO_DBI_PATH = Path(terno_dbi.__file__).resolve().parent
+BASE_DIR = TERNO_DBI_PATH.parent.parent
 
 SECRET_KEY = os.environ.get('DBI_SECRET_KEY', 'django-insecure-change-me-in-production')
 DEBUG = os.environ.get('DBI_DEBUG', 'True').lower() == 'true'
