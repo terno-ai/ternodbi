@@ -44,36 +44,110 @@
             </aside>
 
             <article class="docs-content">
-                <h1>Setup & Installation</h1>
-                <p>Welcome to TernoDBI. This guide will help you get started with installing and configuring TernoDBI to
-                    bridge your databases with AI agents.</p>
+                <h1>Installation & Setup Guide</h1>
 
-                <h2>Installation</h2>
-                <pre><code>pip install terno-dbi</code></pre>
-
-                <h2>Configuration</h2>
-                <p>TernoDBI uses environment variables for configuration. Create a <code>.env</code> file in your
-                    project root or export variables directly.</p>
-
-                <h3>Core Settings</h3>
+                <h2>Prerequisites</h2>
                 <ul>
-                    <li><code>DATABASE_ENGINE</code>: Supported values: <code>POSTGRESQL</code>, <code>MYSQL</code>,
-                        <code>SNOWFLAKE</code>, <code>BIGQUERY</code>, <code>DATABRICKS</code>, <code>ORACLE</code>.
-                    </li>
-                    <li><code>SECRET_KEY</code>: A secure random string for encryption.</li>
-                    <li><code>DEBUG</code>: Set to <code>True</code> for development, <code>False</code> for production.
-                    </li>
+                    <li>Python 3.10+</li>
+                    <li>pip or uv</li>
+                    <li>A supported database (Postgres, MySQL, Snowflake, BigQuery, Databricks, Oracle, or SQLite)</li>
                 </ul>
 
-                <h3>Database Specific</h3>
-                <p>Depending on your <code>DATABASE_ENGINE</code>, set the appropriate credentials (e.g.,
-                    <code>POSTGRES_DB</code>, <code>POSTGRES_USER</code>, etc.).
-                </p>
+                <h2>Installation</h2>
+                <h3>From PyPI</h3>
+                <pre><code>pip install terno-dbi</code></pre>
+
+                <h3>From Source (Development)</h3>
+                <pre><code>git clone https://github.com/terno-ai/ternodbi
+cd ternodbi
+pip install -e .</code></pre>
+
+                <h2>Configuration</h2>
+                <p>TernoDBI works out-of-the-box with SQLite, but production use requires configuring environment
+                    variables.</p>
+
+                <h3>Environment Variables</h3>
+                <div class="api-table-wrapper">
+                    <table class="api-table">
+                        <thead>
+                            <tr>
+                                <th>Variable</th>
+                                <th>Description</th>
+                                <th>Default</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>DBI_SECRET_KEY</code></td>
+                                <td>Django cryptographic signing key. <strong>Change this in prod!</strong></td>
+                                <td><code>django-insecure...</code></td>
+                            </tr>
+                            <tr>
+                                <td><code>DBI_DEBUG</code></td>
+                                <td>Enable debug mode (detailed errors).</td>
+                                <td><code>True</code></td>
+                            </tr>
+                            <tr>
+                                <td><code>DBI_ALLOWED_HOSTS</code></td>
+                                <td>Comma-separated list of allowed hostnames.</td>
+                                <td><code>*</code></td>
+                            </tr>
+                            <tr>
+                                <td><code>DATABASE_ENGINE</code></td>
+                                <td>Primary backend DB: <code>MYSQL</code>, <code>POSTGRESQL</code>, or empty (SQLite).
+                                </td>
+                                <td><code>SQLite</code></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <h3>Database Specific Configuration</h3>
+                <h4>PostgreSQL (<code>DATABASE_ENGINE=POSTGRESQL</code>)</h4>
+                <ul>
+                    <li><code>POSTGRES_DB</code></li>
+                    <li><code>POSTGRES_USER</code></li>
+                    <li><code>POSTGRES_PASS</code></li>
+                    <li><code>POSTGRES_HOST</code></li>
+                    <li><code>POSTGRES_PORT</code></li>
+                </ul>
+
+                <h4>MySQL (<code>DATABASE_ENGINE=MYSQL</code>)</h4>
+                <ul>
+                    <li><code>MYSQL_DB</code></li>
+                    <li><code>MYSQL_USER</code></li>
+                    <li><code>MYSQL_PASS</code></li>
+                    <li><code>MYSQL_HOST</code></li>
+                    <li><code>MYSQL_PORT</code></li>
+                </ul>
 
                 <h2>Running the Server</h2>
-                <p>Start the server with a single command:</p>
-                <pre><code>ternodbi start</code></pre>
-                <p>This command handles migrations, default user creation, and starts the API host.</p>
+                <ol>
+                    <li>
+                        <strong>Start the Server</strong>:
+                        <pre><code>ternodbi start</code></pre>
+                        <p>This single command automatically runs database migrations, creates a default admin user, and
+                            starts the API server.</p>
+                        <ul>
+                            <li>The Health Check will be available at: <code>http://localhost:8376/api/health/</code>
+                            </li>
+                            <li>The Admin Console will be at: <code>http://localhost:8376/admin/</code></li>
+                        </ul>
+                    </li>
+                </ol>
+
+                <h2>Creating Your First User & Token</h2>
+                <ol>
+                    <li>
+                        <strong>Create Superuser</strong> (if you don't want to use the default
+                        <code>admin/admin</code>):
+                        <pre><code>ternodbi manage createsuperuser</code></pre>
+                    </li>
+                    <li>
+                        <strong>Issue API Token</strong> (for Agents):
+                        <pre><code>ternodbi manage issue_token --name "MyFirstAgent" --type query</code></pre>
+                    </li>
+                </ol>
             </article>
         </div>
     </main>

@@ -10,6 +10,10 @@
         href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="static/terno_dbi/css/main.css">
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true, theme: 'dark' });
+    </script>
 </head>
 
 <body>
@@ -44,32 +48,107 @@
             </aside>
 
             <article class="docs-content">
-                <h1>TernoDBI Architecture</h1>
-                <p>TernoDBI acts as an intelligence and security layer between AI agents and your databases. It
-                    translates high-level requests into secure, optimized SQL.</p>
+                <h1>Architecture Overview</h1>
+                <p>TernoDBI is designed as a <strong>Database Interface Layer</strong> that sits between your AI Agents
+                    and your physical data warehouses. It solves the "last mile" problem of letting LLMs query databases
+                    securely.</p>
 
-                <h2>1. Model Context Protocol (MCP) Interface</h2>
-                <p>TernoDBI natively supports MCP, providing standardized tools for agents like Claude and Cursor.</p>
+                <h2>System Diagram</h2>
+                <div class="mermaid">
+                    graph TD
+                    User([AI Agent / Claude]) -->|HTTP / MCP| Server[TernoDBI Server]
+
+                    subgraph Pipeline[" "]
+                    direction TB
+                    Server -->|1. Authenticate| Auth[Auth Middleware]
+                    Auth -->|Valid| Router{Request Type}
+
+                    %% Admin Path (Bypasses Shield)
+                    Router -->|Admin Tool| Admin[Admin Service]
+                    Admin -->|Metadata Ops| Connect[Unified Connector]
+
+                    %% Query Path (Protected)
+                    Router -->|Query Tool| Shield[SQLShield Engine]
+                    Shield -->|2. Parse & Validate| AST[AST Analysis]
+                    AST --x|Forbidden| Error[Block Request]
+                    AST -->|3. Transform| SafeQuery[Safe SQL Builder]
+                    SafeQuery -->|Execute| Connect
+                    end
+
+                    Connect -->|SQL Dialect| DB[(Target Warehouse)]
+
+                    subgraph Backends[" "]
+                    direction LR
+                    DB -.-> PG[Postgres]
+                    DB -.-> MySQL[MySQL]
+                    DB -.-> SQ[SQLite]
+                    DB -.-> Snow[Snowflake]
+                    DB -.-> BQ[BigQuery]
+                    DB -.-> DBX[Databricks]
+                    DB -.-> Ora[Oracle]
+                    end
+
+                    %% Styling
+                    classDef protective fill:#2e001f,stroke:#ff0055,stroke-width:2px;
+                    classDef admin fill:#0f172a,stroke:#6366f1,stroke-width:2px,stroke-dasharray: 5 5;
+                    classDef container fill:transparent,stroke:#94a3b8,stroke-width:2px,color:#fff;
+
+                    class Shield,AST,SafeQuery protective;
+                    class Admin admin;
+                    class Pipeline,Backends container;
+                </div>
+
+                <h2>Core Components</h2>
+
+                <h3>1. The MCP Layer</h3>
+                <p>TernoDBI exposes two distinct servers via the <a href="https://modelcontextprotocol.io/"
+                        target="_blank">Model Context Protocol</a>:</p>
                 <ul>
-                    <li><strong>Query Server</strong>: Provides read-only access to data.</li>
-                    <li><strong>Admin Server</strong>: Allows agents to explore and enrich schema metadata.</li>
+                    <li><strong>Query Server</strong>: Read-only. Exposes tools like <code>list_tables</code>,
+                        <code>list_table_columns</code>, and <code>execute_query</code>. Designed for safety.
+                    </li>
+                    <li><strong>Admin Server</strong>: Write-access. Exposes tools like <code>rename_table</code>,
+                        <code>update_table_description</code>, and <code>validate_connection</code>. Designed for
+                        human-in-the-loop curation.
+                    </li>
                 </ul>
 
-                <h2>2. SQLShield Engine</h2>
-                <p>The core security component that inspects every query before execution.</p>
+                <h3>2. SQLShield</h3>
+                <p>The security engine. It parses every incoming SQL query into an Abstract Syntax Tree (AST) using
+                    <code>sqlglot</code>.
+                </p>
                 <ul>
-                    <li><strong>Validation</strong>: Rejects mutations like INSERT, DROP, or ALTER.</li>
-                    <li><strong>Transformation</strong>: Can rewrite queries to apply RLS or force LIMITs.</li>
-                    <li><strong>Dialect Translation</strong>: Handles differences between Postgres, MySQL, Snowflake,
-                        etc.</li>
+                    <li><strong>Validation</strong>: Rejects mutations (<code>INSERT</code>, <code>DROP</code>,
+                        <code>ALTER</code>).
+                    </li>
+                    <li><strong>Transformation</strong>: Can rewrite queries (e.g., forcing <code>LIMIT</code>, applying
+                        Row
+                        Level Security).</li>
+                    <li><strong>Dialect Translation</strong>: Converts generic SQL into database-specific dialects
+                        (e.g.,
+                        handling BigQuery backticks vs Postgres quotes).</li>
                 </ul>
 
-                <h2>3. Unified Connector System</h2>
-                <p>A factory-based abstraction over SQLAlchemy and native drivers, providing a single interface for all
-                    supported databases.</p>
+                <h3>3. Unified Connector System</h3>
+                <p>A factory-based abstraction over <code>SQLAlchemy</code> and native drivers.</p>
+                <ul>
+                    <li><strong>Single Interface</strong>: Application code (and Agents) interact with a single
+                        <code>Connector</code> interface.
+                    </li>
+                    <li><strong>Complexity Handling</strong>: TernoDBI handles the complexity of connection pooling,
+                        cursor
+                        management, and type conversion for each backend.</li>
+                </ul>
 
-                <h2>4. Service Token Authentication</h2>
-                <p>Custom authentication designed for agents, with scoped access and expiration auditing.</p>
+                <h3>4. Service Token Authentication</h3>
+                <p>A custom authentication system designed for agents.</p>
+                <ul>
+                    <li><strong>Scopes</strong>: Tokens can be global or restricted to specific Datasource IDs.</li>
+                    <li><strong>Expiration</strong>: Tokens can be short-lived (e.g., ephemeral tokens for a specific
+                        chat
+                        session).</li>
+                    <li><strong>Audit</strong>: Usage is tracked per-token.</li>
+                </ul>
             </article>
         </div>
     </main>

@@ -44,34 +44,102 @@
             </aside>
 
             <article class="docs-content">
-                <h1>MCP Integration</h1>
-                <p>TernoDBI is built from the ground up to support the Model Context Protocol (MCP). This allows AI
-                    agents like Claude Desktop to interact with your data seamlessly.</p>
+                <h1>Model Context Protocol (MCP) Integration</h1>
+                <p>TernoDBI provides first-class support for the Model Context Protocol, enabling it to function as a
+                    tool provider for Claude Desktop, Terno Agents, or any other MCP-compliant client.</p>
 
-                <h2>Using the CLI</h2>
-                <p>TernoDBI provides a dedicated command to output your MCP configuration snippet.</p>
-                <pre><code>ternodbi mcp-config</code></pre>
+                <h2>Servers</h2>
+                <p>We expose two separate MCP servers to separate concerns:</p>
 
-                <h2>Claude Desktop Configuration</h2>
-                <p>Add the following to your <code>claude_desktop_config.json</code>:</p>
+                <h3>1. Query Server (<code>ternodbi-query</code>)</h3>
+                <ul>
+                    <li><strong>Purpose</strong>: Safe analysis and data retrieval.</li>
+                    <li><strong>Tools Provided</strong>:
+                        <ul>
+                            <li><code>list_datasources</code>: See available databases.</li>
+                            <li><code>list_tables</code>: See tables in a database.</li>
+                            <li><code>list_table_columns</code>: Get columns for a specific table.</li>
+                            <li><code>get_sample_data</code>: Get sample rows from a table.</li>
+                            <li><code>execute_query</code>: Run <code>SELECT</code> queries with advanced pagination.
+                                <ul>
+                                    <li>Supports <code>offset</code> (page-based) and <code>cursor</code> (infinite
+                                        scroll)
+                                        modes.</li>
+                                    <li>Security: All cursors are HMAC-signed to prevent tampering.</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    </li>
+                </ul>
+
+                <h3>2. Admin Server (<code>ternodbi-admin</code>)</h3>
+                <ul>
+                    <li><strong>Purpose</strong>: Management and Curation.</li>
+                    <li><strong>Tools Provided</strong>:
+                        <ul>
+                            <li><code>add_datasource</code>: Safely connect a new database.</li>
+                            <li><code>delete_datasource</code>: Remove a connection.</li>
+                            <li><code>validate_connection</code>: Test credentials before saving.</li>
+                            <li><code>sync_metadata</code>: Sync schemas from the database.</li>
+                            <li><code>rename_table</code>: Change the public-facing name of a table.</li>
+                            <li><code>rename_column</code>: Change the public-facing name of a column.</li>
+                            <li><code>update_table_description</code>: Add documentation to a table.</li>
+                            <li><code>update_column_description</code>: Add documentation to a column.</li>
+                            <li><code>get_table_info</code>: Fetch detailed context for AI curation.</li>
+                        </ul>
+                    </li>
+                </ul>
+
+                <h2>Connecting to Claude Desktop</h2>
+                <p>Add the following to your <code>claude_desktop_config.json</code>.</p>
+
+                <h3>Production Config (Recommended)</h3>
+                <p>This uses <code>uvx</code> to download and run the latest version of TernoDBI automatically.</p>
                 <pre><code>{
   "mcpServers": {
-    "ternodbi": {
+    "ternodbi-query": {
       "command": "uvx",
       "args": ["--from", "terno-dbi", "dbi-mcp", "query"],
       "env": {
-        "TERNODBI_API_URL": "http://localhost:8376",
-        "TERNODBI_API_KEY": "YOUR_TOKEN"
+        "TERNODBI_API_URL": "http://127.0.0.1:8376",
+        "TERNODBI_API_KEY": "dbi_query_..."
+      }
+    },
+    "ternodbi-admin": {
+      "command": "uvx",
+      "args": ["--from", "terno-dbi", "dbi-mcp", "admin"],
+      "env": {
+        "TERNODBI_API_URL": "http://127.0.0.1:8376",
+        "TERNODBI_API_KEY": "dbi_admin_..."
       }
     }
   }
 }</code></pre>
 
-                <h2>Tools Provided</h2>
+                <h3>Local Development Config</h3>
+                <p>Use this if you are modifying TernoDBI code locally.</p>
+                <pre><code>{
+  "mcpServers": {
+    "ternodbi-query": {
+      "command": "/absolute/path/to/venv/bin/dbi-mcp",
+      "args": ["query"],
+      "env": {
+        "TERNODBI_API_URL": "http://127.0.0.1:8376",
+        "TERNODBI_API_KEY": "dbi_query_..."
+      }
+    }
+  }
+}</code></pre>
+
+                <h2>Troubleshooting</h2>
                 <ul>
-                    <li><strong>list_tables</strong>: List tables available to the agent.</li>
-                    <li><strong>describe_table</strong>: Get columns and metadata for a table.</li>
-                    <li><strong>execute_query</strong>: Run a secure SQL query.</li>
+                    <li><strong>Connection Refused</strong>: Ensure the Django server is running
+                        (<code>python manage.py runserver</code>).</li>
+                    <li><strong>Authentication Failed</strong>: Check that your <code>TERNODBI_API_KEY</code> matches a
+                        valid active token in the database.</li>
+                    <li><strong>Module Not Found</strong>: If using local dev, ensure you ran
+                        <code>pip install -e .</code>
+                        and are pointing to the <code>dbi-mcp</code> binary in your virtualenv.</li>
                 </ul>
             </article>
         </div>

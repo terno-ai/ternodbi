@@ -1163,6 +1163,25 @@ details[open] .api-summary::after {
     font-size: 0.9rem;
 }
 
+/* Mermaid Diagrams */
+.mermaid {
+    background: rgba(15, 23, 42, 0.4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 2rem;
+    margin: 2rem 0;
+    display: flex;
+    justify-content: center;
+    overflow-x: auto;
+}
+
+.docs-content hr {
+    border: none;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+    margin: 4rem 0;
+}
+
 .docs-content ul,
 .docs-content ol {
     margin: 0 0 1.5rem 1.5rem;

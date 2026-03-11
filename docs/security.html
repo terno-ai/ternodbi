@@ -44,37 +44,70 @@
             </aside>
 
             <article class="docs-content">
-                <h1>Security & Tokens</h1>
-                <p>Security is the foundation of TernoDBI. We use a multi-layered approach to ensure your data stays
-                    safe while being accessible to AI.</p>
+                <h1>Security & SQLShield</h1>
+                <p>Security is the primary design goal of TernoDBI. When giving AI Agents access to databases, the risk
+                    of data exfiltration or destruction is high. TernoDBI mitigates this with a defense-in-depth
+                    approach.</p>
 
                 <h2>1. SQLShield: The Query Firewall</h2>
-                <p>SQLShield is our proprietary SQL validation engine that parses SQL into an AST to check for forbidden
-                    node types.</p>
+                <p>SQLShield is our proprietary SQL validation engine. Unlike regex-based filters (which are easily
+                    bypassed), SQLShield parses SQL into an Abstract Syntax Tree (AST) using <code>sqlglot</code>.</p>
+
+                <h3>How it works</h3>
+                <ol>
+                    <li><strong>Parsing</strong>: The incoming query is parsed into a structural representation.</li>
+                    <li><strong>Analysis</strong>: The AST is traversed to check for forbidden node types.</li>
+                    <li><strong>Transformation</strong>: The query is rewritten (e.g., adding <code>LIMIT</code>
+                        clauses)
+                        before execution.</li>
+                </ol>
+
+                <h3>Protections</h3>
                 <ul>
-                    <li><strong>ReadOnly Enforcement</strong>: Rejects all mutations (INSERT, UPDATE, DELETE, etc.).
+                    <li><strong>ReadOnly Enforcement</strong>: Rejects <code>INSERT</code>, <code>UPDATE</code>,
+                        <code>DELETE</code>, <code>DROP</code>, <code>ALTER</code>, <code>GRANT</code>,
+                        <code>TRUNCATE</code>.
                     </li>
-                    <li><strong>Limit Enforcement</strong>: Automatically appends LIMIT to prevent heavy queries.</li>
+                    <li><strong>System Catalog Protection</strong>: Prevents access to <code>information_schema</code>
+                        or
+                        <code>pg_catalog</code> unless explicitly allowed.
+                    </li>
+                    <li><strong>Limit Enforcement</strong>: Automatically appends <code>LIMIT 100</code> (or
+                        configurable
+                        max) to prevent DOS attacks via massive result sets.</li>
                 </ul>
 
                 <h2>2. Service Token Authentication</h2>
-                <p>TernoDBI uses scoped API Key authentication designed for agents.</p>
+                <p>TernoDBI uses a custom implementation of API Key authentication (<code>ServiceToken</code>).</p>
 
                 <h3>Token Types</h3>
                 <ul>
-                    <li><strong>Query Token</strong>: Read-only access to specific datasources.</li>
-                    <li><strong>Admin Token</strong>: Full access to the Admin API.</li>
+                    <li><strong>Query Token</strong>: Read-only access. Can be scoped to specific Datasources.</li>
+                    <li><strong>Admin Token</strong>: Full access to the Admin API (Datasource creation, Metadata
+                        updates).
+                    </li>
                 </ul>
 
-                <h3>Issuing a Token</h3>
-                <pre><code>ternodbi manage issue_token --name "Agent 1" --type query</code></pre>
+                <h3>Scoping</h3>
+                <p>Tokens can be restricted to specific Datasource IDs.</p>
+                <pre><code># Only allow access to Financial DB (ID: 5)
+ternodbi manage issue_token --name "FinBot" --type query --datasource 5</code></pre>
+
+                <h3>Expiration</h3>
+                <p>Tokens can be set to auto-expire.</p>
+                <pre><code># Valid for 24 hours
+ternodbi manage issue_token --name "TempAccess" --expires 1</code></pre>
 
                 <h2>3. Best Practices</h2>
-                <ul>
-                    <li>Always use read-only database users for the connection string.</li>
-                    <li>Rotate tokens regularly.</li>
-                    <li>Use scoped tokens whenever possible.</li>
-                </ul>
+                <ol>
+                    <li><strong>Least Privilege</strong>: Always create database users (on Postgres/Snowflake) with
+                        read-only permissions. Do not give TernoDBI a <code>root</code> or <code>admin</code> DB
+                        connection string.</li>
+                    <li><strong>Ephemeral Tokens</strong>: For chat sessions, generate a short-lived token per session.
+                    </li>
+                    <li><strong>Network Isolation</strong>: Run TernoDBI in a private subnet, accessible only by your
+                        Agent infrastructure.</li>
+                </ol>
             </article>
         </div>
     </main>

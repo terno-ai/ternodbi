@@ -45,62 +45,242 @@
 
             <article class="docs-content">
                 <h1>API Reference</h1>
-                <p>The TernoDBI API is RESTful and designed for easy consumption by AI agents.</p>
+                <p>TernoDBI provides two API services: <strong>Query Service</strong> for read operations and
+                    <strong>Admin Service</strong> for write operations. Both services require authentication via API
+                    tokens.
+                </p>
+
+                <h2>Authentication</h2>
+                <p>All API endpoints require a valid service token passed in the <code>Authorization</code> header:</p>
+                <pre><code>Authorization: Bearer &lt;your-api-token&gt;</code></pre>
+                <p>Generate tokens using:</p>
+                <pre><code>python manage.py issue_token --name "My Agent" --type query</code></pre>
+
+                <hr>
 
                 <h2>Query Service</h2>
-                <div class="api-table-wrapper">
-                    <table class="api-table">
-                        <thead>
-                            <tr>
-                                <th>Method</th>
-                                <th>Endpoint</th>
-                                <th>Description</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td><span class="method get">GET</span></td>
-                                <td><code>/api/query/health/</code></td>
-                                <td>Service health check</td>
-                            </tr>
-                            <tr>
-                                <td><span class="method get">GET</span></td>
-                                <td><code>/api/query/datasources/</code></td>
-                                <td>List available datasources</td>
-                            </tr>
-                            <tr>
-                                <td><span class="method post">POST</span></td>
-                                <td><code>/api/query/datasources/{id}/query/</code></td>
-                                <td>Execute a SQL query</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                <p>Base URL: <code>/api/query/</code></p>
+                <p>The Query Service is designed for AI agents and provides read-only access to your databases.</p>
+
+                <h3>Health Check</h3>
+                <pre><code>GET /api/query/health/</code></pre>
+                <p>Returns the service status.</p>
+                <p><strong>Response:</strong></p>
+                <pre><code>{
+  "status": "ok",
+  "version": "1.0.0"
+}</code></pre>
+
+                <hr>
+
+                <h3>List Datasources</h3>
+                <pre><code>GET /api/query/datasources/</code></pre>
+                <p>Returns all datasources accessible to the authenticated token.</p>
+                <p><strong>Response:</strong></p>
+                <pre><code>{
+  "datasources": [
+    {
+      "id": 1,
+      "name": "Production DB",
+      "db_type": "postgres"
+    }
+  ]
+}</code></pre>
+
+                <hr>
+
+                <h3>Get Datasource Details</h3>
+                <pre><code>GET /api/query/datasources/{id}/</code></pre>
+                <p>Returns detailed information about a specific datasource.</p>
+
+                <hr>
+
+                <h3>Get Schema</h3>
+                <pre><code>GET /api/query/datasources/{id}/schema/</code></pre>
+                <p>Returns the complete schema for a datasource, including tables, columns, and relationships. This is
+                    the primary endpoint for LLMs to understand your database structure.</p>
+                <p><strong>Response:</strong></p>
+                <pre><code>{
+  "datasource": "Production DB",
+  "tables": [
+    {
+      "id": 1,
+      "name": "users",
+      "public_name": "Users",
+      "description": "User accounts",
+      "columns": [
+        {
+          "name": "id",
+          "public_name": "User ID",
+          "data_type": "integer",
+          "description": "Primary key"
+        }
+      ]
+    }
+  ]
+}</code></pre>
+
+                <hr>
+
+                <h3>List Tables</h3>
+                <pre><code>GET /api/query/datasources/{id}/tables/</code></pre>
+                <p>Returns all visible tables for a datasource.</p>
+
+                <hr>
+
+                <h3>List Columns</h3>
+                <pre><code>GET /api/query/datasources/{id}/tables/{table_id}/columns/</code></pre>
+                <p>Returns columns for a specific table.</p>
+
+                <hr>
+
+                <h3>List Foreign Keys</h3>
+                <pre><code>GET /api/query/datasources/{id}/foreign-keys/</code></pre>
+                <p>Returns foreign key relationships for schema understanding.</p>
+
+                <hr>
+
+                <h3>Execute Query</h3>
+                <pre><code>POST /api/query/datasources/{id}/query/</code></pre>
+                <p>Executes a SQL query with advanced pagination support.</p>
+                <p><strong>Request Body:</strong></p>
+                <pre><code>{
+  "sql": "SELECT * FROM users",
+  "pagination_mode": "cursor",
+  "per_page": 50,
+  "page": 1,
+  "cursor": "...",
+  "direction": "forward",
+  "order_by": [
+    {"column": "id", "direction": "DESC"}
+  ]
+}</code></pre>
+                <p><strong>Response:</strong></p>
+                <pre><code>{
+  "status": "success",
+  "table_data": {
+    "columns": ["id", "name", "email"],
+    "data": [
+      [1, "Alice", "alice@example.com"],
+      [2, "Bob", "bob@example.com"]
+    ],
+    "page": 1,
+    "per_page": 50,
+    "row_count": 1000,
+    "total_pages": 20,
+    "has_next": true,
+    "has_prev": false,
+    "next_cursor": "eyJ2Ijox...",
+    "prev_cursor": null
+  },
+  "warnings": [
+    "PAGINATION_WARNING: Deep offset (50000) - consider cursor pagination"
+  ]
+}</code></pre>
+
+                <hr>
+
+                <h3>Get Sample Data</h3>
+                <pre><code>GET /api/query/tables/{table_id}/sample/</code></pre>
+                <p>Returns sample rows from a table (useful for LLM context).</p>
+
+                <hr>
 
                 <h2>Admin Service</h2>
-                <div class="api-table-wrapper">
-                    <table class="api-table">
-                        <thead>
-                            <tr>
-                                <th>Method</th>
-                                <th>Endpoint</th>
-                                <th>Description</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td><span class="method post">POST</span></td>
-                                <td><code>/api/admin/datasources/</code></td>
-                                <td>Add a new datasource</td>
-                            </tr>
-                            <tr>
-                                <td><span class="method get">GET</span></td>
-                                <td><code>/api/admin/datasources/{id}/sync/</code></td>
-                                <td>Triger metadata sync</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                <p>Base URL: <code>/api/admin/</code></p>
+                <p>The Admin Service requires <code>admin</code> type tokens and provides write access for managing
+                    datasources and metadata.</p>
+
+                <h3>Create Datasource</h3>
+                <pre><code>POST /api/admin/datasources/</code></pre>
+                <p>Creates a new datasource connection.</p>
+                <p><strong>Request Body:</strong></p>
+                <pre><code>{
+  "name": "My Database",
+  "db_type": "postgres",
+  "connection_string": "postgresql://user:pass@host:5432/db"
+}</code></pre>
+
+                <hr>
+
+                <h3>Update Datasource</h3>
+                <pre><code>PUT /api/admin/datasources/{id}/</code></pre>
+                <p>Updates datasource configuration.</p>
+
+                <hr>
+
+                <h3>Delete Datasource</h3>
+                <pre><code>DELETE /api/admin/datasources/{id}/delete/</code></pre>
+                <p>Removes a datasource and its metadata.</p>
+
+                <hr>
+
+                <h3>Sync Metadata</h3>
+                <pre><code>POST /api/admin/datasources/{id}/sync/</code></pre>
+                <p>Re-syncs table and column metadata from the database.</p>
+
+                <hr>
+
+                <h3>Update Table Metadata</h3>
+                <pre><code>PUT /api/admin/tables/{id}/</code></pre>
+                <p>Updates table metadata (description, public name, visibility).</p>
+                <p><strong>Request Body:</strong></p>
+                <pre><code>{
+  "public_name": "Customer Orders",
+  "description": "All customer order records",
+  "is_visible": true
+}</code></pre>
+
+                <hr>
+
+                <h3>Update Column Metadata</h3>
+                <pre><code>PUT /api/admin/columns/{id}/</code></pre>
+                <p>Updates column metadata.</p>
+                <p><strong>Request Body:</strong></p>
+                <pre><code>{
+  "public_name": "Order Date",
+  "description": "When the order was placed",
+  "is_visible": true
+}</code></pre>
+
+                <hr>
+
+                <h3>Validate Connection</h3>
+                <pre><code>POST /api/admin/validate/</code></pre>
+                <p>Tests a connection string without creating a datasource.</p>
+                <p><strong>Request Body:</strong></p>
+                <pre><code>{
+  "connection_string": "postgresql://user:pass@host:5432/db"
+}</code></pre>
+
+                <hr>
+
+                <h3>Get Table Info</h3>
+                <pre><code>GET /api/admin/datasources/{id}/tables/{table_name}/info/</code></pre>
+                <p>Returns detailed table information including column metadata.</p>
+
+                <hr>
+
+                <h3>Get All Tables Info</h3>
+                <pre><code>GET /api/admin/datasources/{id}/tables/info/</code></pre>
+                <p>Returns metadata for all tables in a datasource.</p>
+
+                <hr>
+
+                <h2>Error Responses</h2>
+                <p>All endpoints return standard error responses:</p>
+                <pre><code>{
+  "error": "Error message",
+  "code": "ERROR_CODE"
+}</code></pre>
+                <p>Common status codes:</p>
+                <ul>
+                    <li><code>400</code> - Bad Request (validation error)</li>
+                    <li><code>401</code> - Unauthorized (invalid or missing token)</li>
+                    <li><code>403</code> - Forbidden (insufficient permissions)</li>
+                    <li><code>404</code> - Not Found</li>
+                    <li><code>500</code> - Internal Server Error</li>
+                </ul>
             </article>
         </div>
     </main>
