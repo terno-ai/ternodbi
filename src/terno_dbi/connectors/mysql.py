@@ -16,6 +16,14 @@ class MySQLConnector(BaseConnector):
                  pool_timeout: int = DEFAULT_POOL_TIMEOUT,
                  pool_recycle: int = DEFAULT_POOL_RECYCLE,
                  use_pool: bool = True):
+
+        if connection_string.startswith("mysql://"):
+            try:
+                import MySQLdb
+            except ImportError:
+                connection_string = connection_string.replace("mysql://", "mysql+pymysql://", 1)
+                logger.debug("mysqlclient (MySQLdb) not found; falling back to pymysql driver")
+
         super().__init__(connection_string, credentials, pool_size, max_overflow,
                         pool_timeout, pool_recycle, use_pool)
 
