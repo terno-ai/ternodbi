@@ -4,6 +4,35 @@ from terno_dbi.core import models
 logger = logging.getLogger(__name__)
 
 
+def get_all_group_datasources(organisation, roles):
+    global_datasources = models.DataSource.objects.filter(organisation=organisation, enabled=True)
+
+    private_datasource_object = models.PrivateDataSourceSelector.objects.filter(
+        organisation=organisation).first()
+    if private_datasource_object:
+        private_datasources_ids = private_datasource_object.datasources.all().values_list('id', flat=True)
+        global_datasources = global_datasources.exclude(id__in=private_datasources_ids)
+
+    group_datasources_objects = models.GroupDataSourceSelector.objects.filter(
+        group__in=roles)
+    
+    if group_datasources_objects.exists():
+        datasources_to_include = models.DataSource.objects.none()
+        datasources_to_exclude = models.DataSource.objects.none()
+        
+        for g_obj in group_datasources_objects:
+            datasources_to_include = datasources_to_include | g_obj.datasources.all()
+            datasources_to_exclude = datasources_to_exclude | g_obj.exclude_datasources.all()
+            
+        all_group_datasources = global_datasources.union(datasources_to_include)
+        all_group_datasources = models.DataSource.objects.filter(
+            id__in=all_group_datasources.values('id')).exclude(id__in=datasources_to_exclude.values('id'))
+    else:
+        all_group_datasources = global_datasources
+
+    return all_group_datasources
+
+
 def get_all_group_tables(datasource, roles):
     global_tables = models.Table.objects.filter(data_source=datasource)
 

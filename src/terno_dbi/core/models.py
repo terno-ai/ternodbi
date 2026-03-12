@@ -201,6 +201,38 @@ class ForeignKey(models.Model):
         db_table = 'terno_foreignkey'
 
 
+class PrivateDataSourceSelector(models.Model):
+    organisation = models.ForeignKey(CoreOrganisation, on_delete=models.CASCADE)
+    datasources = models.ManyToManyField(
+        DataSource, blank=True,
+        related_name='private_datasources'
+    )
+
+    class Meta:
+        db_table = 'terno_privatedatasourceselector'
+
+    def __str__(self):
+        return f'{self.organisation.name}'
+
+
+class GroupDataSourceSelector(models.Model):
+    group = models.ForeignKey(Group, on_delete=models.CASCADE)
+    datasources = models.ManyToManyField(
+        DataSource, blank=True,
+        related_name='include_datasources'
+    )
+    exclude_datasources = models.ManyToManyField(
+        DataSource, blank=True,
+        related_name='exclude_datasources'
+    )
+
+    class Meta:
+        db_table = 'terno_groupdatasourceselector'
+
+    def __str__(self) -> str:
+        return f'{self.group.name}'
+
+
 class PrivateTableSelector(models.Model):
     data_source = models.ForeignKey(DataSource, on_delete=models.CASCADE)
     tables = models.ManyToManyField(

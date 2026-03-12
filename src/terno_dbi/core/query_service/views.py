@@ -44,13 +44,32 @@ def list_datasources(request):
     datasources = request.allowed_datasources
     logger.debug("List datasources requested: count=%d", len(datasources))
 
+    roles = None
+    if getattr(request, 'service_token', None) and request.service_token.created_by:
+        roles = request.service_token.created_by.groups.all()
+
     data = []
+    
+    if roles is not None and datasources.exists():
+        from terno_dbi.services.access import get_all_group_datasources
+        org_id = datasources.first().organisation_id
+        datasources = get_all_group_datasources(org_id, roles)
+
     for ds in datasources:
+        from terno_dbi.services.access import get_admin_config_object
+        description = ds.description or ""
+        
+        # Ensure they have tables they can access within it, else don't show the datasource
+        if roles is not None:
+            tables, _ = get_admin_config_object(ds, roles)
+            if not tables.exists():
+                continue
+
         data.append({
             'id': ds.id,
             'name': ds.display_name,
             'type': ds.type,
-            'description': ds.description,
+            'description': description,
             'is_erp': ds.is_erp,
             'dialect_name': ds.dialect_name,
             'dialect_version': ds.dialect_version,
