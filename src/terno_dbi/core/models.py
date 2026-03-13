@@ -400,10 +400,28 @@ class ServiceToken(models.Model):
         return self.get_accessible_datasources().filter(id=datasource.id).exists()
 
     def has_access_to_table(self, table):
-        return self.has_access_to_datasource(table.data_source)
+        if not self.has_access_to_datasource(table.data_source):
+            return False
+
+        # Check explicit private table selector
+        from terno_dbi.core.models import PrivateTableSelector
+        pts = PrivateTableSelector.objects.filter(data_source=table.data_source).first()
+        if pts and pts.tables.filter(id=table.id).exists():
+            return False
+
+        return True
 
     def has_access_to_column(self, column):
-        return self.has_access_to_datasource(column.table.data_source)
+        if not self.has_access_to_table(column.table):
+            return False
+
+        # Check explicit private column selector
+        from terno_dbi.core.models import PrivateColumnSelector
+        pcs = PrivateColumnSelector.objects.filter(data_source=column.table.data_source).first()
+        if pcs and pcs.columns.filter(id=column.id).exists():
+            return False
+
+        return True
 
     def has_scope(self, required_scope: str) -> bool:
         """

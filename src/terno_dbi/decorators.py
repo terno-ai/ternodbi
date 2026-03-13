@@ -77,9 +77,9 @@ def require_service_auth(allowed_types=None):
             if table_id:
                 try:
                     table = Table.objects.select_related('data_source').get(id=table_id)
-                    if not allowed_ds.filter(id=table.data_source_id).exists():
+                    if not token.has_access_to_table(table):
                         logger.warning(
-                            "Table access denied: token '%s' attempted access to table_id=%s",
+                            "Table access denied: token '%s' attempted access to private/unauthorized table_id=%s",
                             token.name, table_id
                         )
                         return JsonResponse(
@@ -95,9 +95,9 @@ def require_service_auth(allowed_types=None):
             if column_id:
                 try:
                     column = TableColumn.objects.select_related('table__data_source').get(id=column_id)
-                    if not allowed_ds.filter(id=column.table.data_source_id).exists():
+                    if not token.has_access_to_column(column):
                         logger.warning(
-                            "Column access denied: token '%s' attempted access to column_id=%s",
+                            "Column access denied: token '%s' attempted access to private/unauthorized column_id=%s",
                             token.name, column_id
                         )
                         return JsonResponse(

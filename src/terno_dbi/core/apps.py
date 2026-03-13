@@ -15,8 +15,5 @@ class TernoDBIConfig(AppConfig):
 
     def ready(self):
         """Initialize app when Django starts."""
-        # Connect cache invalidation signals using direct model references
-        from terno_dbi.core.signals import connect_cache_invalidation_signals
-        connect_cache_invalidation_signals()
-        logger.debug("TernoDBI app initialized: cache invalidation signals connected")
-
+        from . import receivers
+        logger.debug("TernoDBI app initialized: receivers imported")

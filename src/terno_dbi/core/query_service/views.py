@@ -76,10 +76,11 @@ def list_tables(request, datasource_identifier):
         from django.contrib.auth.models import Group
         role_ids = [int(r) for r in role_ids_str.split(',') if r.strip()]
         roles = Group.objects.filter(id__in=role_ids)
-        tables, columns = get_admin_config_object(ds, roles)
     else:
-        tables = models.Table.objects.filter(data_source=ds)
-        columns = models.TableColumn.objects.filter(table__in=tables)
+        from django.contrib.auth.models import Group
+        roles = Group.objects.none()
+
+    tables, columns = get_admin_config_object(ds, roles)
 
     tables_list = []
     for table in tables:
@@ -124,7 +125,11 @@ def list_table_columns(request, datasource_identifier, table_identifier):
                 "error": f"Table '{table_identifier}' not found"
             }, status=404)
 
-    columns = models.TableColumn.objects.filter(table=table)
+    # Enforce column visibility
+    from django.contrib.auth.models import Group
+    roles = Group.objects.none()
+    _, allowed_columns = get_admin_config_object(ds, roles)
+    columns = allowed_columns.filter(table=table)
 
     return JsonResponse({
         "status": "success",

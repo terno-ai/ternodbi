@@ -1015,3 +1015,55 @@ class TestTokenTypeScopeInteraction:
         response = view(request, datasource_identifier=str(ds.id))
 
         assert response.status_code == 200
+
+@pytest.mark.django_db
+class TestServiceTokenVisibilityChecks:
+    @pytest.fixture
+    def setup_data(self, org1, ds1_org1):
+        from terno_dbi.core.models import PrivateTableSelector, PrivateColumnSelector
+        # Create a token
+        token = ServiceToken.objects.create(
+            name="Visibility Test Token",
+            organisation=org1
+        )
+
+        # Create tables and columns
+        table_public = Table.objects.create(name="public_table", public_name="Public", data_source=ds1_org1)
+        table_private = Table.objects.create(name="private_table", public_name="Private", data_source=ds1_org1)
+
+        col_public = TableColumn.objects.create(name="col_pub", table=table_public)
+        col_private = TableColumn.objects.create(name="col_priv", table=table_public)
+
+        # Mark as private
+        pts = PrivateTableSelector.objects.create(data_source=ds1_org1)
+        pts.tables.add(table_private)
+
+        pcs = PrivateColumnSelector.objects.create(data_source=ds1_org1)
+        pcs.columns.add(col_private)
+
+        return {
+            "token": token,
+            "table_public": table_public,
+            "table_private": table_private,
+            "col_public": col_public,
+            "col_private": col_private,
+        }
+
+    def test_has_access_to_table_hides_private(self, setup_data):
+        token = setup_data["token"]
+        assert token.has_access_to_table(setup_data["table_public"]) is True
+        assert token.has_access_to_table(setup_data["table_private"]) is False
+
+    def test_has_access_to_column_hides_private(self, setup_data):
+        token = setup_data["token"]
+        # Can access public column on public table
+        assert token.has_access_to_column(setup_data["col_public"]) is True
+        # Cannot access private column on public table
+        assert token.has_access_to_column(setup_data["col_private"]) is False
+
+        # Now try a column on a private table
+        table_private = setup_data["table_private"]
+        col_on_private_table = TableColumn.objects.create(name="col_on_priv", table=table_private)
+
+        # Even if the column isn't in PrivateColumnSelector, the parent table is private
+        assert token.has_access_to_column(col_on_private_table) is False
