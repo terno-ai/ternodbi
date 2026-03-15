@@ -174,14 +174,26 @@ def update_table(request, table_id):
 
         updated = []
         if "public_name" in body:
-            table.public_name = body["public_name"]
+            val = body["public_name"]
+            if val is not None and isinstance(val, str) and not val.strip():
+                return JsonResponse({
+                    "status": "error",
+                    "error": "public_name cannot be an empty string. Use null to clear it."
+                }, status=400)
+            table.public_name = val
             updated.append("public_name")
         if "description" in body:
             table.description = body["description"]
             updated.append("description")
+        if "is_hidden" in body:
+            table.is_hidden = bool(body["is_hidden"])
+            updated.append("is_hidden")
 
         if updated:
-            table.save(update_fields=updated)
+            table.save(update_fields=updated + ["metadata_updated_at"])
+            # Invalidate cache so changes are reflected immediately
+            from terno_dbi.services.shield import delete_cache
+            delete_cache(table.data_source)
 
         return JsonResponse({
             "status": "success",
@@ -190,6 +202,7 @@ def update_table(request, table_id):
                 "id": table.id,
                 "name": table.public_name,
                 "description": table.description,
+                "is_hidden": table.is_hidden,
             }
         })
 
@@ -213,14 +226,26 @@ def update_column(request, column_id):
 
         updated = []
         if "public_name" in body:
-            column.public_name = body["public_name"]
+            val = body["public_name"]
+            if val is not None and isinstance(val, str) and not val.strip():
+                return JsonResponse({
+                    "status": "error",
+                    "error": "public_name cannot be an empty string. Use null to clear it."
+                }, status=400)
+            column.public_name = val
             updated.append("public_name")
         if "description" in body:
             column.description = body["description"]
             updated.append("description")
+        if "is_hidden" in body:
+            column.is_hidden = bool(body["is_hidden"])
+            updated.append("is_hidden")
 
         if updated:
-            column.save(update_fields=updated)
+            column.save(update_fields=updated + ["metadata_updated_at"])
+            # Invalidate cache so changes are reflected immediately
+            from terno_dbi.services.shield import delete_cache
+            delete_cache(column.table.data_source)
 
         return JsonResponse({
             "status": "success",
@@ -229,6 +254,8 @@ def update_column(request, column_id):
                 "id": column.id,
                 "name": column.public_name,
                 "data_type": column.data_type,
+                "description": column.description,
+                "is_hidden": column.is_hidden,
             }
         })
 
@@ -238,7 +265,48 @@ def update_column(request, column_id):
             "error": "Invalid JSON in request body"
         }, status=400)
 
+@require_service_auth()
+@require_scope('admin:read')
+@require_http_methods(["GET"])
+def list_hidden(request, datasource_identifier):
+    ds = request.resolved_datasource
+    logger.info("List hidden request: datasource_id=%d", ds.id)
 
+    hidden_tables = models.Table.objects.filter(
+        data_source=ds, is_hidden=True
+    ).values('id', 'name', 'public_name', 'description', 'metadata_updated_at')
+
+    hidden_columns = models.TableColumn.objects.filter(
+        table__data_source=ds, is_hidden=True
+    ).select_related('table').values(
+        'id', 'name', 'public_name', 'data_type', 'table__name', 'metadata_updated_at'
+    )
+
+    return JsonResponse({
+        "status": "success",
+        "datasource_id": ds.id,
+        "hidden_tables": [
+            {
+                "id": t["id"],
+                "name": t["name"],
+                "public_name": t["public_name"],
+                "description": t["description"],
+                "hidden_at": t["metadata_updated_at"].isoformat() if t["metadata_updated_at"] else None,
+            }
+            for t in hidden_tables
+        ],
+        "hidden_columns": [
+            {
+                "id": c["id"],
+                "name": c["name"],
+                "public_name": c["public_name"],
+                "data_type": c["data_type"],
+                "table": c["table__name"],
+                "hidden_at": c["metadata_updated_at"].isoformat() if c["metadata_updated_at"] else None,
+            }
+            for c in hidden_columns
+        ],
+    })
 
 
 @csrf_exempt
@@ -251,7 +319,7 @@ def validate_connection(request):
         db_type = body.get("type")
         conn_str = body.get("connection_str") or body.get("connection_string")
         conn_json = body.get("connection_json")
-        
+
         logger.debug("Validate connection request: type='%s'", db_type)
 
         if not db_type or not conn_str:

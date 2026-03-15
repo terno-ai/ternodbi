@@ -5,7 +5,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_all_group_tables(datasource, roles):
-    global_tables = models.Table.objects.filter(data_source=datasource)
+    global_tables = models.Table.objects.filter(data_source=datasource, is_hidden=False)
 
     private_table_object = models.PrivateTableSelector.objects.filter(
         data_source=datasource).first()
@@ -30,7 +30,7 @@ def get_all_group_tables(datasource, roles):
 def get_all_group_columns(datasource, tables, roles):
     tables_ids = list(tables.values_list('id', flat=True))
 
-    table_columns = models.TableColumn.objects.filter(table_id__in=tables_ids)
+    table_columns = models.TableColumn.objects.filter(table_id__in=tables_ids, is_hidden=False)
 
     private_columns_object = models.PrivateColumnSelector.objects.filter(
         data_source=datasource).first()

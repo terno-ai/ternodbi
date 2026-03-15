@@ -135,7 +135,12 @@ class Table(models.Model):
         null=True, blank=True,
         help_text="Approximate row count fetched during metadata sync."
     )
+    is_hidden = models.BooleanField(
+        default=False,
+        help_text="If True, this table is globally hidden from all API consumers and the AI agent."
+    )
     description_updated_at = models.DateTimeField(blank=True, null=True)
+    metadata_updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
 
     class Meta:
         db_table = 'terno_table'
@@ -159,6 +164,11 @@ class TableColumn(models.Model):
     description = models.CharField(max_length=300, null=True, blank=True)
     unique_categories = models.JSONField(default=dict, null=True, blank=True)
     primary_key = models.BooleanField(default=False)
+    is_hidden = models.BooleanField(
+        default=False,
+        help_text="If True, this column is globally hidden from all API consumers and the AI agent."
+    )
+    metadata_updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
 
     class Meta:
         db_table = 'terno_tablecolumn'

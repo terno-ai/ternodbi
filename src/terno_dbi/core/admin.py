@@ -19,7 +19,7 @@ if not PARENT_APP_INSTALLED:
     class TableColumnInline(admin.TabularInline):
         model = TableColumn
         extra = 0
-        fields = ('name', 'public_name', 'data_type', 'description')
+        fields = ('name', 'public_name', 'data_type', 'description', 'is_hidden')
         readonly_fields = ('name', 'data_type')
 
     class ForeignKeyInline(admin.TabularInline):
@@ -114,8 +114,8 @@ if not PARENT_APP_INSTALLED:
 
     @admin.register(Table)
     class TableAdmin(reversion.admin.VersionAdmin):
-        list_display = ('name', 'public_name', 'data_source', 'estimated_row_count', 'column_count')
-        list_filter = ('data_source',)
+        list_display = ('name', 'public_name', 'data_source', 'is_hidden', 'estimated_row_count', 'column_count')
+        list_filter = ('data_source', 'is_hidden')
         search_fields = ('name', 'public_name', 'description')
         inlines = [TableColumnInline, ForeignKeyInline]
 
@@ -125,8 +125,8 @@ if not PARENT_APP_INSTALLED:
 
     @admin.register(TableColumn)
     class TableColumnAdmin(reversion.admin.VersionAdmin):
-        list_display = ('name', 'public_name', 'table', 'data_type')
-        list_filter = ('table__data_source', 'data_type')
+        list_display = ('name', 'public_name', 'table', 'data_type', 'is_hidden')
+        list_filter = ('table__data_source', 'data_type', 'is_hidden')
         search_fields = ('name', 'public_name', 'description')
         raw_id_fields = ('table',)
 
