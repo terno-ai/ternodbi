@@ -15,7 +15,8 @@ def generate_service_token(
     expires_at=None,
     datasource_ids: Optional[List[int]] = None,
     organisation=None,
-    scopes: Optional[List[str]] = None
+    scopes: Optional[List[str]] = None,
+    groups=None
 ) -> Tuple[ServiceToken, str]:
     random_part = secrets.token_urlsafe(32)
     prefix_type = token_type.lower()
@@ -45,6 +46,13 @@ def generate_service_token(
         )
     else:
         logger.info("Service token created: name='%s', type='%s'", name, token_type)
+
+    if groups:
+        token.groups.set(groups)
+        logger.info(
+            "Service token groups set: name='%s', groups=%s",
+            name, [g.name for g in groups]
+        )
 
     return token, full_key
 

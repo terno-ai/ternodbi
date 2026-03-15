@@ -19,6 +19,18 @@ from terno_dbi.decorators import require_service_auth
 logger = logging.getLogger(__name__)
 
 
+def _resolve_roles(request, role_ids=None):
+    """Resolve Django Group roles from explicit IDs or fall back to token-inherited groups."""
+    from django.contrib.auth.models import Group
+    if role_ids:
+        if isinstance(role_ids, str):
+            role_ids = [int(r) for r in role_ids.split(',') if r.strip()]
+        return Group.objects.filter(id__in=role_ids)
+    if hasattr(request, 'service_token') and request.service_token.groups.exists():
+        return request.service_token.groups.all()
+    return Group.objects.none()
+
+
 def health(request):
     return JsonResponse({
         "status": "ok",
@@ -71,14 +83,7 @@ def list_tables(request, datasource_identifier):
     logger.debug("List tables requested: datasource='%s'", ds.display_name)
 
     role_ids_str = request.GET.get('roles', '')
-
-    if role_ids_str:
-        from django.contrib.auth.models import Group
-        role_ids = [int(r) for r in role_ids_str.split(',') if r.strip()]
-        roles = Group.objects.filter(id__in=role_ids)
-    else:
-        from django.contrib.auth.models import Group
-        roles = Group.objects.none()
+    roles = _resolve_roles(request, role_ids_str if role_ids_str else None)
 
     tables, columns = get_admin_config_object(ds, roles)
 
@@ -126,8 +131,7 @@ def list_table_columns(request, datasource_identifier, table_identifier):
             }, status=404)
 
     # Enforce column visibility
-    from django.contrib.auth.models import Group
-    roles = Group.objects.none()
+    roles = _resolve_roles(request)
     _, allowed_columns = get_admin_config_object(ds, roles)
     columns = allowed_columns.filter(table=table)
 
@@ -265,12 +269,7 @@ def execute_query(request, datasource_identifier=None):
         include_count = body.get("include_count", False)
 
         role_ids = body.get("roles", [])
-        from django.contrib.auth.models import Group
-
-        if role_ids:
-            roles = Group.objects.filter(id__in=role_ids)
-        else:
-            roles = Group.objects.none()
+        roles = _resolve_roles(request, role_ids if role_ids else None)
 
         mDb = prepare_mdb(ds, roles)
         logger.info("Execute query: datasource='%s', pagination=%s", ds.display_name, pagination_mode)
@@ -349,12 +348,7 @@ def export_query(request, datasource_identifier=None):
                 "error": "Missing 'sql' in request body"
             }, status=400)
         role_ids = body.get("roles", [])
-        from django.contrib.auth.models import Group
-
-        if role_ids:
-            roles = Group.objects.filter(id__in=role_ids)
-        else:
-            roles = Group.objects.none()
+        roles = _resolve_roles(request, role_ids if role_ids else None)
 
         mDb = prepare_mdb(ds, roles)
         transform_result = generate_native_sql(mDb, sql, ds.dialect_name)

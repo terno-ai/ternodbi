@@ -25,7 +25,9 @@ class TestGenerateServiceToken:
     @pytest.fixture
     def user(self):
         from django.contrib.auth.models import User
-        return User.objects.create_user('testuser', 'test@example.com', 'password')
+        import uuid
+        uname = f"testuser_{uuid.uuid4().hex[:8]}"
+        return User.objects.create_user(uname, f"{uname}@example.com", 'password')
 
     def test_generates_unique_key(self, user):
         """Each generated token should have a unique key."""
@@ -125,6 +127,23 @@ class TestGenerateServiceToken:
         assert ds1 in token.datasources.all()
         assert ds2 in token.datasources.all()
 
+    def test_assigns_groups(self, user):
+        """Token should inherit specific Django Groups."""
+        from django.contrib.auth.models import Group
+        
+        group1 = Group.objects.create(name='Token Group 1')
+        group2 = Group.objects.create(name='Token Group 2')
+        
+        token, key = generate_service_token(
+            name='Grouped Token',
+            created_by=user,
+            groups=[group1, group2]
+        )
+        
+        assert token.groups.count() == 2
+        assert group1 in token.groups.all()
+        assert group2 in token.groups.all()
+
     def test_returns_tuple_of_token_and_key(self, user):
         """Function should return (ServiceToken, str) tuple."""
         result = generate_service_token(name='Test Token', created_by=user)
@@ -142,7 +161,9 @@ class TestVerifyToken:
     @pytest.fixture
     def user(self):
         from django.contrib.auth.models import User
-        return User.objects.create_user('verifyuser', 'verify@example.com', 'password')
+        import uuid
+        uname = f"verifyuser_{uuid.uuid4().hex[:8]}"
+        return User.objects.create_user(uname, f"{uname}@example.com", 'password')
 
     def test_valid_token_returns_token_obj(self, user):
         """Valid token string should return the ServiceToken object."""
@@ -225,7 +246,9 @@ class TestUpdateTokenUsage:
     @pytest.fixture
     def user(self):
         from django.contrib.auth.models import User
-        return User.objects.create_user('usageuser', 'usage@example.com', 'password')
+        import uuid
+        uname = f"usageuser_{uuid.uuid4().hex[:8]}"
+        return User.objects.create_user(uname, f"{uname}@example.com", 'password')
 
     def test_updates_last_used_timestamp(self, user):
         """update_token_usage should update last_used field."""

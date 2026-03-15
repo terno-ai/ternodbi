@@ -13,16 +13,14 @@ def get_all_group_tables(datasource, roles):
         private_tables_ids = private_table_object.tables.all().values_list('id', flat=True)
         global_tables = global_tables.exclude(id__in=private_tables_ids)
 
-    group_tables_object = models.GroupTableSelector.objects.filter(
-        group__in=roles,
-        tables__data_source=datasource).first()
-    if group_tables_object:
-        group_tables = group_tables_object.tables.all()
-        all_group_tables = global_tables.union(group_tables)
-        all_group_tables = models.Table.objects.filter(
-            id__in=all_group_tables.values('id'))
-    else:
-        all_group_tables = global_tables
+    #  Get explicit tables granted to any of the user's groups in ONE query
+    group_tables = models.Table.objects.filter(
+        include_tables__group__in=roles,
+        data_source=datasource
+    )
+
+    # Bitwise OR (|) safely constructs a single unified SQL query
+    all_group_tables = (global_tables | group_tables).distinct()
 
     return all_group_tables
 
@@ -38,16 +36,12 @@ def get_all_group_columns(datasource, tables, roles):
         private_columns_ids = private_columns_object.columns.all().values_list('id', flat=True)
         table_columns = table_columns.exclude(id__in=private_columns_ids)
 
-    group_columns_object = models.GroupColumnSelector.objects.filter(
-        group__in=roles,
-        columns__table__in=tables).first()
-    if group_columns_object:
-        group_columns = group_columns_object.columns.all()
-        all_table_columns = table_columns.union(group_columns)
-        all_table_columns = models.TableColumn.objects.filter(
-            id__in=all_table_columns.values('id'))
-    else:
-        all_table_columns = table_columns
+    group_columns = models.TableColumn.objects.filter(
+        include_columns__group__in=roles,
+        table__in=tables
+    )
+
+    all_table_columns = (table_columns | group_columns).distinct()
 
     return all_table_columns
 

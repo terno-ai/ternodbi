@@ -340,6 +340,14 @@ class ServiceToken(models.Model):
         related_name='service_tokens',
         help_text="If set, overrides org scope with explicit datasource list"
     )
+
+    groups = models.ManyToManyField(
+        Group,
+        blank=True,
+        related_name='service_tokens',
+        help_text="Groups inherited by this token to evaluate GroupTableSelector/GroupColumnSelector"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
         User,
