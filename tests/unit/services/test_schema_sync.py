@@ -183,3 +183,32 @@ def test_sync_creates_revisions(sqlite_datasource):
     col_versions = Version.objects.get_for_object(col)
     assert len(col_versions) > 0
     assert col_versions[0].revision.comment == "Automatic Metadata Sync"
+
+
+@pytest.mark.django_db
+def test_sync_resolves_duplicates(sqlite_datasource):
+    """Verify that sync_metadata cleans up legacy duplicate Table and TableColumn records
+    by keeping the first one and deleting the rest."""
+    ds, _ = sqlite_datasource
+
+    # Manually create a corrupt database state with duplicates
+    t1 = Table.objects.create(data_source=ds, name="users", public_name="users")
+    t2 = Table.objects.create(data_source=ds, name="users", public_name="users_dup")
+    t3 = Table.objects.create(data_source=ds, name="users", public_name="users_dup2")
+
+    c1 = TableColumn.objects.create(table=t1, name="id", public_name="id", data_type="INTEGER")
+    c2 = TableColumn.objects.create(table=t1, name="id", public_name="id_dup", data_type="INTEGER")
+    
+    # Run sync which should trigger self-healing
+    result = sync_metadata(ds.id)
+
+    # Verify duplicates were deleted
+    remaining_tables = Table.objects.filter(data_source=ds, name="users")
+    assert remaining_tables.count() == 1
+    assert remaining_tables.first().id == t1.id  # Kept the first one
+
+    remaining_cols = TableColumn.objects.filter(table=t1, name="id")
+    assert remaining_cols.count() == 1
+    assert remaining_cols.first().id == c1.id  # Kept the first one
+
+    assert result["tables_updated"] > 0

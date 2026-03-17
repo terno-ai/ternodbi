@@ -2,7 +2,6 @@ import logging
 from django.db.models.signals import post_save, post_delete, pre_delete, m2m_changed
 from django.dispatch import receiver
 from terno_dbi.core import models
-from terno_dbi.core.models import DataSource
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +14,7 @@ def _invalidate_cache_for_datasource(datasource):
         delete_cache(datasource)
     except Exception as e:
         logger.error(f"Failed to invalidate cache for datasource {datasource}: {e}")
+
 
 @receiver(post_save, sender=models.TableRowFilter)
 @receiver(post_save, sender=models.GroupTableRowFilter)
@@ -102,6 +102,7 @@ def _get_instance_datasource_id(instance):
         return instance.table.data_source_id
     return None
 
+
 def _get_m2m_target_datasource_ids(sender, pk_set):
     """Fetch data_source_ids for the target tables/columns being modified in the M2M relation."""
     if sender in (models.GroupTableSelector.tables.through, models.GroupTableSelector.exclude_tables.through):
@@ -109,6 +110,7 @@ def _get_m2m_target_datasource_ids(sender, pk_set):
     if sender in (models.GroupColumnSelector.columns.through, models.GroupColumnSelector.exclude_columns.through):
         return models.TableColumn.objects.filter(id__in=pk_set).values_list('table__data_source_id', flat=True)
     return []
+
 
 def _get_pre_clear_datasource_ids(sender, instance):
     """Fetch data_source_ids for all currently attached targets before a clear operation."""
@@ -125,6 +127,7 @@ def _get_pre_clear_datasource_ids(sender, instance):
         logger.error(f"Error extracting datasources during pre_clear: {e}")
     return []
 
+
 @receiver(m2m_changed, sender=models.PrivateTableSelector.tables.through)
 @receiver(m2m_changed, sender=models.PrivateColumnSelector.columns.through)
 @receiver(m2m_changed, sender=models.GroupTableSelector.tables.through)
@@ -139,7 +142,7 @@ def invalidate_cache_on_m2m_change(sender, instance, action, reverse, pk_set, **
 
     ds_ids = set()
 
-    # 1. Pre-Clear: Gather the soon-to-be-deleted IDs
+    # Pre-Clear: Gather the soon-to-be-deleted IDs
     if action == 'pre_clear':
         if reverse:
             ds_id = _get_instance_datasource_id(instance)
@@ -150,11 +153,11 @@ def invalidate_cache_on_m2m_change(sender, instance, action, reverse, pk_set, **
                 ds_ids.add(ds_id)
             else:
                 ds_ids.update(_get_pre_clear_datasource_ids(sender, instance))
-        
+
         instance._m2m_clear_ds_ids = list(ds_ids)
         return
 
-    # 2. Post-Clear: Execute using collected IDs
+    # Post-Clear: Execute using collected IDs
     if action == 'post_clear':
         ds_ids = set(getattr(instance, '_m2m_clear_ds_ids', []))
 
@@ -162,7 +165,7 @@ def invalidate_cache_on_m2m_change(sender, instance, action, reverse, pk_set, **
     elif action in ['post_add', 'post_remove']:
         if not pk_set:
             return
-            
+
         if reverse:
             ds_id = _get_instance_datasource_id(instance)
             if ds_id: ds_ids.add(ds_id)
@@ -173,7 +176,7 @@ def invalidate_cache_on_m2m_change(sender, instance, action, reverse, pk_set, **
             else:
                 ds_ids.update(_get_m2m_target_datasource_ids(sender, pk_set))
 
-    # 4. Invalidate Target Caches
+    # Invalidate Target Caches
     for ds_id in ds_ids:
         if ds_id:
             _invalidate_cache_for_datasource(ds_id)

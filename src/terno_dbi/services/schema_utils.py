@@ -3,8 +3,10 @@ import math
 from decimal import Decimal
 from typing import Dict, Any, List, Optional
 import reversion
+from django.db import transaction
 
-from sqlalchemy import MetaData, Table, select, func, text, inspect, case
+
+from sqlalchemy import MetaData, Table, select, func, inspect, case
 from sqlalchemy.sql.sqltypes import (
     Integer, Float, Numeric, BigInteger, SmallInteger, DECIMAL,
     String, Text, Enum, DateTime, Date, TIMESTAMP
@@ -565,69 +567,96 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
 
         for tbl_name, tbl in mdb.tables.items():
             try:
-                actual_table_name = tbl.name
-                existing_table = models.Table.objects.filter(
-                    data_source=datasource, 
-                    name=actual_table_name
-                ).first()
-
-                if existing_table:
-                    table_model = existing_table
-                    result["tables_updated"] += 1
-                else:
-                    table_model = models.Table.objects.create(
+                with transaction.atomic():
+                    actual_table_name = tbl.name
+                    existing_tables = models.Table.objects.filter(
                         data_source=datasource,
-                        name=actual_table_name,
-                        public_name=actual_table_name,
+                        name=actual_table_name
                     )
-                    result["tables_created"] += 1
+                    existing_table = existing_tables.first()
 
-                count = resolve_row_count(actual_table_name, row_counts_map)
-                if count is not None:
-                    table_model.estimated_row_count = count
-                    table_model.save(update_fields=['estimated_row_count'])
+                    if existing_table:
+                        if existing_tables.count() > 1:    # clean up legacy duplicate table records
+                            duplicate_ids = list(
+                                existing_tables.exclude(id=existing_table.id)
+                                .values_list('id', flat=True)
+                            )
+                            logger.info(
+                                f"Cleaning up {len(duplicate_ids)} duplicate "
+                                f"records for table {actual_table_name}"
+                            )
+                            models.Table.objects.filter(id__in=duplicate_ids).delete()
 
-                found_table_names.add(actual_table_name)
-
-                columns_count = 0
-                found_column_names = set()
-                for col_name, col in tbl.columns.items():
-                    existing_col = models.TableColumn.objects.filter(
-                        table=table_model,
-                        name=col_name
-                    ).first()
-
-                    if existing_col:
-                        if overwrite:
-                            existing_col.data_type = str(col.type)
-                            existing_col.save()
+                        table_model = existing_table
+                        result["tables_updated"] += 1
                     else:
-                        models.TableColumn.objects.create(
-                            table=table_model,
-                            name=col_name,
-                            public_name=col_name,
-                            data_type=str(col.type),
+                        table_model = models.Table.objects.create(
+                            data_source=datasource,
+                            name=actual_table_name,
+                            public_name=actual_table_name,
                         )
-                        result["columns_created"] += 1
-                    found_column_names.add(col_name)
-                    columns_count += 1
+                        result["tables_created"] += 1
 
-                missing_cols = models.TableColumn.objects.filter(
-                    table=table_model
-                ).exclude(name__in=found_column_names)
+                    count = resolve_row_count(actual_table_name, row_counts_map)
+                    if count is not None:
+                        table_model.estimated_row_count = count
+                        table_model.save(update_fields=['estimated_row_count'])
 
-                if missing_cols.exists():
-                    count = missing_cols.count()
-                    missing_cols.delete()
-                    result["columns_deleted"] += count
-                    logger.info(f"Deleted {count} stale columns from {actual_table_name}")
+                    found_table_names.add(actual_table_name)
 
-                result["tables"].append({
-                    "name": actual_table_name,
-                    "status": "created" if not existing_table else "updated",
-                    "id": table_model.id,
-                    "columns": columns_count
-                })
+                    columns_count = 0
+                    found_column_names = set()
+                    for col_name, col in tbl.columns.items():
+                        existing_cols = models.TableColumn.objects.filter(
+                            table=table_model,
+                            name=col_name
+                        )
+                        existing_col = existing_cols.first()
+
+                        if existing_col:
+                            if existing_cols.count() > 1:
+                                duplicate_col_ids = list(
+                                    existing_cols.exclude(id=existing_col.id)
+                                    .values_list('id', flat=True)
+                                )
+                                logger.info(
+                                    f"Cleaning up {len(duplicate_col_ids)} duplicate "
+                                    f"columns for {actual_table_name}.{col_name}"
+                                )
+                                models.TableColumn.objects.filter(
+                                    id__in=duplicate_col_ids
+                                ).delete()
+
+                            if overwrite:
+                                existing_col.data_type = str(col.type)
+                                existing_col.save()
+                        else:
+                            models.TableColumn.objects.create(
+                                table=table_model,
+                                name=col_name,
+                                public_name=col_name,
+                                data_type=str(col.type),
+                            )
+                            result["columns_created"] += 1
+                        found_column_names.add(col_name)
+                        columns_count += 1
+
+                    missing_cols = models.TableColumn.objects.filter(
+                        table=table_model
+                    ).exclude(name__in=found_column_names)
+
+                    if missing_cols.exists():
+                        count = missing_cols.count()
+                        missing_cols.delete()
+                        result["columns_deleted"] += count
+                        logger.info(f"Deleted {count} stale columns from {actual_table_name}")
+
+                    result["tables"].append({
+                        "name": actual_table_name,
+                        "status": "created" if not existing_table else "updated",
+                        "id": table_model.id,
+                        "columns": columns_count
+                    })
 
             except Exception as e:
                 logger.exception(f"Error syncing table {tbl_name}: {e}")
@@ -652,39 +681,40 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
 
                 for fk in foreign_keys:
                     try:
-                        constrained_columns = models.TableColumn.objects.filter(
-                            name=fk.constrained_columns[0].name,
-                            table__data_source=datasource
-                        ).first()
+                        with transaction.atomic():
+                            constrained_columns = models.TableColumn.objects.filter(
+                                name=fk.constrained_columns[0].name,
+                                table__data_source=datasource
+                            ).first()
 
-                        referred_table = models.Table.objects.filter(
-                            name=fk.referred_table.name, 
-                            data_source=datasource
-                        ).first()
+                            referred_table = models.Table.objects.filter(
+                                name=fk.referred_table.name, 
+                                data_source=datasource
+                            ).first()
 
-                        referred_columns = models.TableColumn.objects.filter(
-                            name=fk.referred_columns[0].name,
-                            table__data_source=datasource
-                        ).first()
+                            referred_columns = models.TableColumn.objects.filter(
+                                name=fk.referred_columns[0].name,
+                                table__data_source=datasource
+                            ).first()
 
-                        if not all([constrained_columns, referred_table, referred_columns]):
-                            continue
+                            if not all([constrained_columns, referred_table, referred_columns]):
+                                continue
 
-                        existing_fk = models.ForeignKey.objects.filter(
-                            constrained_table=table,
-                            constrained_columns=constrained_columns,
-                            referred_table=referred_table,
-                            referred_columns=referred_columns
-                        ).first()
-
-                        if not existing_fk:
-                            models.ForeignKey.objects.create(
+                            existing_fk = models.ForeignKey.objects.filter(
                                 constrained_table=table,
                                 constrained_columns=constrained_columns,
                                 referred_table=referred_table,
                                 referred_columns=referred_columns
-                            )
-                            result["foreign_keys_created"] += 1
+                            ).first()
+
+                            if not existing_fk:
+                                models.ForeignKey.objects.create(
+                                    constrained_table=table,
+                                    constrained_columns=constrained_columns,
+                                    referred_table=referred_table,
+                                    referred_columns=referred_columns
+                                )
+                                result["foreign_keys_created"] += 1
                     except Exception as fk_error:
                         logger.warning(f"Error creating FK for {tbl_name}: {fk_error}")
 
