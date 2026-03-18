@@ -86,52 +86,18 @@ class TestCoreViews:
         assert data['supported_databases'] == ['postgres', 'mysql']
         assert data['config']['cache_timeout'] == 60
 
-    def test_doc_view_success(self):
-        """Should render documentation page."""
+    def test_doc_view_redirects_valid_page(self):
+        """Should redirect to external docs for valid page."""
         from terno_dbi.core.views import doc_view
-        
-        request = RequestFactory().get('/docs/setup')
-        
-        # Mock markdown module since it's imported inside function
-        # We can patch sys.modules or use patch('terno_dbi.core.views.markdown')? No, it's local import.
-        # Patch sys.modules to ensure we control it.
-        mock_md_mod = MagicMock()
-        mock_md_mod.markdown.return_value = "<h1>Title</h1>Content"
-        
-        with patch.dict(sys.modules, {'markdown': mock_md_mod}):
-            # Mock settings explicitly at source since it is local import
-            with patch('django.conf.settings') as mock_settings:
-                mock_path = MagicMock()
-                mock_settings.BASE_DIR.parent.__truediv__.return_value = mock_path
-                
-                mock_file = MagicMock()
-                mock_path.__truediv__.return_value = mock_file
-                mock_file.exists.return_value = True
-                
-                with patch('builtins.open', mock_open(read_data="# Title\nContent")):
-                    with patch('terno_dbi.core.views.render') as mock_render:
-                        mock_render.return_value = "Doc Page"
-                        
-                        response = doc_view(request, page='setup')
-                        
-                        mock_render.assert_called()
-                        assert response == "Doc Page"
+        request = RequestFactory().get('/docs/architecture')
+        response = doc_view(request, page='architecture')
+        assert response.status_code == 302
+        assert response.url == "https://terno-ai.github.io/ternodbi/architecture.html"
 
-    def test_doc_view_not_found(self):
-        """Should raise 404 for missing doc or invalid page."""
+    def test_doc_view_redirects_invalid_page(self):
+        """Should redirect to setup for invalid page."""
         from terno_dbi.core.views import doc_view
-        
         request = RequestFactory().get('/docs/badpage')
-        
-        # Need to patch settings again
-        with patch('django.conf.settings') as mock_settings:
-                mock_path = MagicMock()
-                mock_settings.BASE_DIR.parent.__truediv__.return_value = mock_path
-                mock_file = MagicMock()
-                mock_path.__truediv__.return_value = mock_file
-                
-                # File does not exist
-                mock_file.exists.return_value = False
-                
-                with pytest.raises(Http404):
-                    doc_view(request, page='setup')
+        response = doc_view(request, page='badpage')
+        assert response.status_code == 302
+        assert response.url == "https://terno-ai.github.io/ternodbi/setup.html"

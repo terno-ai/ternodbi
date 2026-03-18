@@ -34,13 +34,13 @@ if _bq_creds:
     except json.JSONDecodeError:
         pass
 
-from terno.connectors.factory import ConnectorFactory
-from terno.connectors.postgres import PostgresConnector
-from terno.connectors.mysql import MySQLConnector
-from terno.connectors.snowflake import SnowflakeConnector
-from terno.connectors.bigquery import BigQueryConnector
-from terno.connectors.databricks import DatabricksConnector
-from terno.connectors.sqlite import SQLiteConnector
+from terno_dbi.connectors.factory import ConnectorFactory
+from terno_dbi.connectors.postgres import PostgresConnector
+from terno_dbi.connectors.mysql import MySQLConnector
+from terno_dbi.connectors.snowflake import SnowflakeConnector
+from terno_dbi.connectors.bigquery import BigQueryConnector
+from terno_dbi.connectors.databricks import DatabricksConnector
+from terno_dbi.connectors.sqlite import SQLiteConnector
 
 
 def skip_if_no_connection(connection_string, db_name):

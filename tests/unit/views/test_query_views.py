@@ -4,8 +4,8 @@ Unit tests for Query Service Views.
 Tests all endpoints in query_service/views.py including:
 - health, info
 - list_datasources, get_datasource
-- list_tables, list_columns, get_table_columns
-- get_schema, list_foreign_keys
+- list_tables, list_columns, list_table_columns
+- list_foreign_keys
 - get_sample_data, execute_query, export_query
 """
 import pytest
@@ -166,23 +166,7 @@ class TestInfoEndpoint:
         
         assert response.status_code == 200
 
-@pytest.mark.django_db
-class TestGetDatasource:
-    """Tests for /api/query/datasources/<id>/"""
 
-    def test_returns_datasource(self, request_factory, setup_test_data):
-        """Should return datasource details."""
-        from terno_dbi.core.query_service.views import get_datasource
-        
-        request = request_factory.get(
-            f'/api/query/datasources/{setup_test_data["datasource"].id}/'
-        )
-        setup_request_for_view(request, setup_test_data['token'], datasource=setup_test_data['datasource'])
-        
-        response = get_datasource(request, setup_test_data['datasource'].id)
-        assert response.status_code == 200
-        data = json.loads(response.content)
-        assert data.get('id') == setup_test_data['datasource'].id
 
 
 @pytest.mark.django_db
@@ -282,56 +266,7 @@ class TestListTables:
         assert callable(list_tables)
 
 
-@pytest.mark.django_db
-class TestGetSchema:
-    """Tests for /api/query/datasources/<id>/schema/"""
 
-    def test_returns_full_schema(self, request_factory, setup_test_data):
-        """Should return schema with tables and columns."""
-        from terno_dbi.core.query_service.views import get_schema
-        
-        request = request_factory.get(
-            f'/api/query/datasources/{setup_test_data["datasource"].id}/schema/'
-        )
-        setup_request_for_view(
-            request,
-            setup_test_data['token'],
-            datasource=setup_test_data['datasource']
-        )
-        
-        response = get_schema(request, setup_test_data['datasource'].id)
-        
-        assert response.status_code == 200
-        data = json.loads(response.content)
-        # Response has 'schema' key with table list
-        assert 'schema' in data or 'tables' in data
-
-
-@pytest.mark.django_db
-class TestGetTableColumns:
-    """Tests for /api/query/tables/<table_id>/columns/"""
-
-    def test_returns_columns_with_types(self, request_factory, setup_test_data):
-        """Should return columns with data types."""
-        from terno_dbi.core.query_service.views import get_table_columns
-        
-        request = request_factory.get(
-            f'/api/query/tables/{setup_test_data["table1"].id}/columns/'
-        )
-        setup_request_for_view(
-            request,
-            setup_test_data['token'],
-            table=setup_test_data['table1']
-        )
-        
-        response = get_table_columns(request, setup_test_data['table1'].id)
-        
-        assert response.status_code == 200
-        data = json.loads(response.content)
-        # Response is a dict with 'columns' key
-        assert data.get('status') == 'success'
-        assert 'columns' in data
-        assert len(data['columns']) == 2  # id and email columns
 
 @pytest.mark.django_db
 class TestListTableColumns:
@@ -353,12 +288,14 @@ class TestListTableColumns:
 
     def test_get_table_columns_not_found(self, request_factory, setup_test_data):
         """Should return 404 if table not found."""
-        from terno_dbi.core.query_service.views import get_table_columns
+        from terno_dbi.core.query_service.views import list_table_columns
         
-        request = request_factory.get('/api/query/tables/999/columns/')
-        setup_request_for_view(request, setup_test_data['token'])
+        request = request_factory.get(
+            f'/api/query/datasources/{setup_test_data["datasource"].id}/tables/999/columns/'
+        )
+        setup_request_for_view(request, setup_test_data['token'], datasource=setup_test_data['datasource'])
         
-        response = get_table_columns(request, 999)
+        response = list_table_columns(request, setup_test_data['datasource'].id, '999')
         assert response.status_code == 404
 
 

@@ -21,7 +21,7 @@ import os
 import json
 from sqlalchemy import text
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
-from terno.connectors.factory import ConnectorFactory
+from terno_dbi.connectors.factory import ConnectorFactory
 
 POSTGRES_CONNECTION_STRING = os.getenv('TEST_POSTGRES_CONN')
 MYSQL_CONNECTION_STRING = os.getenv('TEST_MYSQL_CONN')

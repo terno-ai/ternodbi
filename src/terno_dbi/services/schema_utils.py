@@ -6,7 +6,7 @@ import reversion
 from django.db import transaction
 
 
-from sqlalchemy import MetaData, Table, select, func, inspect, case
+from sqlalchemy import MetaData, Table, select, func, inspect, case, text
 from sqlalchemy.sql.sqltypes import (
     Integer, Float, Numeric, BigInteger, SmallInteger, DECIMAL,
     String, Text, Enum, DateTime, Date, TIMESTAMP
@@ -329,7 +329,6 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
         Number of tables/views discovered
     """
     from terno_dbi.core import models
-    from sqlalchemy import text
 
     tables_discovered = 0
 

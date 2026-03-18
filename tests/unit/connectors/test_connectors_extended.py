@@ -18,7 +18,7 @@ from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.pool import QueuePool, NullPool
 
 # Import test targets
-from terno.connectors.base import (
+from terno_dbi.connectors.base import (
     BaseConnector, 
     DEFAULT_POOL_SIZE, 
     DEFAULT_MAX_OVERFLOW,
@@ -27,14 +27,14 @@ from terno.connectors.base import (
     DEFAULT_MAX_RETRIES,
     DEFAULT_RETRY_BASE_DELAY
 )
-from terno.connectors.factory import ConnectorFactory, UnsupportedDatabaseError
-from terno.connectors.postgres import PostgresConnector
-from terno.connectors.mysql import MySQLConnector
-from terno.connectors.snowflake import SnowflakeConnector
-from terno.connectors.bigquery import BigQueryConnector
-from terno.connectors.databricks import DatabricksConnector
-from terno.connectors.oracle import OracleConnector
-from terno.connectors.sqlite import SQLiteConnector
+from terno_dbi.connectors.factory import ConnectorFactory, UnsupportedDatabaseError
+from terno_dbi.connectors.postgres import PostgresConnector
+from terno_dbi.connectors.mysql import MySQLConnector
+from terno_dbi.connectors.snowflake import SnowflakeConnector
+from terno_dbi.connectors.bigquery import BigQueryConnector
+from terno_dbi.connectors.databricks import DatabricksConnector
+from terno_dbi.connectors.oracle import OracleConnector
+from terno_dbi.connectors.sqlite import SQLiteConnector
 
 
 class TestConnectorFactory(unittest.TestCase):
@@ -299,7 +299,7 @@ class TestGetConnection(unittest.TestCase):
 class TestPoolConfiguration(unittest.TestCase):
     """Tests for connection pool configuration."""
 
-    @patch('terno.connectors.base.sqlalchemy.create_engine')
+    @patch('terno_dbi.connectors.base.sqlalchemy.create_engine')
     def test_pool_enabled_uses_queue_pool(self, mock_create_engine):
         """Test pool enabled uses QueuePool."""
         connector = PostgresConnector('postgresql://test', use_pool=True)
@@ -308,7 +308,7 @@ class TestPoolConfiguration(unittest.TestCase):
         call_kwargs = mock_create_engine.call_args[1]
         self.assertEqual(call_kwargs['poolclass'], QueuePool)
 
-    @patch('terno.connectors.base.sqlalchemy.create_engine')
+    @patch('terno_dbi.connectors.base.sqlalchemy.create_engine')
     def test_pool_disabled_uses_null_pool(self, mock_create_engine):
         """Test pool disabled uses NullPool."""
         connector = PostgresConnector('postgresql://test', use_pool=False)
@@ -317,7 +317,7 @@ class TestPoolConfiguration(unittest.TestCase):
         call_kwargs = mock_create_engine.call_args[1]
         self.assertEqual(call_kwargs['poolclass'], NullPool)
 
-    @patch('terno.connectors.base.sqlalchemy.create_engine')
+    @patch('terno_dbi.connectors.base.sqlalchemy.create_engine')
     def test_pool_size_passed_to_engine(self, mock_create_engine):
         """Test pool_size is passed to create_engine."""
         connector = PostgresConnector('postgresql://test', pool_size=15)
@@ -326,7 +326,7 @@ class TestPoolConfiguration(unittest.TestCase):
         call_kwargs = mock_create_engine.call_args[1]
         self.assertEqual(call_kwargs['pool_size'], 15)
 
-    @patch('terno.connectors.base.sqlalchemy.create_engine')
+    @patch('terno_dbi.connectors.base.sqlalchemy.create_engine')
     def test_pool_pre_ping_enabled(self, mock_create_engine):
         """Test pool_pre_ping is enabled."""
         connector = PostgresConnector('postgresql://test')
@@ -349,7 +349,7 @@ class TestRetryLogic(unittest.TestCase):
         self.assertEqual(result, 'success')
         mock_func.assert_called_once()
 
-    @patch('terno.connectors.base.time.sleep')
+    @patch('terno_dbi.connectors.base.time.sleep')
     def test_retry_on_pool_timeout(self, mock_sleep):
         """Test retry on pool timeout."""
         connector = PostgresConnector('postgresql://test')
@@ -361,7 +361,7 @@ class TestRetryLogic(unittest.TestCase):
         self.assertEqual(mock_func.call_count, 2)
         mock_sleep.assert_called_once_with(1)  # First retry delay
 
-    @patch('terno.connectors.base.time.sleep')
+    @patch('terno_dbi.connectors.base.time.sleep')
     def test_exponential_backoff_delays(self, mock_sleep):
         """Test exponential backoff delay pattern: 1s, 2s, 4s."""
         connector = PostgresConnector('postgresql://test')
@@ -388,7 +388,7 @@ class TestRetryLogic(unittest.TestCase):
         
         mock_func.assert_called_once()
 
-    @patch('terno.connectors.base.time.sleep')
+    @patch('terno_dbi.connectors.base.time.sleep')
     def test_max_retries_exhausted(self, mock_sleep):
         """Test raises after max retries exhausted."""
         connector = PostgresConnector('postgresql://test')
@@ -413,8 +413,8 @@ class TestDatabricksConnector(unittest.TestCase):
         connector = DatabricksConnector('databricks://token:xxx@host:443')
         self.assertEqual(connector._schema, 'default')
 
-    @patch('terno.connectors.databricks.MDatabase')
-    @patch('terno.connectors.databricks.inspect')
+    @patch('terno_dbi.connectors.databricks.MDatabase')
+    @patch('terno_dbi.connectors.databricks.inspect')
     def test_get_metadata_uses_safe_reflect(self, mock_inspect, mock_mdb):
         """Test get_metadata uses safe reflection."""
         connector = DatabricksConnector('databricks://token:xxx@host:443/test_schema')
@@ -434,7 +434,7 @@ class TestDatabricksConnector(unittest.TestCase):
             
             mock_mdb.from_inspector.assert_called_once()
 
-    @patch('terno.connectors.databricks.inspect')
+    @patch('terno_dbi.connectors.databricks.inspect')
     def test_safe_reflect_handles_table_errors(self, mock_inspect):
         """Test safe reflection continues on individual table errors."""
         connector = DatabricksConnector('databricks://token:xxx@host:443/schema')
@@ -449,7 +449,7 @@ class TestDatabricksConnector(unittest.TestCase):
             if kwargs.get('only') == ['bad_table']:
                 raise Exception("Table error")
         
-        with patch('terno.connectors.databricks.MetaData') as mock_metadata_class:
+        with patch('terno_dbi.connectors.databricks.MetaData') as mock_metadata_class:
             mock_metadata = Mock()
             mock_metadata.reflect.side_effect = reflect_side_effect
             mock_metadata_class.return_value = mock_metadata
@@ -460,7 +460,7 @@ class TestDatabricksConnector(unittest.TestCase):
             # Both tables should have been attempted
             self.assertEqual(mock_metadata.reflect.call_count, 2)
 
-    @patch('terno.connectors.databricks.inspect')
+    @patch('terno_dbi.connectors.databricks.inspect')
     def test_safe_reflect_handles_inspector_error(self, mock_inspect):
         """Test safe reflection handles inspector errors."""
         connector = DatabricksConnector('databricks://token:xxx@host:443/schema')
@@ -470,7 +470,7 @@ class TestDatabricksConnector(unittest.TestCase):
         mock_inspector.get_table_names.side_effect = Exception("Inspector error")
         mock_inspect.return_value = mock_inspector
         
-        with patch('terno.connectors.databricks.MetaData') as mock_metadata_class:
+        with patch('terno_dbi.connectors.databricks.MetaData') as mock_metadata_class:
             mock_metadata = Mock()
             mock_metadata_class.return_value = mock_metadata
             
@@ -504,7 +504,7 @@ class TestSQLiteConnector(unittest.TestCase):
         connector = SQLiteConnector('sqlite:///test.db')
         self.assertFalse(connector.use_pool)
 
-    @patch('terno.connectors.sqlite.MDatabase')
+    @patch('terno_dbi.connectors.sqlite.MDatabase')
     def test_get_metadata(self, mock_mdb):
         """Test get_metadata works correctly."""
         connector = SQLiteConnector('sqlite:///test.db')
@@ -555,7 +555,7 @@ class TestPostgresConnector(unittest.TestCase):
             
         self.assertEqual(dialect_name, 'postgres')
 
-    @patch('terno.connectors.postgres.MDatabase')
+    @patch('terno_dbi.connectors.postgres.MDatabase')
     def test_get_metadata(self, mock_mdb):
         """Test get_metadata works correctly."""
         connector = PostgresConnector('postgresql://test')
@@ -575,7 +575,7 @@ class TestPostgresConnector(unittest.TestCase):
 class TestMySQLConnector(unittest.TestCase):
     """Tests specific to MySQLConnector."""
 
-    @patch('terno.connectors.mysql.MDatabase')
+    @patch('terno_dbi.connectors.mysql.MDatabase')
     def test_get_metadata(self, mock_mdb):
         """Test get_metadata works correctly."""
         connector = MySQLConnector('mysql+pymysql://test')
@@ -611,7 +611,7 @@ class TestMySQLConnector(unittest.TestCase):
 class TestOracleConnector(unittest.TestCase):
     """Tests specific to OracleConnector."""
 
-    @patch('terno.connectors.oracle.MDatabase')
+    @patch('terno_dbi.connectors.oracle.MDatabase')
     def test_get_metadata(self, mock_mdb):
         """Test get_metadata works correctly."""
         connector = OracleConnector('oracle+oracledb://test')
@@ -647,7 +647,7 @@ class TestOracleConnector(unittest.TestCase):
 class TestSnowflakeConnector(unittest.TestCase):
     """Tests specific to SnowflakeConnector."""
 
-    @patch('terno.connectors.snowflake.MDatabase')
+    @patch('terno_dbi.connectors.snowflake.MDatabase')
     def test_get_metadata_uses_snowflake_dialect(self, mock_mdb):
         """Test get_metadata uses from_snowflake_dialect."""
         connector = SnowflakeConnector('snowflake://test')
@@ -694,7 +694,7 @@ class TestBigQueryConnector(unittest.TestCase):
         
         self.assertEqual(connector.credentials, creds)
 
-    @patch('terno.connectors.bigquery.sqlalchemy.create_engine')
+    @patch('terno_dbi.connectors.bigquery.sqlalchemy.create_engine')
     def test_create_engine_passes_credentials(self, mock_create_engine):
         """Test _create_engine passes credentials to SQLAlchemy."""
         creds = {'type': 'service_account', 'project_id': 'test'}
@@ -705,7 +705,7 @@ class TestBigQueryConnector(unittest.TestCase):
         call_kwargs = mock_create_engine.call_args[1]
         self.assertEqual(call_kwargs['credentials_info'], creds)
 
-    @patch('terno.connectors.bigquery.sqlalchemy.create_engine')
+    @patch('terno_dbi.connectors.bigquery.sqlalchemy.create_engine')
     def test_create_engine_with_pool(self, mock_create_engine):
         """Test _create_engine uses QueuePool when enabled."""
         creds = {'type': 'service_account'}
@@ -716,7 +716,7 @@ class TestBigQueryConnector(unittest.TestCase):
         call_kwargs = mock_create_engine.call_args[1]
         self.assertEqual(call_kwargs['poolclass'], QueuePool)
 
-    @patch('terno.connectors.bigquery.sqlalchemy.create_engine')
+    @patch('terno_dbi.connectors.bigquery.sqlalchemy.create_engine')
     def test_create_engine_without_pool(self, mock_create_engine):
         """Test _create_engine uses NullPool when disabled."""
         creds = {'type': 'service_account'}
@@ -727,7 +727,7 @@ class TestBigQueryConnector(unittest.TestCase):
         call_kwargs = mock_create_engine.call_args[1]
         self.assertEqual(call_kwargs['poolclass'], NullPool)
 
-    @patch('terno.connectors.bigquery.MDatabase')
+    @patch('terno_dbi.connectors.bigquery.MDatabase')
     def test_get_metadata(self, mock_mdb):
         """Test get_metadata works correctly."""
         creds = {'type': 'service_account'}
@@ -805,7 +805,7 @@ class TestConnectionStringMasking(unittest.TestCase):
 class TestReflectMetadata(unittest.TestCase):
     """Tests for _reflect_metadata base method."""
 
-    @patch('terno.connectors.base.sqlalchemy.MetaData')
+    @patch('terno_dbi.connectors.base.sqlalchemy.MetaData')
     def test_reflect_metadata_with_schema(self, mock_metadata_class):
         """Test _reflect_metadata passes schema correctly."""
         connector = PostgresConnector('postgresql://test')
@@ -820,7 +820,7 @@ class TestReflectMetadata(unittest.TestCase):
         mock_metadata_class.assert_called_once_with(schema='my_schema')
         mock_metadata.reflect.assert_called_once_with(bind=mock_engine)
 
-    @patch('terno.connectors.base.sqlalchemy.MetaData')
+    @patch('terno_dbi.connectors.base.sqlalchemy.MetaData')
     def test_reflect_metadata_returns_metadata(self, mock_metadata_class):
         """Test _reflect_metadata returns the metadata object."""
         connector = PostgresConnector('postgresql://test')

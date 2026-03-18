@@ -47,20 +47,7 @@ class TestInitialMigration:
             # Should call create_model for each model in list (11 models)
             assert schema_editor.create_model.call_count == 11
 
-    def test_add_constraints_if_needed_sqlite(self):
-        """Should skip explicit constraint check on sqlite."""
-        apps = MagicMock()
-        schema_editor = MagicMock()
-        
-        with patch('django.db.connection.cursor') as mock_cursor:
-            # Simulate SQLite where vendor is sqlite
-            # We can't easily change connection.vendor directly if it's a property or proxy
-            # But the code does: from django.db import connection ... if connection.vendor
-            pass 
-            # This is hard to test without mocking connection module or property.
-            # let's skip deep vendor testing and just ensure it runs without error.
-            
-            initial_migration.add_constraints_if_needed(apps, schema_editor)
+
 
     def test_create_tables_error(self):
         """Should raise exception on creation error."""
@@ -72,17 +59,7 @@ class TestInitialMigration:
             with pytest.raises(Exception, match="Create Fail"):
                 initial_migration.create_tables_if_needed(apps, schema_editor)
 
-    def test_add_constraints_error_handled(self):
-        """Should silently handle constraint addition errors."""
-        apps = MagicMock()
-        schema_editor = MagicMock()
-        
-        # Mock cursor context to raise on enter or inside
-        with patch('django.db.connection.cursor') as mock_cursor:
-            mock_cursor.side_effect = Exception("Constraint Fail")
-            
-            # Should NOT raise
-            initial_migration.add_constraints_if_needed(apps, schema_editor)
+
 
 
 class TestOrgMigration:
@@ -102,66 +79,27 @@ class TestOrgMigration:
         apps = MagicMock()
         schema_editor = MagicMock()
         
-        with patch('django.db.connection.cursor') as mock_cursor:
-            mock_cur = MagicMock()
-            # Handle context manager usage: with connection.cursor() as c:
-            mock_cursor.return_value.__enter__.return_value = mock_cur
-            # Handle direct usage: c = connection.cursor(); c.execute()
-            mock_cursor.return_value.execute = mock_cur.execute
-            # Also fetchall
-            mock_cursor.return_value.fetchall = mock_cur.fetchall
-            
-            # Mock fetchall returns empty (no columns)
-            mock_cur.fetchall.return_value = []
-            
-            # Mock vendor to not be sqlite for ALTER TABLE logic
-            with patch('django.db.connection.vendor', 'postgresql'):
+        with patch('django.db.connection.cursor'):
+            with patch('django.db.connection.introspection.get_table_description') as mock_desc:
+                mock_desc.return_value = []
+                
                 org_migration.add_datasource_org_fk(apps, schema_editor)
-                
-                # cursor.execute called multiple times.
-                # First for info schema check
-                # Then for ALTER TABLE
-                
-                # Verify ALTER TABLE was called
-                found_alter = False
-                for call in mock_cur.execute.call_args_list:
-                    sql = call[0][0] # first arg, first element
-                    if "ALTER TABLE terno_datasource" in sql and "ADD COLUMN organisation_id" in sql:
-                        found_alter = True
-                        break
-                
-                assert found_alter, "ALTER TABLE statement not found in execute calls"
+                schema_editor.add_field.assert_called_once()
 
-    def test_add_datasource_org_fk_sqlite(self):
-        """Should use unique SQL for sqlite."""
+    def test_add_datasource_org_fk_skips_if_exists(self):
+        """Should skip adding column if it exists."""
         apps = MagicMock()
         schema_editor = MagicMock()
         
-        with patch('django.db.connection.cursor') as mock_cursor:
-            mock_cur = MagicMock()
-            # Setup mock for both context manager and direct usage
-            mock_cursor.return_value.__enter__.return_value = mock_cur
-            mock_cursor.return_value.execute = mock_cur.execute
-            mock_cursor.return_value.fetchall = mock_cur.fetchall
-            
-            # First fetchall (PRAGMA table_info) returns empty
-            mock_cur.fetchall.return_value = []
-            
-            with patch('django.db.connection.vendor', 'sqlite'):
+        col_mock = MagicMock()
+        col_mock.name = 'organisation_id'
+        
+        with patch('django.db.connection.cursor'):
+            with patch('django.db.connection.introspection.get_table_description') as mock_desc:
+                mock_desc.return_value = [col_mock]
+                
                 org_migration.add_datasource_org_fk(apps, schema_editor)
-                
-                # Verify PRAGMA was called
-                pragma_called = False
-                alter_called = False
-                for call in mock_cur.execute.call_args_list:
-                    sql = call[0][0]
-                    if "PRAGMA table_info" in sql:
-                        pragma_called = True
-                    if "ALTER TABLE terno_datasource" in sql and "REFERENCES core_organisation" in sql:
-                        alter_called = True
-                
-                assert pragma_called
-                assert alter_called
+                schema_editor.add_field.assert_not_called()
 
     def test_create_org_tables_error(self):
         """Should raise exception on creation error."""

@@ -273,7 +273,7 @@ class TestMySQLConnector:
         
         connector = MySQLConnector('mysql://localhost/test')
         
-        assert connector.connection_string == 'mysql://localhost/test'
+        assert connector.connection_string == 'mysql+pymysql://localhost/test'
 
     @pytest.mark.skip(reason="Requires live MySQL database")
     def test_dialect_info(self):

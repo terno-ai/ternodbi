@@ -180,6 +180,9 @@ class TestUpdateTableEdgeCases:
         request = req_factory.patch('/', data={"public_name": "Pub", "description": "Desc"}, content_type='application/json')
         table = MagicMock(spec=Table)
         table.id = 1
+        table.public_name = "Pub"
+        table.description = "Desc"
+        table.is_hidden = False
         request.resolved_table = table
         
         func = update_table
@@ -206,6 +209,8 @@ class TestUpdateColumnEdgeCases:
         col.id = 1
         col.public_name = "Pub"
         col.data_type = "text" # Needs to be serializable
+        col.description = "Desc"
+        col.is_hidden = False
         request.resolved_column = col
         
         func = update_column
