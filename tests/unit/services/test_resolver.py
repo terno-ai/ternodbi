@@ -97,7 +97,15 @@ class TestResolveDatasource:
         # Force create another with same name (bypassing unique constraint for test)
         # This tests the MultipleObjectsReturned handling in the resolver
         # In practice, the unique constraint should prevent this
-        pass  # Skip - unique constraint prevents this scenario
+        from unittest.mock import patch
+        with patch('terno_dbi.services.resolver.DataSource.objects.all') as mock_all:
+            mock_qs = mock_all.return_value.filter.return_value
+            mock_qs.get.side_effect = DataSource.MultipleObjectsReturned()
+            
+            with pytest.raises(Http404) as exc_info:
+                resolve_datasource('duplicate_name')
+                
+            assert 'Multiple datasources found' in str(exc_info.value)
 
 
 @pytest.mark.django_db  

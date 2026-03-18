@@ -97,3 +97,62 @@ class TestBigQueryConnector:
             
             assert name == "bigquery"
             assert "(1, 0, 0)" in version
+
+    @patch('google.cloud.bigquery.Client')
+    @patch('google.oauth2.service_account.Credentials')
+    def test_get_table_row_counts(self, mock_creds, mock_client):
+        connector = BigQueryConnector(
+            'bigquery://my-project/my_dataset', 
+            credentials={'type': 'service_account', 'project_id': 'billing-project'}
+        )
+        
+        mock_engine = MagicMock()
+        mock_engine.url.host = "my-project"
+        mock_engine.url.database = "my_dataset"
+        
+        with patch.object(connector, 'get_engine', return_value=mock_engine):
+            mock_bq_client = MagicMock()
+            mock_client.return_value = mock_bq_client
+            
+            mock_row = MagicMock()
+            mock_row.table_id = "users"
+            mock_row.row_count = 100
+            
+            mock_bq_client.query_and_wait.return_value = [mock_row]
+            
+            counts = connector.get_table_row_counts()
+            
+            assert counts == {"users": 100}
+            mock_bq_client.query_and_wait.assert_called_with(
+                "SELECT table_id, row_count FROM `my-project.my_dataset.__TABLES__`"
+            )
+
+    def test_get_table_row_counts_missing_project_or_dataset(self):
+        connector = BigQueryConnector(
+            'bigquery://my-project', 
+            credentials={'type': 'service_account'}
+        )
+        # database is missing
+        mock_engine = MagicMock()
+        mock_engine.url.host = "my-project"
+        mock_engine.url.database = None
+        
+        with patch.object(connector, 'get_engine', return_value=mock_engine):
+            counts = connector.get_table_row_counts()
+            assert counts == {}
+
+    @patch('google.cloud.bigquery.Client')
+    @patch('google.oauth2.service_account.Credentials')
+    def test_get_table_row_counts_exception(self, mock_creds, mock_client):
+        connector = BigQueryConnector(
+            'bigquery://my-project/my_dataset', 
+            credentials={'type': 'service_account'}
+        )
+        mock_engine = MagicMock()
+        mock_engine.url.host = "my-project"
+        mock_engine.url.database = "my_dataset"
+        
+        with patch.object(connector, 'get_engine', return_value=mock_engine):
+            mock_client.side_effect = Exception("error")
+            counts = connector.get_table_row_counts()
+            assert counts == {}

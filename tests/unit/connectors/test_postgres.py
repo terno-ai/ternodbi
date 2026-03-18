@@ -51,3 +51,54 @@ class TestPostgresConnector(unittest.TestCase):
         with patch.object(connector, 'get_engine', return_value=mock_engine):
             name, _ = connector.get_dialect_info()
             assert name == "redshift"
+
+    @patch('terno_dbi.connectors.postgres.text')
+    def test_get_table_row_counts_default_schema(self, mock_text):
+        connector = PostgresConnector("postgresql://uri")
+        with patch.object(connector, 'get_connection') as mock_get_conn:
+            mock_conn = MagicMock()
+            mock_get_conn.return_value.__enter__.return_value = mock_conn
+            
+            # mock getting current schema
+            mock_conn.execute.return_value.scalar.return_value = "public"
+            # mock fetching row counts
+            mock_conn.execute.return_value.fetchall.return_value = [("users", 100), ("orders", -1)]
+            
+            counts = connector.get_table_row_counts()
+            
+            assert counts == {"users": 100}
+
+    @patch('terno_dbi.connectors.postgres.text')
+    def test_get_table_row_counts_schema_fallback(self, mock_text):
+        connector = PostgresConnector("postgresql://uri")
+        with patch.object(connector, 'get_connection') as mock_get_conn:
+            mock_conn = MagicMock()
+            mock_get_conn.return_value.__enter__.return_value = mock_conn
+            
+            # First execute raises, fallback to 'public'
+            def execute_side_effect(*args, **kwargs):
+                if mock_text.return_value == args[0] and "current_schema" in args[0].text:
+                    raise Exception("no schema")
+                mock_result = MagicMock()
+                mock_result.fetchall.return_value = [("users", 50)]
+                return mock_result
+            
+            mock_conn.execute.side_effect = execute_side_effect
+            counts = connector.get_table_row_counts()
+            assert counts == {"users": 50}
+
+    @patch('terno_dbi.connectors.postgres.text')
+    def test_get_table_row_counts_with_tables(self, mock_text):
+        connector = PostgresConnector("postgresql://uri")
+        with patch.object(connector, 'get_connection') as mock_get_conn:
+            mock_conn = MagicMock()
+            mock_get_conn.return_value.__enter__.return_value = mock_conn
+            
+            # Use explicit schema and tables
+            mock_conn.execute.return_value.fetchall.return_value = [("users", 50)]
+            
+            counts = connector.get_table_row_counts(schema="test", tables=["public.users"])
+            assert counts == {"users": 50}
+            
+            # Verify the query execution was called correctly
+            mock_conn.execute.assert_called_with(mock_text.return_value, {"schema": "test", "tables": ["users"]})

@@ -136,7 +136,15 @@ addopts = "--strict-markers"
 [tool.coverage.run]
 source = ["src/terno_dbi"]
 branch = true
-omit = ["*/tests/*", "*/__pycache__/*"]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "src/terno_dbi/examples/*",
+    "src/terno_dbi/core/migrations/*",
+    "src/terno_dbi/server/asgi.py",
+    "src/terno_dbi/server/wsgi.py",
+    "manage.py"
+]
 
 [tool.coverage.report]
 fail_under = 90

@@ -68,7 +68,7 @@ def validate_datasource_input(type_, conn_str, connection_json=None):
                     client.list_datasets(project=project_id, max_results=1)
                 except exceptions.NotFound:
                     return f"BigQuery project '{project_id}' does not exist."
-                except exceptions.PermissionDenied:
+                except exceptions.Forbidden:
                     return f"Permission denied: Cannot access BigQuery project '{project_id}'."
 
                 try:
@@ -76,7 +76,7 @@ def validate_datasource_input(type_, conn_str, connection_json=None):
                     client.get_dataset(dataset_ref)
                 except exceptions.NotFound:
                     return f"Dataset '{dataset_id}' does not exist in project '{project_id}'."
-                except exceptions.PermissionDenied:
+                except exceptions.Forbidden:
                     return f"Permission denied: Cannot access dataset '{dataset_id}'."
 
             except ImportError:
