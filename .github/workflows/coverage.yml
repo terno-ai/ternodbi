@@ -18,7 +18,7 @@ jobs:
       run: |
         apt-get update
         apt-get upgrade -y
-        apt-get install -y gcc git default-libmysqlclient-dev libpq-dev pkg-config curl nodejs
+        apt-get install -y gcc git default-libmysqlclient-dev libpq-dev pkg-config curl nodejs gnupg
 
     - name: Cache Python Dependencies
       id: pip-cache
