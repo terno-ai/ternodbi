@@ -1,0 +1,47 @@
+name: Code Coverage
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: python:3.10-slim
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install System Dependencies
+      run: |
+        apt-get update
+        apt-get upgrade -y
+        apt-get install -y gcc git default-libmysqlclient-dev libpq-dev pkg-config curl nodejs
+
+    - name: Cache Python Dependencies
+      id: pip-cache
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: pip-cache-v1-${{ hashFiles('pyproject.toml') }}
+      
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev,all-db]"
+
+    - name: Run Tests with Coverage
+      env:
+        DJANGO_SETTINGS_MODULE: "terno_dbi.server.settings"
+      run: |
+        # Run pytest with coverage for the terno_dbi core package
+        pytest tests/unit --cov=terno_dbi --cov-report=xml --cov-fail-under=90
+
+    - name: Report to CodeCov
+      uses: codecov/codecov-action@v4
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./coverage.xml
+        fail_ci_if_error: true
