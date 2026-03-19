@@ -28,7 +28,7 @@ The easiest way to get started is to run TernoDBI locally and connect your favor
    ```bash
    ternodbi manage issue_token --name "My Agent" --type query
    ```
-5. **Configure MCP** (See [MCP Integration](#-ternodbi-as-an-mcp-server) below)
+5. **Configure MCP** (See [MCP Integration](#ternodbi-as-an-mcp-server) below)
 6. **Start chatting with your enterprise data!**
 
 
