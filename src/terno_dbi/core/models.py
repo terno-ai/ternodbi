@@ -7,6 +7,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _get_fernet():
+    from cryptography.fernet import Fernet
+    from django.conf import settings
+    return Fernet(settings.MCP_ENCRYPTION_KEY)
+
+
 class CoreOrganisation(models.Model):
     name = models.CharField(max_length=255)
     subdomain = models.CharField(max_length=100, unique=True)
@@ -34,6 +40,19 @@ class OrganisationUser(models.Model):
         related_name='organisation_users'
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE)
+    active_token = models.ForeignKey(
+        'ServiceToken',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='org_users',
+        help_text="Active sandbox ServiceToken for this user+org pair"
+    )
+    encrypted_token_key = models.BinaryField(
+        null=True,
+        blank=True,
+        help_text="Fernet-encrypted raw key for the active sandbox token"
+    )
     created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
 
@@ -48,6 +67,14 @@ class OrganisationUser(models.Model):
 
     def __str__(self):
         return f"{self.user.username}"
+
+    def encrypt_token_key(self, raw_key):
+        """Encrypt raw token key for secure storage using Fernet."""
+        self.encrypted_token_key = _get_fernet().encrypt(raw_key.encode())
+
+    def decrypt_token_key(self):
+        """Decrypt stored token key using Fernet."""
+        return _get_fernet().decrypt(bytes(self.encrypted_token_key)).decode()
 
 
 class OrganisationGroup(models.Model):
@@ -433,8 +460,6 @@ class ServiceToken(models.Model):
         if not self.has_access_to_table(column.table):
             return False
 
-        # Check explicit private column selector
-        from terno_dbi.core.models import PrivateColumnSelector
         pcs = PrivateColumnSelector.objects.filter(data_source=column.table.data_source).first()
         if pcs and pcs.columns.filter(id=column.id).exists():
             return False
