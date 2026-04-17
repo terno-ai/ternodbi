@@ -142,6 +142,34 @@ To get total row count, set include_count=true (off by default for performance).
                 "required": ["table_id"]
             }
         ),
+        Tool(
+            name="find_similar_examples",
+            description="Find similar prompt examples (e.g. past SQL queries) based on semantic similarity.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The natural language query or context to find similar examples for"
+                    },
+                    "example_type": {
+                        "type": "string",
+                        "description": "The type of example (e.g., 'SQL', 'MQL'). Default is 'SQL'",
+                        "default": "SQL"
+                    },
+                    "datasource_id": {
+                        "type": "integer",
+                        "description": "Optional: Restrict search to a specific datasource ID"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of examples to return (default: 10)",
+                        "default": 10
+                    }
+                },
+                "required": ["query"]
+            }
+        ),
 
     ]
 
@@ -202,6 +230,16 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             table_id = arguments["table_id"]
             rows = arguments.get("rows", 10)
             result = client.get_sample_data(table_id, rows)
+
+        elif name == "find_similar_examples":
+            query_str = arguments["query"]
+            example_type = arguments.get("example_type", "SQL")
+            limit = arguments.get("limit", 10)
+            result = client.find_similar_examples(
+                query=query_str,
+                example_type=example_type,
+                limit=limit
+            )
 
         else:
             result = {"error": f"Unknown tool: {name}"}

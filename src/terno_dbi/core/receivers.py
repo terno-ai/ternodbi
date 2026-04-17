@@ -2,6 +2,7 @@ import logging
 from django.db.models.signals import post_save, post_delete, pre_delete, m2m_changed
 from django.dispatch import receiver
 from terno_dbi.core import models
+from terno_dbi.vector_store.utils import sync_prompt_example, delete_from_milvus
 
 logger = logging.getLogger(__name__)
 
@@ -180,3 +181,23 @@ def invalidate_cache_on_m2m_change(sender, instance, action, reverse, pk_set, **
     for ds_id in ds_ids:
         if ds_id:
             _invalidate_cache_for_datasource(ds_id)
+
+
+@receiver(post_save, sender=models.PromptExample)
+def handle_prompt_example_save(sender, instance, **kwargs):
+    if getattr(instance, "_skip_signal", False):
+        print(f"[SYNC] Skipping signal for ID={instance.id}")
+        return
+
+    try:
+        sync_prompt_example(instance)
+    except Exception as e:
+        print(f"[Milvus Sync Error - SAVE]: {e}")
+
+
+@receiver(post_delete, sender=models.PromptExample)
+def handle_prompt_example_delete(sender, instance, **kwargs):
+    try:
+        delete_from_milvus(instance.id)
+    except Exception as e:
+        print(f"[Milvus Sync Error - DELETE]: {e}")

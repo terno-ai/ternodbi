@@ -32,6 +32,9 @@ DEFAULTS = {
     "ALLOW_SUPERTOKEN": False,  # If True, tokens without org/DS links can access all
     "REQUIRE_TOKEN_SCOPE": True,  # If True, tokens must have org or DS links to access anything
     "PROTECTED_PATH_PREFIXES": ["/api/admin/", "/api/query/"],
+
+    # Uncomment and add Milvus URI for your hosted Milvus instance, by default a file (default_vector_DB.db) is used for vector storage
+    # "MILVUS_URI": "milvus-standalone:19530",
 }
 
 

@@ -4,6 +4,10 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 
+from terno_dbi.core.models import PromptExample
+from terno_dbi.vector_store.utils import find_similar_examples, sync_prompt_example, extract_examples_from_conversation
+from terno_dbi.llm.base import LLMFactory
+
 from terno_dbi.core import models
 from terno_dbi.core import conf
 from terno_dbi.services.query import (
@@ -374,3 +378,95 @@ def export_query(request, datasource_identifier=None):
             "status": "error",
             "error": str(e)
         }, status=500)
+
+@csrf_exempt
+@require_service_auth()
+@require_http_methods(["POST"])
+def get_similar_examples_for_agent(request):
+    try:
+        body = json.loads(request.body)
+
+        org_id = body.get("org_id")
+        if not org_id and getattr(request, 'token_organisation', None):
+            org_id = request.token_organisation.id
+
+        query = body.get("query", "")
+        example_types = body.get("example_types", ["query_sql"])
+        threshold = body.get("threshold", 0.85)
+        limit = body.get("limit", 3)
+
+        if not org_id:
+            return JsonResponse({"status": "error", "error": "org_id is required"}, status=400)
+
+        try:
+            org = models.CoreOrganisation.objects.get(id=org_id)
+        except models.CoreOrganisation.DoesNotExist:
+            return JsonResponse({"status": "error", "error": "Organisation not found"}, status=404)
+
+        llm = LLMFactory.create_llm(org)
+        embedding = llm.generate_vector(query)
+
+        similar = find_similar_examples(
+            embedding=embedding,
+            org_id=org_id,
+            example_types=example_types,
+            threshold=threshold,
+            limit=limit
+        )
+
+        return JsonResponse({
+            "status": "success",
+            "examples": similar
+        })
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        logger.exception("Error finding similar examples")
+        return JsonResponse({"status": "error", "error": str(e)}, status=500)
+
+
+@csrf_exempt
+@require_service_auth()
+@require_http_methods(["POST"])
+def add_prompt_example(request):
+    try:
+        body = json.loads(request.body)
+
+        org_id = body.get("org_id")
+        if not org_id and getattr(request, 'token_organisation', None):
+            org_id = request.token_organisation.id
+
+        key = body.get("key", "")
+        value = body.get("value", "")
+        example_type = body.get("example_type", "query_sql")
+
+        if not org_id:
+            return JsonResponse({"status": "error", "error": "org_id is required"}, status=400)
+
+        try:
+            org = models.CoreOrganisation.objects.get(id=org_id)
+        except models.CoreOrganisation.DoesNotExist:
+            return JsonResponse({"status": "error", "error": "Organisation not found"}, status=404)
+
+        example = PromptExample.objects.create(
+            organisation=org,
+            key=key,
+            value=value,
+            example_type=example_type
+        )
+
+        sync_prompt_example(example)
+
+        return JsonResponse({
+            "status": "success",
+            "example": {
+                "id": example.id,
+                "key": example.key,
+                "value": example.value
+            }
+        })
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        logger.exception("Error adding prompt example")
+        return JsonResponse({"status": "error", "error": str(e)}, status=500)

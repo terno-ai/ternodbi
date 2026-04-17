@@ -207,6 +207,32 @@ class TernoDBIClient:
             if not cursor:
                 break
 
+    def find_similar_examples(self, query: str, example_types: list[str], org_id: Optional[int] = None, threshold: float = 0.85, limit: int = 3) -> Dict:
+        url = f"{self.base_url}/api/query/similar-examples/"
+        payload = {
+            "query": query,
+            "example_types": example_types,
+            "threshold": threshold,
+            "limit": limit
+        }
+        if org_id is not None:
+            payload["org_id"] = org_id
+
+        response = requests.post(url, json=payload, headers=self._get_headers())
+        return self._handle_response(response)
+
+    def add_examples(self, key: str, value: str, example_type: str, org_id: int) -> Dict:
+        url = f"{self.base_url}/api/query/add-examples/"
+        payload = {
+            "key": key,
+            "value": value,
+            "example_type": example_type,
+            "org_id": org_id,
+        }
+
+        response = requests.post(url, json=payload, headers=self._get_headers())
+        return self._handle_response(response)
+
     def get_sample_data(self, table_id: int, rows: int = 10) -> Dict:
         url = f"{self.base_url}/api/query/tables/{table_id}/sample/"
         response = requests.get(

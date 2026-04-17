@@ -2,6 +2,10 @@ import logging
 from django.contrib import admin
 from django.apps import apps
 import reversion.admin
+from .models import LLMConfiguration, PromptExample
+from django.db.models import Q
+
+from terno_dbi.core import models
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +17,7 @@ if not PARENT_APP_INSTALLED:
         PrivateTableSelector, GroupTableSelector,
         PrivateColumnSelector, GroupColumnSelector,
         GroupTableRowFilter, TableRowFilter,
-        CoreOrganisation, OrganisationUser, OrganisationGroup,
+        CoreOrganisation, OrganisationUser, OrganisationGroup, 
     )
 
     class TableColumnInline(admin.TabularInline):
@@ -252,3 +256,115 @@ if not PARENT_APP_INSTALLED:
                 ))
             else:
                 super().save_model(request, obj, form, change)
+
+
+class OrganisationFilterMixin:
+    organisation_related_field_names = []
+    organisation_foreignkey_field_names = {}
+    organisation_manytomany_field_names = {}
+
+    def get_user_organisation(self, request):
+        organisation = CoreOrganisation.objects.get(pk=request.org_id)
+        if not OrganisationUser.objects.filter(
+                user=request.user,
+                organisation=organisation.core).exists():
+            return None
+        return organisation
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser:
+            user_organisation = self.get_user_organisation(request)
+            if user_organisation and self.organisation_related_field_names:
+                # Use dynamic filtering based on the organisation field specified in the admin class
+                combined_q = Q()
+                
+                for field_name in self.organisation_related_field_names:
+                    combined_q = combined_q | Q(**{f"{field_name}_id": user_organisation.pk})
+                        
+                qs = qs.filter(combined_q)
+            else:
+                qs = qs.none()
+        return qs
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if not request.user.is_superuser:
+            user_organisation = self.get_user_organisation(request)
+            if user_organisation and db_field.name in self.organisation_foreignkey_field_names:
+                field_filter = self.organisation_foreignkey_field_names.get(db_field.name)
+                if field_filter:
+                    filter_kwargs = {
+                        f"{field_filter}_id": user_organisation.pk
+                    }
+
+                    kwargs["queryset"] = db_field.related_model.objects.filter(**filter_kwargs)
+            else:
+                kwargs["queryset"] = db_field.related_model.objects.none()
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        if not request.user.is_superuser:
+            user_organisation = self.get_user_organisation(request)
+            if user_organisation and db_field.name in self.organisation_manytomany_field_names:
+                field_filter = self.organisation_manytomany_field_names.get(db_field.name)
+                if field_filter:
+                    filter_kwargs = {
+                        f"{field_filter}_id": user_organisation.pk
+                    }
+
+                    kwargs["queryset"] = db_field.related_model.objects.filter(**filter_kwargs)
+            else:
+                kwargs["queryset"] = db_field.related_model.objects.none()
+        return super().formfield_for_manytomany(db_field, request, **kwargs)
+
+@admin.register(LLMConfiguration)
+class LLMConfigurationAdmin(admin.ModelAdmin):
+
+    list_display = ('organisation', 'llm_type', 'masked_api_key', 'model_name', 'enabled')
+    list_filter = ('llm_type', 'enabled', 'organisation')
+    search_fields = ('llm_type', 'model_name')
+
+    fieldsets = (
+        ('Basic Configuration', {
+            'fields': ('organisation', 'llm_type', 'api_key', 'enabled'),
+        }),
+        ('Advanced Configuration (Optional)', {
+            'classes': ('collapse',),
+            'fields': ('model_name', 'temperature', 'top_p', 'top_k', 'max_tokens', 'custom_parameters'),
+        }),
+    )
+
+    # Mask API key
+    def masked_api_key(self, obj):
+        if obj.api_key:
+            return obj.api_key[:6] + "****"
+        return ""
+    masked_api_key.short_description = "API Key"
+
+    # Make API key readonly after creation
+    def get_readonly_fields(self, request, obj=None):
+        if obj:
+            return ('api_key',)
+        return ()
+
+    def save_model(self, request, obj, form, change):
+        if obj.enabled:
+            # Disable other enabled LLMs for same org
+            LLMConfiguration.objects.filter(
+                organisation=obj.organisation,
+                enabled=True
+            ).exclude(id=obj.id).update(enabled=False)
+
+        super().save_model(request, obj, form, change)
+
+@admin.register(models.PromptExample)
+class PromptExampleAdmin(OrganisationFilterMixin, admin.ModelAdmin):
+    list_display = ('example_type', 'key', 'value', 'created_at', 'updated_at')
+    organisation_related_field_names = ['organisation']
+    exclude = ['organisation']
+
+    def save_model(self, request, obj, form, change):
+        org_id = request.org_id
+        org = models.CoreOrganisation.objects.get(pk=org_id)
+        obj.organisation = org
+        super().save_model(request, obj, form, change)

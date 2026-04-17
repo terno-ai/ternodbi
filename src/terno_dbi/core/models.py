@@ -2,6 +2,7 @@ from django.db import models
 from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.models import Group, User
+from django.core.exceptions import ValidationError
 import logging
 
 logger = logging.getLogger(__name__)
@@ -463,3 +464,93 @@ class ServiceToken(models.Model):
                 if required_scope.startswith(prefix):
                     return True
         return False
+
+
+class LLMConfiguration(models.Model):
+
+    LLM_TYPES = [
+        ('openai', 'OpenAI'),
+        ('gemini', 'Gemini'),
+        ('anthropic', 'Anthropic'),
+        ('ollama', 'Ollama'),
+        ('custom', 'CustomLLM'),
+        ('terno', 'TernoLLM'),
+    ]
+
+    organisation = models.ForeignKey(
+        CoreOrganisation,
+        on_delete=models.CASCADE,
+        related_name="llm_configs"
+    )
+
+    llm_type = models.CharField(max_length=64, choices=LLM_TYPES)
+    api_key = models.CharField(max_length=512)
+    model_name = models.CharField(max_length=256, blank=True, null=True)
+    temperature = models.FloatField(blank=True, null=True)
+    custom_system_message = models.TextField(blank=True, null=True)
+    max_tokens = models.IntegerField(blank=True, null=True)
+    top_p = models.FloatField(blank=True, null=True)
+    top_k = models.FloatField(blank=True, null=True)
+    custom_parameters = models.JSONField(blank=True, null=True)
+    enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "dbi_llm_configuration"
+
+    def clean(self):
+        super().clean()
+
+        if self.custom_parameters:
+            if not isinstance(self.custom_parameters, dict):
+                raise ValidationError("custom_parameters must be a JSON object")
+
+        # Only ONE enabled per organisation
+        if self.enabled:
+            existing = LLMConfiguration.objects.filter(
+                organisation=self.organisation,
+                enabled=True
+            ).exclude(id=self.id)
+
+            if existing.exists():
+                raise ValidationError("Only one enabled LLM per organisation allowed")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.organisation} - {self.llm_type}"
+
+
+class PromptExample(models.Model):
+    ExampleType = [
+        ("query_sql", "Query - SQL"),
+        ("question_plan", "Question - Plan"),
+        ("input_response", "Input Response"),
+        ("lib_script", "Library Script")
+    ]
+
+    organisation = models.ForeignKey(
+        CoreOrganisation, on_delete=models.CASCADE, null=True, blank=True,
+        related_name='prompt_examples')
+    example_type = models.CharField(
+        max_length=50,
+        choices=ExampleType,
+        default=ExampleType[0][0],
+        help_text="Type of example, e.g., Query - SQL or Question - Plan."
+    )
+    key = models.CharField(
+        max_length=255,
+        help_text="The key or variable name used in the prompt template."
+    )
+    value = models.TextField(
+        help_text="The example value corresponding to the key."
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "terno_promptexample"
+        verbose_name = "Prompt Example"
+        verbose_name_plural = "Prompt Examples"
