@@ -3,6 +3,8 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from terno_dbi.connectors import ConnectorFactory
 from terno_dbi.core import conf
+from django.shortcuts import redirect
+
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +38,6 @@ def info(request):
 
 
 def doc_view(request, page="setup"):
-    from django.shortcuts import redirect
-    
-    # Sanitize page
     valid_pages = ["architecture", "setup", "mcp-guide", "security", "api"]
     if page not in valid_pages:
         page = "setup"

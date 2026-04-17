@@ -1,6 +1,9 @@
 import os
 import sys
 import json
+import django
+from django.contrib.auth import get_user_model
+from django.core.management import execute_from_command_line
 
 
 def print_welcome_message(port):
@@ -25,14 +28,11 @@ def print_welcome_message(port):
 
 
 def create_default_superuser():
-    import django
     django.setup()
-    from django.contrib.auth import get_user_model
     User = get_user_model()
 
     if not User.objects.filter(is_superuser=True).exists():
         print("\nFirst Boot Detected: Creating default admin user...")
-        # Create a default superuser
         User.objects.create_superuser('admin', 'admin@example.com', 'admin')
         print("Default Login created! Username: admin, Password: admin")
         print("WARNING: Please change this in production!\n")
@@ -52,17 +52,16 @@ def main():
     command = sys.argv[1]
 
     if command == "start":
-        from django.core.management import execute_from_command_line
 
-        # 1. Run Migrations automatically and silently
+        # Run Migrations automatically
         print("Initializing TernoDBI Database (this may take a moment)...")
         execute_from_command_line(['manage.py', 'migrate', '--verbosity', '0'])
         print("Database ready.")
 
-        # 2. Check and create default superuser
+        # Check and create default superuser
         create_default_superuser()
 
-        # 3. Start the server on port 8376
+        # Start the server on port 8376
         port = "8376"
         print_welcome_message(port)
 
@@ -97,7 +96,6 @@ def main():
         print("\n")
 
     elif command == "manage":
-        from django.core.management import execute_from_command_line
         django_args = ['manage.py'] + sys.argv[2:]
         execute_from_command_line(django_args)
 

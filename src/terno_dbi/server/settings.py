@@ -1,12 +1,9 @@
 import os
 from pathlib import Path
+import terno_dbi
 
-# This file lives in src/terno_dbi/server/settings.py
-# We want the db to be placed in the user's home directory by default
-# to avoid writing to the site-packages directory.
 DEFAULT_DBI_HOME = Path.home() / '.ternodbi'
 
-import terno_dbi
 TERNO_DBI_PATH = Path(terno_dbi.__file__).resolve().parent
 BASE_DIR = TERNO_DBI_PATH.parent.parent
 
@@ -58,7 +55,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'terno_dbi.server.wsgi.application'
 
-# Database Configuration
 DJANGO_PROJECT_PATH = os.environ.get('DJANGO_PROJECT_PATH', '')
 
 if os.environ.get('DATABASE_ENGINE') == 'MYSQL':
@@ -132,7 +128,7 @@ STATIC_ROOT = DEFAULT_DBI_HOME / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Logging Configuration
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
