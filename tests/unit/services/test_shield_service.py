@@ -314,7 +314,7 @@ class TestRowFiltering:
         tables = {'missing_table': mtable}
         
         # Should not crash if table lookup fails (returns None)
-        _update_table_descriptions(tables)
+        _update_table_descriptions(tables, [])
         
         # Desc remains empty
         assert mtable.desc == ''

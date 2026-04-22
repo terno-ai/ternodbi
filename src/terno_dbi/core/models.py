@@ -3,13 +3,15 @@ from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.models import Group, User
 import logging
+import secrets
+import hashlib
+from cryptography.fernet import Fernet
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
 
 def _get_fernet():
-    from cryptography.fernet import Fernet
-    from django.conf import settings
     return Fernet(settings.MCP_ENCRYPTION_KEY)
 
 
@@ -360,7 +362,6 @@ class ServiceToken(models.Model):
         help_text="If set, token can access all datasources in this organisation"
     )
 
-    # Granular datasource override
     datasources = models.ManyToManyField(
         DataSource,
         blank=True,
@@ -407,13 +408,11 @@ class ServiceToken(models.Model):
 
     @classmethod
     def generate_key(cls):
-        import secrets
         return f"dbi_sk_{secrets.token_hex(24)}"
 
     @classmethod
     def hash_key(cls, key):
         """Hash a token key for storage."""
-        import hashlib
         return hashlib.sha256(key.encode()).hexdigest()
 
     def get_accessible_datasources(self):
@@ -448,7 +447,6 @@ class ServiceToken(models.Model):
         if not self.has_access_to_datasource(table.data_source):
             return False
 
-        # Check explicit private table selector
         from terno_dbi.core.models import PrivateTableSelector
         pts = PrivateTableSelector.objects.filter(data_source=table.data_source).first()
         if pts and pts.tables.filter(id=table.id).exists():
@@ -472,7 +470,6 @@ class ServiceToken(models.Model):
         Supports wildcard matching, e.g. 'query:*' matches 'query:read'.
         """
         if not self.scopes:
-            # Legacy tokens without scopes: fall back to token_type check
             if required_scope.startswith('query:') and self.token_type == self.TokenType.QUERY:
                 return True
             if required_scope.startswith('admin:') and self.token_type == self.TokenType.ADMIN:
@@ -482,9 +479,8 @@ class ServiceToken(models.Model):
         for scope in self.scopes:
             if scope == required_scope:
                 return True
-            # Wildcard support: 'query:*' matches 'query:read'
             if scope.endswith(':*'):
-                prefix = scope[:-1]  # 'query:'
+                prefix = scope[:-1]
                 if required_scope.startswith(prefix):
                     return True
         return False

@@ -38,7 +38,7 @@ def column(table):
 class TestCacheInvalidation:
     """Tests for cache invalidation helper."""
 
-    @patch('terno_dbi.services.shield.delete_cache')
+    @patch('terno_dbi.core.receivers.delete_cache')
     def test_invalidate_cache_calls_delete_cache(self, mock_delete_cache, datasource):
         """_invalidate_cache_for_datasource should call delete_cache."""
         from terno_dbi.core.receivers import _invalidate_cache_for_datasource

@@ -3,6 +3,7 @@ from functools import wraps
 from django.http import JsonResponse
 from terno_dbi.core.models import Table, TableColumn
 from terno_dbi.core import conf
+from terno_dbi.services.resolver import resolve_datasource
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,6 @@ def require_service_auth(allowed_types=None):
 
             if ds_identifier:
                 try:
-                    from terno_dbi.services.resolver import resolve_datasource
                     ds = resolve_datasource(ds_identifier)
                     if not allowed_ds.filter(id=ds.id).exists():
                         logger.warning(
@@ -117,19 +117,19 @@ def require_service_auth(allowed_types=None):
 def require_scope(*required_scopes):
     """
     Decorator to enforce that the service token has specific scope(s).
-    
+
     Usage:
         @require_service_auth()
         @require_scope('query:execute')
         def execute_query(request):
             ...
-        
+
         # Multiple scopes (requires ALL):
         @require_service_auth()
         @require_scope('admin:read', 'admin:write')
         def admin_action(request):
             ...
-    
+
     Note: This decorator must be used AFTER @require_service_auth().
     """
     def decorator(view_func):
@@ -140,7 +140,7 @@ def require_scope(*required_scopes):
                 return JsonResponse({"error": "Authentication required"}, status=401)
 
             token = request.service_token
-            
+
             # Check all required scopes
             for scope in required_scopes:
                 if not token.has_scope(scope):
@@ -152,8 +152,7 @@ def require_scope(*required_scopes):
                         {"error": f"Insufficient scope. Required: '{scope}'"},
                         status=403
                     )
-            
+
             return view_func(request, *args, **kwargs)
         return _wrapped_view
     return decorator
-

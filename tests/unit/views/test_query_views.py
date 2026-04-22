@@ -124,7 +124,7 @@ class TestHealthEndpoint:
 
     def test_returns_ok(self, request_factory):
         """Health endpoint should return OK status."""
-        from terno_dbi.core.query_service.views import health
+        from terno_dbi.core.views import health
         
         request = request_factory.get('/api/query/health/')
         response = health(request)
@@ -132,10 +132,11 @@ class TestHealthEndpoint:
         assert response.status_code == 200
         data = json.loads(response.content)
         assert data.get('status') == 'ok'
+        assert data.get('service') == 'terno_dbi'
 
     def test_no_auth_required(self, request_factory):
         """Health endpoint should not require authentication."""
-        from terno_dbi.core.query_service.views import health
+        from terno_dbi.core.views import health
         
         request = request_factory.get('/api/query/health/')
         response = health(request)
@@ -148,7 +149,7 @@ class TestInfoEndpoint:
 
     def test_returns_version(self, request_factory):
         """Info endpoint should return version info."""
-        from terno_dbi.core.query_service.views import info
+        from terno_dbi.core.views import info
         
         request = request_factory.get('/api/query/info/')
         response = info(request)
@@ -159,7 +160,7 @@ class TestInfoEndpoint:
 
     def test_no_auth_required(self, request_factory):
         """Info endpoint should not require authentication."""
-        from terno_dbi.core.query_service.views import info
+        from terno_dbi.core.views import info
         
         request = request_factory.get('/api/query/info/')
         response = info(request)

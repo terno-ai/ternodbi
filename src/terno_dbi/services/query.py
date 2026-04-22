@@ -8,7 +8,6 @@ import pandas as pd
 from django.http import HttpResponse
 from django.utils import timezone
 from typing import Optional, List, Dict, Any
-
 from terno_dbi.connectors import ConnectorFactory
 from terno_dbi.services.pagination import (
     PaginationService,

@@ -2,6 +2,7 @@ import logging
 from django.db.models.signals import post_save, post_delete, pre_delete, m2m_changed
 from django.dispatch import receiver
 from terno_dbi.core import models
+from terno_dbi.services.shield import delete_cache
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +11,6 @@ def _invalidate_cache_for_datasource(datasource):
     if not datasource:
         return
     try:
-        from terno_dbi.services.shield import delete_cache
         delete_cache(datasource)
     except Exception as e:
         logger.error(f"Failed to invalidate cache for datasource {datasource}: {e}")
@@ -161,7 +161,7 @@ def invalidate_cache_on_m2m_change(sender, instance, action, reverse, pk_set, **
     if action == 'post_clear':
         ds_ids = set(getattr(instance, '_m2m_clear_ds_ids', []))
 
-    # 3. Add/Remove: Resolve from instance or pk_set
+    # Add/Remove: Resolve from instance or pk_set
     elif action in ['post_add', 'post_remove']:
         if not pk_set:
             return

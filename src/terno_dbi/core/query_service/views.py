@@ -3,7 +3,6 @@ import logging
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
-
 from terno_dbi.core import models
 from terno_dbi.core import conf
 from terno_dbi.services.query import (
@@ -15,13 +14,14 @@ from terno_dbi.services.shield import prepare_mdb, generate_native_sql
 from terno_dbi.services.access import get_admin_config_object
 from terno_dbi.services.resolver import resolve_datasource
 from terno_dbi.decorators import require_service_auth
+from django.contrib.auth.models import Group
+from terno_dbi.connectors import ConnectorFactory
 
 logger = logging.getLogger(__name__)
 
 
 def _resolve_roles(request, role_ids=None):
     """Resolve Django Group roles from explicit IDs or fall back to token-inherited groups."""
-    from django.contrib.auth.models import Group
     if role_ids:
         if isinstance(role_ids, str):
             role_ids = [int(r) for r in role_ids.split(',') if r.strip()]
@@ -29,25 +29,6 @@ def _resolve_roles(request, role_ids=None):
     if hasattr(request, 'service_token') and request.service_token.groups.exists():
         return request.service_token.groups.all()
     return Group.objects.none()
-
-
-def health(request):
-    return JsonResponse({
-        "status": "ok",
-        "service": "terno_dbi.query_service",
-        "version": "1.0.0",
-    })
-
-
-def info(request):
-    from terno_dbi.connectors import ConnectorFactory
-
-    return JsonResponse({
-        "service": "terno_dbi.query_service",
-        "version": "1.0.0",
-        "supported_databases": ConnectorFactory.get_supported_databases(),
-    })
-
 
 
 @require_service_auth()

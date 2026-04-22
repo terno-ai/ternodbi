@@ -7,6 +7,7 @@ from io import StringIO
 from terno_dbi.cli import main, print_welcome_message, create_default_superuser
 
 
+@pytest.mark.django_db
 class TestCLI:
 
     @patch('sys.stdout', new_callable=StringIO)
@@ -16,9 +17,9 @@ class TestCLI:
         assert "TernoDBI Server Started Successfully!" in output
         assert "http://127.0.0.1:8000" in output
 
-    @patch('django.setup')
+    @patch('terno_dbi.cli.django.setup')
     def test_create_default_superuser_new(self, mock_setup):
-        with patch('django.contrib.auth.get_user_model') as mock_get_user_model:
+        with patch('terno_dbi.cli.get_user_model') as mock_get_user_model:
             mock_user_model = MagicMock()
             mock_get_user_model.return_value = mock_user_model
 
@@ -29,9 +30,9 @@ class TestCLI:
             mock_setup.assert_called_once()
             mock_user_model.objects.create_superuser.assert_called_once_with('admin', 'admin@example.com', 'admin')
 
-    @patch('django.setup')
+    @patch('terno_dbi.cli.django.setup')
     def test_create_default_superuser_existing(self, mock_setup):
-        with patch('django.contrib.auth.get_user_model') as mock_get_user_model:
+        with patch('terno_dbi.cli.get_user_model') as mock_get_user_model:
             mock_user_model = MagicMock()
             mock_get_user_model.return_value = mock_user_model
 
@@ -65,7 +66,7 @@ class TestCLI:
             mock_exit.assert_called_once_with(1)
             assert "Unknown command: invalidcommand" in mock_stdout.getvalue()
 
-    @patch('django.core.management.execute_from_command_line')
+    @patch('terno_dbi.cli.execute_from_command_line')
     @patch('terno_dbi.cli.create_default_superuser')
     @patch('terno_dbi.cli.print_welcome_message')
     def test_main_start(self, mock_print, mock_create_user, mock_execute):
@@ -78,7 +79,7 @@ class TestCLI:
             mock_create_user.assert_called_once()
             mock_print.assert_called_once_with("8376")
 
-    @patch('django.core.management.execute_from_command_line')
+    @patch('terno_dbi.cli.execute_from_command_line')
     def test_main_manage(self, mock_execute):
         with patch.object(sys, 'argv', ['ternodbi', 'manage', 'makemigrations']):
             main()

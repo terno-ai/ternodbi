@@ -22,7 +22,7 @@ class TestDataSourceAdmin:
         form = MagicMock()
         
         with patch('terno_dbi.core.admin.reversion.admin.VersionAdmin.save_model'), \
-             patch('terno_dbi.services.schema_utils.sync_metadata') as mock_sync, \
+             patch('terno_dbi.core.admin.sync_metadata') as mock_sync, \
              patch('django.contrib.messages.success') as mock_success:
             
             mock_sync.return_value = {'tables_created': 1, 'columns_created': 2}
@@ -39,7 +39,7 @@ class TestDataSourceAdmin:
         form = MagicMock()
         
         with patch('terno_dbi.core.admin.reversion.admin.VersionAdmin.save_model'), \
-             patch('terno_dbi.services.schema_utils.sync_metadata') as mock_sync, \
+             patch('terno_dbi.core.admin.sync_metadata') as mock_sync, \
              patch('django.contrib.messages.warning') as mock_warn:
             
             mock_sync.return_value = {'error': 'Failed'}
@@ -56,7 +56,7 @@ class TestDataSourceAdmin:
         form = MagicMock()
         
         with patch('terno_dbi.core.admin.reversion.admin.VersionAdmin.save_model'), \
-             patch('terno_dbi.services.schema_utils.sync_metadata') as mock_sync, \
+             patch('terno_dbi.core.admin.sync_metadata') as mock_sync, \
              patch('django.contrib.messages.warning') as mock_warn:
             
             mock_sync.side_effect = Exception("System Failure")
@@ -73,7 +73,7 @@ class TestDataSourceAdmin:
         form = MagicMock()
         
         with patch('terno_dbi.core.admin.reversion.admin.VersionAdmin.save_model') as mock_super_save, \
-             patch('terno_dbi.services.schema_utils.sync_metadata') as mock_sync:
+             patch('terno_dbi.core.admin.sync_metadata') as mock_sync:
             
             admin.save_model(mock_request, obj, form, change=False)
             
@@ -90,7 +90,7 @@ class TestDataSourceAdmin:
         queryset.__iter__.return_value = [ds1, ds2]
         queryset.count.return_value = 2
         
-        with patch('terno_dbi.services.schema_utils.sync_metadata') as mock_sync, \
+        with patch('terno_dbi.core.admin.sync_metadata') as mock_sync, \
              patch('django.contrib.messages.success') as mock_success, \
              patch('django.contrib.messages.warning') as mock_warn:
              
@@ -107,7 +107,7 @@ class TestDataSourceAdmin:
         queryset = MagicMock()
         queryset.__iter__.return_value = [ds1]
         
-        with patch('terno_dbi.services.schema_utils.sync_metadata') as mock_sync, \
+        with patch('terno_dbi.core.admin.sync_metadata') as mock_sync, \
              patch('django.contrib.messages.error') as mock_error:
              
             mock_sync.return_value = {'error': 'Could not connect'}
@@ -122,7 +122,7 @@ class TestDataSourceAdmin:
         queryset = MagicMock()
         queryset.__iter__.return_value = [ds1]
         
-        with patch('terno_dbi.services.schema_utils.sync_metadata') as mock_sync, \
+        with patch('terno_dbi.core.admin.sync_metadata') as mock_sync, \
              patch('django.contrib.messages.error') as mock_error:
              
             mock_sync.side_effect = Exception("Database crash")

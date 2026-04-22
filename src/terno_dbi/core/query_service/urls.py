@@ -4,8 +4,6 @@ from . import views
 app_name = "query_service"
 
 urlpatterns = [
-    path("health/", views.health, name="health"),
-    path("info/", views.info, name="info"),
     path("datasources/", views.list_datasources, name="list_datasources"),
     path("datasources/<str:datasource_identifier>/tables/", views.list_tables, name="list_tables"),
     path("datasources/<str:datasource_identifier>/tables/<str:table_identifier>/columns/",

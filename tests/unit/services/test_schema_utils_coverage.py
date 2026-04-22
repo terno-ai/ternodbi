@@ -82,7 +82,7 @@ class TestSchemaUtilsCoverage:
         
     @patch('terno_dbi.core.models.Table.objects.get')
     @patch('terno_dbi.core.models.TableColumn.objects.get')
-    @patch('terno_dbi.connectors.ConnectorFactory')
+    @patch('terno_dbi.services.schema_utils.ConnectorFactory')
     def test_get_table_info_exceptions(self, mock_factory, mock_col_get, mock_tbl_get):
         datasource = MagicMock()
         mock_tbl_get.side_effect = Exception("get fail")
@@ -159,7 +159,7 @@ class TestSchemaUtilsCoverage:
 
     @pytest.mark.django_db
     @patch('terno_dbi.core.models.DataSource.objects.get')
-    @patch('terno_dbi.connectors.ConnectorFactory.create_connector')
+    @patch('terno_dbi.services.schema_utils.ConnectorFactory.create_connector')
     @patch('terno_dbi.services.schema_utils._sync_from_information_schema')
     def test_sync_metadata_information_schema_fallback(self, mock_sync_info, mock_create, mock_ds_get):
         ds = MagicMock()
@@ -195,7 +195,7 @@ class TestSchemaUtilsCoverage:
 
     @pytest.mark.django_db
     @patch('terno_dbi.core.models.DataSource.objects.get')
-    @patch('terno_dbi.connectors.ConnectorFactory.create_connector')
+    @patch('terno_dbi.services.schema_utils.ConnectorFactory.create_connector')
     @patch('terno_dbi.core.models.Table.objects.filter')
     def test_sync_metadata_duplicate_tables(self, mock_tbl_filter, mock_create, mock_ds_get):
         ds = MagicMock()

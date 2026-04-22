@@ -63,7 +63,7 @@ class TestShieldCoverage:
         
     @patch('terno_dbi.services.shield.cache.get')
     @patch('terno_dbi.services.shield.cache.set')
-    @patch('terno_dbi.services.access.get_admin_config_object')
+    @patch('terno_dbi.services.shield.get_admin_config_object')
     @patch('terno_dbi.services.shield.generate_mdb')
     @patch('terno_dbi.services.shield._keep_only_columns')
     @patch('terno_dbi.services.shield._update_table_descriptions')
@@ -125,33 +125,31 @@ class TestShieldCoverage:
         _keep_only_columns(mock_mdb, mock_tables, mock_columns)
         assert mock_mdb.tables["tbl1"].columns["col1"].pub_name == "PubCol"
         
-    @patch('terno_dbi.services.shield.models.Table.objects.filter')
-    def test_update_table_descriptions(self, mock_tbl_filter):
-        class MockTblObj:
-            description = "Test Desc"
+    def test_update_table_descriptions(self):
+        # Build mock allowed tables with descriptions
+        mock_allowed_tbl = MagicMock()
+        mock_allowed_tbl.name = "tbl1"
+        mock_allowed_tbl.description = "New Desc"
         
-        mock_tq = MagicMock()
-        mock_tq.first.return_value = MockTblObj()
-        mock_tbl_filter.return_value = mock_tq
-        
-        class MockTbl:
-            pass
-        tbl = MockTbl()
-        tables = {"tbl1": tbl}
-        _update_table_descriptions(tables)
-        assert tbl.desc == "Test Desc"
-        
-    @patch('terno_dbi.services.shield.models.Table.objects.filter')
-    def test_update_table_descriptions_no_obj(self, mock_tbl_filter):
-        mock_tq = MagicMock()
-        mock_tq.first.return_value = None
-        mock_tbl_filter.return_value = mock_tq
+        allowed_tables = [mock_allowed_tbl]
         
         class MockTbl:
             desc = "Orig"
         tbl = MockTbl()
         tables = {"tbl1": tbl}
-        _update_table_descriptions(tables)
+        _update_table_descriptions(tables, allowed_tables)
+        assert tbl.desc == "New Desc"
+        
+    def test_update_table_descriptions_no_obj(self):
+        # Empty allowed tables list
+        allowed_tables = []
+    
+        class MockTbl:
+            desc = "Orig"
+        tbl = MockTbl()
+        tables = {"tbl1": tbl}
+        _update_table_descriptions(tables, allowed_tables)
+        # Should remain unchanged because it's not in allowed_tables
         assert tbl.desc == "Orig"
         
     @patch('terno_dbi.services.shield._get_base_filters')

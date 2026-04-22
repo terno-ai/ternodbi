@@ -173,40 +173,6 @@ class TernoDBIClient:
         response = requests.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
-    def iter_query(
-        self,
-        datasource: DatasourceIdentifier,
-        sql: str,
-        per_page: int = 100,
-        order_by: Optional[List[Dict[str, str]]] = None
-    ):
-        cursor = None
-        while True:
-            result = self.execute_query(
-                datasource,
-                sql,
-                pagination_mode="cursor",
-                per_page=per_page,
-                cursor=cursor,
-                order_by=order_by
-            )
-
-            if result.get("status") == "error":
-                raise Exception(result.get("error", "Query failed"))
-
-            table_data = result.get("table_data", {})
-            data = table_data.get("data", [])
-
-            if data:
-                yield data
-
-            if not table_data.get("has_next"):
-                break
-
-            cursor = table_data.get("next_cursor")
-            if not cursor:
-                break
-
     def get_sample_data(self, table_id: int, rows: int = 10) -> Dict:
         url = f"{self.base_url}/api/query/tables/{table_id}/sample/"
         response = requests.get(
