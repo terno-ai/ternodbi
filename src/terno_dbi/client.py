@@ -98,19 +98,21 @@ class TernoDBIClient:
         data = self._handle_response(response)
         return data.get("columns", [])
 
-
     def update_table(
         self,
         table_id: int,
         public_name: Optional[str] = None,
-        description: Optional[str] = None
+        description: Optional[str] = None,
+        is_hidden: Optional[bool] = None
     ) -> Dict:
         url = f"{self.base_url}/api/admin/tables/{table_id}/"
         payload = {}
-        if public_name:
+        if public_name is not None:
             payload["public_name"] = public_name
-        if description:
+        if description is not None:
             payload["description"] = description
+        if is_hidden is not None:
+            payload["is_hidden"] = is_hidden
 
         response = requests.patch(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
@@ -119,14 +121,17 @@ class TernoDBIClient:
         self,
         column_id: int,
         public_name: Optional[str] = None,
-        description: Optional[str] = None
+        description: Optional[str] = None,
+        is_hidden: Optional[bool] = None
     ) -> Dict:
         url = f"{self.base_url}/api/admin/columns/{column_id}/"
         payload = {}
-        if public_name:
+        if public_name is not None:
             payload["public_name"] = public_name
-        if description:
+        if description is not None:
             payload["description"] = description
+        if is_hidden is not None:
+            payload["is_hidden"] = is_hidden
         response = requests.patch(
             url, json=payload, headers=self._get_headers()
         )

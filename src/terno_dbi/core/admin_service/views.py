@@ -5,9 +5,7 @@ from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 from terno_dbi.core import models
 from terno_dbi.services.validation import validate_datasource_input
-from terno_dbi.services.resolver import resolve_datasource
 from terno_dbi.decorators import require_service_auth, require_scope
-from terno_dbi.core.models import ServiceToken
 from terno_dbi.services import schema_utils
 from terno_dbi.services.shield import delete_cache
 from terno_dbi.services.query import execute_native_sql
@@ -201,6 +199,7 @@ def update_table(request, table_id):
             "table": {
                 "id": table.id,
                 "name": table.public_name,
+                "actual_name": table.name,
                 "description": table.description,
                 "is_hidden": table.is_hidden,
             }
@@ -252,6 +251,7 @@ def update_column(request, column_id):
             "column": {
                 "id": column.id,
                 "name": column.public_name,
+                "actual_name": column.name,
                 "data_type": column.data_type,
                 "description": column.description,
                 "is_hidden": column.is_hidden,

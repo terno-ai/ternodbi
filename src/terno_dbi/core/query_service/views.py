@@ -15,7 +15,6 @@ from terno_dbi.services.access import get_admin_config_object
 from terno_dbi.services.resolver import resolve_datasource
 from terno_dbi.decorators import require_service_auth
 from django.contrib.auth.models import Group
-from terno_dbi.connectors import ConnectorFactory
 
 logger = logging.getLogger(__name__)
 
