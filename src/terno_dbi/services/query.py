@@ -19,9 +19,6 @@ from terno_dbi.services.pagination import (
 logger = logging.getLogger(__name__)
 
 
-_sqlglot_warned = False
-
-
 def _infer_order_from_sql(sql: str) -> List:
     """
     Extract ORDER BY columns from SQL using sqlglot.
@@ -29,7 +26,6 @@ def _infer_order_from_sql(sql: str) -> List:
     or query contains GROUP BY (aggregation results are not
     suitable for keyset/cursor pagination).
     """
-    global _sqlglot_warned
     try:
         import sqlglot
         parsed = sqlglot.parse_one(sql)
@@ -47,14 +43,6 @@ def _infer_order_from_sql(sql: str) -> List:
             )
             for expr in order.expressions
         ]
-    except ImportError:
-        if not _sqlglot_warned:
-            logger.warning(
-                "sqlglot is not installed; ORDER BY auto-detection disabled. "
-                "Cursor mode will fall back to offset when no explicit order_by is provided."
-            )
-            _sqlglot_warned = True
-        return []
     except Exception:
         return []
 
@@ -113,7 +101,6 @@ def execute_paginated_query(
                 for o in order_by
             ]
 
-        # Defense-in-depth: clamp per_page regardless of caller
         per_page = min(per_page, 500)
 
         if mode == PaginationMode.CURSOR and not order_columns:
