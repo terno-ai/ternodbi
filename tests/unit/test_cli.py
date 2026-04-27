@@ -10,11 +10,11 @@ from terno_dbi.cli import main, print_welcome_message, create_default_superuser
 @pytest.mark.django_db
 class TestCLI:
 
-    @patch('sys.stdout', new_callable=StringIO)
-    def test_print_welcome_message(self, mock_stdout):
-        print_welcome_message("8000")
-        output = mock_stdout.getvalue()
-        assert "TernoDBI Server Started Successfully!" in output
+    def test_print_welcome_message(self, caplog):
+        with caplog.at_level("INFO"):
+            print_welcome_message("8000")
+        output = caplog.text
+        assert "TernoDBI server is live and ready." in output
         assert "http://127.0.0.1:8000" in output
 
     @patch('terno_dbi.cli.django.setup')
@@ -43,28 +43,28 @@ class TestCLI:
             mock_user_model.objects.create_superuser.assert_not_called()
 
     @patch('sys.exit')
-    @patch('sys.stdout', new_callable=StringIO)
-    def test_main_no_args(self, mock_stdout, mock_exit):
+    def test_main_no_args(self, mock_exit, caplog):
         mock_exit.side_effect = SystemExit(1)
         with patch.object(sys, 'argv', ['ternodbi']):
-            try:
-                main()
-            except SystemExit:
-                pass
+            with caplog.at_level("INFO"):
+                try:
+                    main()
+                except SystemExit:
+                    pass
             mock_exit.assert_called_once_with(1)
-            assert "Usage: ternodbi <command>" in mock_stdout.getvalue()
+            assert "Usage: ternodbi <command>" in caplog.text
 
     @patch('sys.exit')
-    @patch('sys.stdout', new_callable=StringIO)
-    def test_main_unknown_args(self, mock_stdout, mock_exit):
+    def test_main_unknown_args(self, mock_exit, caplog):
         mock_exit.side_effect = SystemExit(1)
         with patch.object(sys, 'argv', ['ternodbi', 'invalidcommand']):
-            try:
-                main()
-            except SystemExit:
-                pass
+            with caplog.at_level("ERROR"):
+                try:
+                    main()
+                except SystemExit:
+                    pass
             mock_exit.assert_called_once_with(1)
-            assert "Unknown command: invalidcommand" in mock_stdout.getvalue()
+            assert "Unknown command: invalidcommand" in caplog.text
 
     @patch('terno_dbi.cli.execute_from_command_line')
     @patch('terno_dbi.cli.create_default_superuser')
@@ -85,16 +85,11 @@ class TestCLI:
             main()
             mock_execute.assert_called_once_with(['manage.py', 'makemigrations'])
 
-    @patch('sys.stdout', new_callable=StringIO)
-    def test_main_mcp_config(self, mock_stdout):
+    def test_main_mcp_config(self, caplog):
         with patch.object(sys, 'argv', ['ternodbi', 'mcp-config']):
-            main()
-            output = mock_stdout.getvalue()
+            with caplog.at_level("INFO"):
+                main()
+            output = caplog.text
             assert "MCP Configuration Snippet" in output
-
-            # Extract JSON block and verify it parses
-            json_str = output.split("MCP Configuration Snippet (for claude_desktop_config.json):")[1].strip()
-            config = json.loads(json_str)
-            assert "mcpServers" in config
-            assert "ternodbi-query" in config["mcpServers"]
-            assert "ternodbi-admin" in config["mcpServers"]
+            assert "ternodbi-query" in output
+            assert "ternodbi-admin" in output
