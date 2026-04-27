@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "terno-dbi"
-version = "0.1.12"
+version = "0.1.13"
 description = "Database Intelligence Layer - Multi-database connectivity with SQLShield integration"
 readme = "README.md"
 license = "Apache-2.0"
@@ -48,9 +48,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Celery for async tasks
-celery = ["celery>=5.3", "redis>=5.0"]
-
 # Development
 dev = [
     "pytest>=7.0",
