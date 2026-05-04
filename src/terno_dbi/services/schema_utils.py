@@ -603,6 +603,11 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
                                     id__in=duplicate_col_ids
                                 ).delete()
 
+                            pk_value = bool(getattr(col, 'primary_key', False))
+                            if existing_col.primary_key != pk_value:
+                                existing_col.primary_key = pk_value
+                                existing_col.save(update_fields=['primary_key'])
+
                             if overwrite:
                                 existing_col.data_type = str(col.type)
                                 existing_col.save()
@@ -612,6 +617,7 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
                                 name=col_name,
                                 public_name=col_name,
                                 data_type=str(col.type),
+                                primary_key=bool(getattr(col, 'primary_key', False)),
                             )
                             result["columns_created"] += 1
                         found_column_names.add(col_name)

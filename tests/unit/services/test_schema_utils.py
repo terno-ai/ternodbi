@@ -504,9 +504,9 @@ class TestSyncMetadataFull:
         mock_table = MagicMock()
         mock_table.name = 'new_table'
         
-        mock_col1 = MagicMock()
+        mock_col1 = MagicMock(primary_key=False)
         mock_col1.type = Integer()
-        mock_col2 = MagicMock()
+        mock_col2 = MagicMock(primary_key=False)
         mock_col2.type = String()
         
         mock_table.columns = {'id': mock_col1, 'name': mock_col2}
@@ -536,13 +536,13 @@ class TestSyncMetadataFull:
         # Table A (Referenced)
         table_a = MagicMock()
         table_a.name = 'users'
-        table_a.columns = {'id': MagicMock(type=Integer())}
+        table_a.columns = {'id': MagicMock(type=Integer(), primary_key=True)}
         table_a.Foreign_Keys = []
         
         # Table B (Constrained)
         table_b = MagicMock()
         table_b.name = 'orders'
-        table_b.columns = {'user_id': MagicMock(type=Integer())}
+        table_b.columns = {'user_id': MagicMock(type=Integer(), primary_key=False)}
         
         # FK Definition
         mock_fk = MagicMock()
@@ -593,7 +593,7 @@ class TestSyncMetadataFull:
         # Metadata only has kept_table with kept_col
         mock_table = MagicMock()
         mock_table.name = 'kept_table'
-        mock_table.columns = {'kept_col': MagicMock(type=Integer())}
+        mock_table.columns = {'kept_col': MagicMock(type=Integer(), primary_key=False)}
         mock_table.Foreign_Keys = []
         
         mock_mdb = MagicMock()
@@ -626,7 +626,7 @@ class TestSyncMetadataFull:
         mock_table = MagicMock()
         mock_table.name = 'existing_tbl'
         # New type is VARCHAR
-        mock_col = MagicMock()
+        mock_col = MagicMock(primary_key=False)
         mock_col.type = String()
         mock_table.columns = {'col1': mock_col}
         mock_table.Foreign_Keys = []

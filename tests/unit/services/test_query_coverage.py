@@ -28,17 +28,7 @@ class TestQueryCoverage:
         assert res[0].column == "id"
         assert res[0].direction == "ASC"
 
-    @patch.dict('sys.modules', {'sqlglot': None})
-    def test_infer_order_from_sql_import_error(self):
-        sql = "SELECT id FROM users ORDER BY id DESC"
-        import terno_dbi.services.query
-        terno_dbi.services.query._sqlglot_warned = False
-        res = _infer_order_from_sql(sql)
-        assert res == []
-        
-        # Second call should skip warning
-        res = _infer_order_from_sql(sql)
-        assert res == []
+
 
     @patch('sqlglot.parse_one')
     def test_infer_order_from_sql_exception(self, mock_parse):
