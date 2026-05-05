@@ -481,7 +481,7 @@ class TestGetColumnStats:
 class TestSyncMetadataFull:
     """Comprehensive tests for sync_metadata."""
     
-    @patch('terno_dbi.connectors.ConnectorFactory')
+    @patch('terno_dbi.services.schema_utils.ConnectorFactory')
     def test_sync_success_with_sqlshield(self, mock_factory, db):
         """Should sync tables and columns using SQLShield metadata."""
         from terno_dbi.services.schema_utils import sync_metadata
@@ -504,9 +504,9 @@ class TestSyncMetadataFull:
         mock_table = MagicMock()
         mock_table.name = 'new_table'
         
-        mock_col1 = MagicMock()
+        mock_col1 = MagicMock(primary_key=False)
         mock_col1.type = Integer()
-        mock_col2 = MagicMock()
+        mock_col2 = MagicMock(primary_key=False)
         mock_col2.type = String()
         
         mock_table.columns = {'id': mock_col1, 'name': mock_col2}
@@ -521,7 +521,7 @@ class TestSyncMetadataFull:
         assert result['columns_created'] == 2
         assert Table.objects.filter(name='new_table', data_source=ds).exists()
         
-    @patch('terno_dbi.connectors.ConnectorFactory')
+    @patch('terno_dbi.services.schema_utils.ConnectorFactory')
     def test_sync_foreign_keys(self, mock_factory, db):
         """Should sync foreign keys."""
         from terno_dbi.services.schema_utils import sync_metadata
@@ -536,13 +536,13 @@ class TestSyncMetadataFull:
         # Table A (Referenced)
         table_a = MagicMock()
         table_a.name = 'users'
-        table_a.columns = {'id': MagicMock(type=Integer())}
+        table_a.columns = {'id': MagicMock(type=Integer(), primary_key=True)}
         table_a.Foreign_Keys = []
         
         # Table B (Constrained)
         table_b = MagicMock()
         table_b.name = 'orders'
-        table_b.columns = {'user_id': MagicMock(type=Integer())}
+        table_b.columns = {'user_id': MagicMock(type=Integer(), primary_key=False)}
         
         # FK Definition
         mock_fk = MagicMock()
@@ -572,7 +572,7 @@ class TestSyncMetadataFull:
         assert fk.constrained_table.name == 'orders'
         assert fk.referred_table.name == 'users'
 
-    @patch('terno_dbi.connectors.ConnectorFactory')
+    @patch('terno_dbi.services.schema_utils.ConnectorFactory')
     def test_sync_deletes_stale_tables_columns(self, mock_factory, db):
         """Should delete tables/columns not present in metadata."""
         from terno_dbi.services.schema_utils import sync_metadata
@@ -593,7 +593,7 @@ class TestSyncMetadataFull:
         # Metadata only has kept_table with kept_col
         mock_table = MagicMock()
         mock_table.name = 'kept_table'
-        mock_table.columns = {'kept_col': MagicMock(type=Integer())}
+        mock_table.columns = {'kept_col': MagicMock(type=Integer(), primary_key=False)}
         mock_table.Foreign_Keys = []
         
         mock_mdb = MagicMock()
@@ -608,13 +608,13 @@ class TestSyncMetadataFull:
         assert Table.objects.filter(name='kept_table').exists()
         assert not TableColumn.objects.filter(name='stale_col').exists()
 
-    @patch('terno_dbi.connectors.ConnectorFactory')
+    @patch('terno_dbi.services.schema_utils.ConnectorFactory')
     def test_sync_overwrites_existing_columns(self, mock_factory, db):
         """Should update existing column data types if overwrite is True."""
         from terno_dbi.services.schema_utils import sync_metadata
         from terno_dbi.core.models import DataSource, Table, TableColumn
         
-        ds = DataSource.objects.create(display_name='overwrite_test', type='pg', connection_str='psql://', enabled=True)
+        ds = DataSource.objects.create(display_name='overwrite_test', type='postgres', connection_str='psql://', enabled=True)
         t = Table.objects.create(data_source=ds, name='existing_tbl')
         c = TableColumn.objects.create(table=t, name='col1', data_type='INTEGER')
         
@@ -626,7 +626,7 @@ class TestSyncMetadataFull:
         mock_table = MagicMock()
         mock_table.name = 'existing_tbl'
         # New type is VARCHAR
-        mock_col = MagicMock()
+        mock_col = MagicMock(primary_key=False)
         mock_col.type = String()
         mock_table.columns = {'col1': mock_col}
         mock_table.Foreign_Keys = []
@@ -643,13 +643,13 @@ class TestSyncMetadataFull:
         c.refresh_from_db()
         assert 'VARCHAR' in c.data_type or 'String' in c.data_type
 
-    @patch('terno_dbi.connectors.ConnectorFactory')
+    @patch('terno_dbi.services.schema_utils.ConnectorFactory')
     def test_sync_fk_error_handling(self, mock_factory, db):
         """Should handle errors during FK creation gracefully."""
         from terno_dbi.services.schema_utils import sync_metadata
         from terno_dbi.core.models import DataSource, Table, ForeignKey
         
-        ds = DataSource.objects.create(display_name='fk_err', type='pg', connection_str='psql://', enabled=True)
+        ds = DataSource.objects.create(display_name='fk_err', type='postgres', connection_str='psql://', enabled=True)
         
         mock_connector = MagicMock()
         mock_factory.create_connector.return_value = mock_connector
@@ -694,7 +694,7 @@ class TestSyncMetadataFull:
 class TestSyncFromInformationSchemaFallback:
     """Tests for sync fallback logic."""
 
-    @patch('terno_dbi.connectors.ConnectorFactory')
+    @patch('terno_dbi.services.schema_utils.ConnectorFactory')
     @patch('terno_dbi.services.schema_utils._sync_from_information_schema')
     def test_calls_fallback_when_no_tables_found(self, mock_fallback, mock_factory, db):
         """Should call information_schema fallback if SQLShield finds nothing."""
@@ -844,7 +844,7 @@ class TestGetDatasourceTablesInfo:
         from terno_dbi.services.schema_utils import get_datasource_tables_info
         from terno_dbi.core.models import DataSource, Table
         
-        ds = DataSource.objects.create(display_name='ds_filter', type='pg', connection_str='psql://', enabled=True)
+        ds = DataSource.objects.create(display_name='ds_filter', type='postgres', connection_str='psql://', enabled=True)
         Table.objects.create(data_source=ds, name='t1')
         Table.objects.create(data_source=ds, name='t2')
         
@@ -885,7 +885,7 @@ class TestSyncMetadataEdgeCases:
         
         assert 'error' in result
 
-    @patch('terno_dbi.connectors.ConnectorFactory')
+    @patch('terno_dbi.services.schema_utils.ConnectorFactory')
     def test_handles_connector_exception(self, mock_factory, db):
         """Should propagate connector creation failure."""
         from terno_dbi.services.schema_utils import sync_metadata
@@ -904,7 +904,7 @@ class TestSyncMetadataEdgeCases:
         with pytest.raises(Exception, match="Connection failed"):
             sync_metadata(datasource_id=ds.id)
 
-    @patch('terno_dbi.connectors.ConnectorFactory')
+    @patch('terno_dbi.services.schema_utils.ConnectorFactory')
     def test_sync_metadata_top_level_error(self, mock_factory, db):
         """Should catch top level errors and return error dict."""
         from terno_dbi.services.schema_utils import sync_metadata
@@ -927,13 +927,13 @@ class TestSyncMetadataEdgeCases:
         assert 'error' in result
         assert "Metadata failure" in result['error']
 
-    @patch('terno_dbi.connectors.ConnectorFactory')
+    @patch('terno_dbi.services.schema_utils.ConnectorFactory')
     def test_sync_dialect_info_failure(self, mock_factory, db):
         """Should continue if get_dialect_info fails."""
         from terno_dbi.services.schema_utils import sync_metadata
         from terno_dbi.core.models import DataSource
         
-        ds = DataSource.objects.create(display_name='dial_err', type='pg', connection_str='psql://', enabled=True)
+        ds = DataSource.objects.create(display_name='dial_err', type='postgres', connection_str='psql://', enabled=True)
         
         mock_connector = MagicMock()
         mock_factory.create_connector.return_value = mock_connector
@@ -987,7 +987,7 @@ class TestSyncMetadataEdgeCases:
 
     @patch('terno_dbi.services.schema_utils.get_column_stats')
     @patch('terno_dbi.services.schema_utils.get_sample_rows')
-    @patch('terno_dbi.connectors.ConnectorFactory')
+    @patch('terno_dbi.services.schema_utils.ConnectorFactory')
     @patch('terno_dbi.services.schema_utils.Table')
     @patch('terno_dbi.services.schema_utils.MetaData')
     @patch('terno_dbi.services.schema_utils.inspect')
@@ -996,7 +996,7 @@ class TestSyncMetadataEdgeCases:
         from terno_dbi.services.schema_utils import get_table_info
         from terno_dbi.core.models import DataSource
         
-        ds = DataSource.objects.create(display_name='enrich_fail', type='pg', connection_str='psql://', enabled=True)
+        ds = DataSource.objects.create(display_name='enrich_fail', type='postgres', connection_str='psql://', enabled=True)
         # Note: We do NOT create Table/Column models in DB.
         
         mock_connector = MagicMock()
@@ -1022,13 +1022,13 @@ class TestSyncMetadataEdgeCases:
         # Code: try table lookup. except DoesNotExist: pass.
         assert 'existing_description' not in result
 
-    @patch('terno_dbi.connectors.ConnectorFactory')
+    @patch('terno_dbi.services.schema_utils.ConnectorFactory')
     def test_get_table_info_failure(self, mock_factory):
         """Should handle errors in get_table_info and return error dict."""
         from terno_dbi.services.schema_utils import get_table_info
         from terno_dbi.core.models import DataSource
         
-        ds = DataSource.objects.create(display_name='err', type='pg', connection_str='psql://', enabled=True)
+        ds = DataSource.objects.create(display_name='err', type='postgres', connection_str='psql://', enabled=True)
         
         mock_connector = MagicMock()
         mock_factory.create_connector.return_value = mock_connector
@@ -1127,7 +1127,7 @@ class TestGetTableInfo:
 
     @patch('terno_dbi.services.schema_utils.get_column_stats')
     @patch('terno_dbi.services.schema_utils.get_sample_rows')
-    @patch('terno_dbi.connectors.ConnectorFactory')
+    @patch('terno_dbi.services.schema_utils.ConnectorFactory')
     @patch('terno_dbi.services.schema_utils.Table')
     @patch('terno_dbi.services.schema_utils.MetaData')
     @patch('terno_dbi.services.schema_utils.inspect')

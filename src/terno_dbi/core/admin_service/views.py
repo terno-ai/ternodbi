@@ -3,12 +3,12 @@ import logging
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
-
 from terno_dbi.core import models
 from terno_dbi.services.validation import validate_datasource_input
-from terno_dbi.services.resolver import resolve_datasource
 from terno_dbi.decorators import require_service_auth, require_scope
-from terno_dbi.core.models import ServiceToken
+from terno_dbi.services import schema_utils
+from terno_dbi.services.shield import delete_cache
+from terno_dbi.services.query import execute_native_sql
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +68,8 @@ def create_datasource(request):
             enabled=True,
         )
         logger.info("Datasource created: id=%d, name='%s', type='%s'", ds.id, ds.display_name, ds.type)
-        
-        from terno_dbi.services.schema_utils import sync_metadata
-        sync_result = sync_metadata(ds.id)
+
+        sync_result = schema_utils.sync_metadata(ds.id)
 
         return JsonResponse({
             "status": "success",
@@ -192,7 +191,6 @@ def update_table(request, table_id):
         if updated:
             table.save(update_fields=updated + ["metadata_updated_at"])
             # Invalidate cache so changes are reflected immediately
-            from terno_dbi.services.shield import delete_cache
             delete_cache(table.data_source)
 
         return JsonResponse({
@@ -201,6 +199,7 @@ def update_table(request, table_id):
             "table": {
                 "id": table.id,
                 "name": table.public_name,
+                "actual_name": table.name,
                 "description": table.description,
                 "is_hidden": table.is_hidden,
             }
@@ -244,7 +243,6 @@ def update_column(request, column_id):
         if updated:
             column.save(update_fields=updated + ["metadata_updated_at"])
             # Invalidate cache so changes are reflected immediately
-            from terno_dbi.services.shield import delete_cache
             delete_cache(column.table.data_source)
 
         return JsonResponse({
@@ -253,6 +251,7 @@ def update_column(request, column_id):
             "column": {
                 "id": column.id,
                 "name": column.public_name,
+                "actual_name": column.name,
                 "data_type": column.data_type,
                 "description": column.description,
                 "is_hidden": column.is_hidden,
@@ -370,9 +369,8 @@ def sync_metadata(request, datasource_identifier):
         overwrite = False
 
     try:
-        from terno_dbi.services.schema_utils import sync_metadata
         logger.info("Starting metadata sync: datasource_id=%d, overwrite=%s", ds.id, overwrite)
-        sync_result = sync_metadata(ds.id, overwrite)
+        sync_result = schema_utils.sync_metadata(ds.id, overwrite)
         logger.info("Metadata sync completed: datasource_id=%d, tables=%d", ds.id, sync_result.get('tables_created', 0))
 
         return JsonResponse({
@@ -404,7 +402,6 @@ def get_table_info(request, datasource_identifier, table_name):
         'public_name', 'data_type', 'description'
     )
     try:
-        from terno_dbi.services.query import execute_native_sql
         sql = f"SELECT * FROM {table.name} LIMIT 3" 
         sample_result = execute_native_sql(ds, sql, page=1, per_page=3)
         sample_rows = sample_result.get('data', [])

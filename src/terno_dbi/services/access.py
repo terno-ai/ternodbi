@@ -13,13 +13,10 @@ def get_all_group_tables(datasource, roles):
         private_tables_ids = private_table_object.tables.all().values_list('id', flat=True)
         global_tables = global_tables.exclude(id__in=private_tables_ids)
 
-    #  Get explicit tables granted to any of the user's groups in ONE query
     group_tables = models.Table.objects.filter(
         include_tables__group__in=roles,
         data_source=datasource
     )
-
-    # Bitwise OR (|) safely constructs a single unified SQL query
     all_group_tables = (global_tables | group_tables).distinct()
 
     return all_group_tables

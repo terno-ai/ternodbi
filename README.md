@@ -21,9 +21,9 @@ The easiest way to get started is to run TernoDBI locally and connect your favor
    ```
 2. **Start the Server**
    ```bash
-   ternodbi start
+   ternodbi start [port]
    ```
-   *(This automatically runs migrations, creates a default `admin`/`admin` user, and starts the server securely on `127.0.0.1:8376`)*
+   *(By default, this starts the server on `127.0.0.1:8376`. It also automatically runs migrations and creates a default `admin`/`admin` user if they don't exist.)*
 3. **Configure your Database**
    Open the admin panel at [http://127.0.0.1:8376/admin](http://127.0.0.1:8376/admin) and add your datasource connections.
 4. **Generate an Access Token**
@@ -59,7 +59,11 @@ The easiest way to get started is to run TernoDBI locally and connect your favor
 
 ### Running the API Server
 ```bash
+# Start on default port (8376)
 ternodbi start
+
+# Start on a custom port
+ternodbi start 9000
 ```
 
 ### Management Commands (CLI)
@@ -131,7 +135,7 @@ TernoDBI exposes Model Context Protocol (MCP) servers to effortlessly plug into 
         "query"
       ],
       "env": {
-        "TERNODBI_API_URL": "http://127.0.0.1:8376",
+        "TERNODBI_API_URL": "http://127.0.0.1:8376", 
         "TERNODBI_API_KEY": "dbi_query_YOUR_TOKEN_HERE"
       }
     },
@@ -151,6 +155,7 @@ TernoDBI exposes Model Context Protocol (MCP) servers to effortlessly plug into 
   }
 }
 ```
+*(Note: If you started TernoDBI on a custom port, make sure to update the `TERNODBI_API_URL` accordingly.)*
 5. **Restart Claude Desktop.** You can now prompt Claude: *"Show me the available datasources."*
 
 

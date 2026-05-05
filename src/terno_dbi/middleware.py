@@ -1,6 +1,4 @@
-
 from django.http import JsonResponse
-from django.utils.functional import SimpleLazyObject
 from terno_dbi.services.auth import verify_token, update_token_usage
 from terno_dbi.core import conf
 import logging
@@ -15,7 +13,7 @@ class ServiceTokenMiddleware:
     def __call__(self, request):
         protected_prefixes = conf.get("PROTECTED_PATH_PREFIXES")
         is_protected = any(request.path.startswith(prefix) for prefix in protected_prefixes)
-        
+
         if not is_protected:
             return self.get_response(request)
 

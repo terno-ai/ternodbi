@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 def generate_service_token(
     name: str,
-    token_type: str = ServiceToken.TokenType.QUERY, 
+    token_type: str = ServiceToken.TokenType.QUERY,
     created_by=None,
     expires_at=None,
     datasource_ids: Optional[List[int]] = None,
@@ -70,7 +70,7 @@ def verify_token(plain_text_key: str) -> Optional[ServiceToken]:
         if token.expires_at and token.expires_at < timezone.now():
             logger.warning("Token verification failed: token '%s' has expired", token.name)
             return None
-        
+
         logger.debug("Token verified successfully: name='%s'", token.name)
         return token
     except ServiceToken.DoesNotExist:

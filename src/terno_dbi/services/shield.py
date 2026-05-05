@@ -2,8 +2,8 @@ import logging
 from django.core.cache import cache
 from sqlshield.shield import Session
 from sqlshield.models import MDatabase
-
 from terno_dbi.core import models
+from terno_dbi.services.access import get_admin_config_object
 
 logger = logging.getLogger(__name__)
 
@@ -80,10 +80,6 @@ def get_cache_key(datasource_id, role_ids):
 
 
 def prepare_mdb(datasource, roles):
-    from terno_dbi.services.access import (
-        get_admin_config_object, get_all_group_tables, get_all_group_columns
-    )
-
     role_ids = sorted(roles.values_list('id', flat=True))
     cache_key = get_cache_key(datasource.id, role_ids)
     cached_mdb = cache.get(cache_key)
@@ -98,7 +94,7 @@ def prepare_mdb(datasource, roles):
     _keep_only_columns(mDb, allowed_tables, allowed_columns)
 
     tables = mDb.get_table_dict()
-    _update_table_descriptions(tables)
+    _update_table_descriptions(tables, allowed_tables)
     _update_filters(tables, datasource, roles)
 
     cache.set(cache_key, mDb, timeout=3600)
@@ -122,11 +118,11 @@ def _keep_only_columns(mDb, tables, columns):
                     col.pub_name = allowed_column.first().public_name
 
 
-def _update_table_descriptions(tables):
+def _update_table_descriptions(tables, allowed_tables):
+    desc_map = {t.name: t.description for t in allowed_tables}
     for tbl_name, tbl_object in tables.items():
-        table_obj = models.Table.objects.filter(name=tbl_name).first()
-        if table_obj:
-            tbl_object.desc = table_obj.description
+        if tbl_name in desc_map:
+            tbl_object.desc = desc_map[tbl_name]
 
 
 def _update_filters(tables, datasource, roles):

@@ -4,13 +4,13 @@ from decimal import Decimal
 from typing import Dict, Any, List, Optional
 import reversion
 from django.db import transaction
-
-
 from sqlalchemy import MetaData, Table, select, func, inspect, case, text
 from sqlalchemy.sql.sqltypes import (
     Integer, Float, Numeric, BigInteger, SmallInteger, DECIMAL,
     String, Text, Enum, DateTime, Date, TIMESTAMP
 )
+from terno_dbi.connectors import ConnectorFactory
+from terno_dbi.core import models
 
 logger = logging.getLogger(__name__)
 
@@ -168,8 +168,6 @@ def get_sample_rows(conn, table_inspector, n: int = 10) -> List[List[Any]]:
 
 
 def get_table_info(datasource, table_name: str, sample_rows_count: int = 10) -> Dict[str, Any]:
-    from terno_dbi.connectors import ConnectorFactory
-    from terno_dbi.core import models
     connector = ConnectorFactory.create_connector(
         datasource.type,
         datasource.connection_str,
@@ -241,7 +239,6 @@ def get_table_info(datasource, table_name: str, sample_rows_count: int = 10) -> 
 
 
 def get_datasource_tables_info(datasource_id: int, table_names: Optional[List[str]] = None) -> Dict[str, Any]:
-    from terno_dbi.core import models
 
     try:
         datasource = models.DataSource.objects.get(id=datasource_id, enabled=True)
@@ -294,13 +291,6 @@ def build_row_counts_lookup(raw_counts: Dict[str, int]) -> Dict[str, int]:
 def resolve_row_count(
     table_name: str, counts_map: Dict[str, int]
 ) -> int | None:
-    """
-    Try to find a match for *table_name* inside *counts_map*.
-
-    Attempts (in order):
-    1. Exact lowercased match  ("public.orders" -> "public.orders")
-    2. Unqualified match       ("public.orders" -> "orders")
-    """
     lower = table_name.lower()
     if lower in counts_map:
         return counts_map[lower]
@@ -318,17 +308,7 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
     views are stored in a way that SQLAlchemy's reflection doesn't pick them up.
 
     Works for Snowflake, BigQuery, PostgreSQL, MySQL, etc.
-
-    Args:
-        connector: Database connector instance
-        datasource: DataSource model instance
-        result: Result dict to update (mutated in place)
-        overwrite: If True, update existing table/column metadata
-
-    Returns:
-        Number of tables/views discovered
     """
-    from terno_dbi.core import models
 
     tables_discovered = 0
 
@@ -469,8 +449,6 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
 
 @reversion.create_revision()
 def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]:
-    from terno_dbi.core import models
-    from terno_dbi.connectors import ConnectorFactory
 
     try:
         datasource = models.DataSource.objects.get(id=datasource_id, enabled=True)
@@ -526,7 +504,6 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
 
                 # Fetch row counts for fallback tables
                 try:
-                    from terno_dbi.core import models
                     found_tables = [t for t in result["tables"] if t.get("status") in ("created", "updated", "skipped")]
                     if found_tables:
                         table_names_list = [t["name"] for t in found_tables]
@@ -626,6 +603,11 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
                                     id__in=duplicate_col_ids
                                 ).delete()
 
+                            pk_value = bool(getattr(col, 'primary_key', False))
+                            if existing_col.primary_key != pk_value:
+                                existing_col.primary_key = pk_value
+                                existing_col.save(update_fields=['primary_key'])
+
                             if overwrite:
                                 existing_col.data_type = str(col.type)
                                 existing_col.save()
@@ -635,6 +617,7 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
                                 name=col_name,
                                 public_name=col_name,
                                 data_type=str(col.type),
+                                primary_key=bool(getattr(col, 'primary_key', False)),
                             )
                             result["columns_created"] += 1
                         found_column_names.add(col_name)

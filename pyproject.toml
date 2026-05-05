@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "terno-dbi"
-version = "0.1.12"
+version = "0.1.14"
 description = "Database Intelligence Layer - Multi-database connectivity with SQLShield integration"
 readme = "README.md"
 license = "Apache-2.0"
@@ -35,7 +35,6 @@ dependencies = [
     "mcp>=1.25.0",
     "requests>=2.32.5",
     "python-dotenv>=1.0.0",
-    "markdown>=3.0",
     # Database Drivers
     "psycopg2-binary>=2.9",
     "pymysql>=1.1",
@@ -45,35 +44,10 @@ dependencies = [
     "databricks-sqlalchemy>=2.0.8",
     "databricks-sql-connector>=2.0",
     "oracledb>=1.4",
-    "django-reversion==5.1.0",
+    "django-reversion>=5.1.0",
 ]
 
 [project.optional-dependencies]
-# Database drivers
-postgres = ["psycopg2-binary>=2.9"]
-mysql = ["pymysql>=1.1"]
-bigquery = ["sqlalchemy-bigquery>=1.9", "google-cloud-bigquery>=3.0"]
-snowflake = ["snowflake-sqlalchemy>=1.5"]
-databricks = ["databricks-sql-connector>=2.0"]
-oracle = ["oracledb>=1.4"]
-
-# All database drivers
-all-db = [
-    "psycopg2-binary>=2.9",
-    "pymysql>=1.1",
-    "sqlalchemy-bigquery>=1.9",
-    "google-cloud-bigquery>=3.0",
-    "snowflake-sqlalchemy>=1.5",
-    "databricks-sql-connector>=2.0",
-    "oracledb>=1.4",
-]
-
-# MCP server
-mcp = ["mcp>=1.0"]
-
-# Celery for async tasks
-celery = ["celery>=5.3", "redis>=5.0"]
-
 # Development
 dev = [
     "pytest>=7.0",

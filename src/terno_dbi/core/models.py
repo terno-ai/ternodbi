@@ -4,8 +4,16 @@ from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.models import Group, User
 from django.core.exceptions import ValidationError
 import logging
+import secrets
+import hashlib
+from cryptography.fernet import Fernet
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _get_fernet():
+    return Fernet(settings.MCP_ENCRYPTION_KEY)
 
 
 class CoreOrganisation(models.Model):
@@ -35,6 +43,19 @@ class OrganisationUser(models.Model):
         related_name='organisation_users'
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE)
+    active_token = models.ForeignKey(
+        'ServiceToken',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='org_users',
+        help_text="Active sandbox ServiceToken for this user+org pair"
+    )
+    encrypted_token_key = models.BinaryField(
+        null=True,
+        blank=True,
+        help_text="Fernet-encrypted raw key for the active sandbox token"
+    )
     created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
 
@@ -49,6 +70,14 @@ class OrganisationUser(models.Model):
 
     def __str__(self):
         return f"{self.user.username}"
+
+    def encrypt_token_key(self, raw_key):
+        """Encrypt raw token key for secure storage using Fernet."""
+        self.encrypted_token_key = _get_fernet().encrypt(raw_key.encode())
+
+    def decrypt_token_key(self):
+        """Decrypt stored token key using Fernet."""
+        return _get_fernet().decrypt(bytes(self.encrypted_token_key)).decode()
 
 
 class OrganisationGroup(models.Model):
@@ -334,7 +363,6 @@ class ServiceToken(models.Model):
         help_text="If set, token can access all datasources in this organisation"
     )
 
-    # Granular datasource override
     datasources = models.ManyToManyField(
         DataSource,
         blank=True,
@@ -381,13 +409,11 @@ class ServiceToken(models.Model):
 
     @classmethod
     def generate_key(cls):
-        import secrets
         return f"dbi_sk_{secrets.token_hex(24)}"
 
     @classmethod
     def hash_key(cls, key):
         """Hash a token key for storage."""
-        import hashlib
         return hashlib.sha256(key.encode()).hexdigest()
 
     def get_accessible_datasources(self):
@@ -422,7 +448,6 @@ class ServiceToken(models.Model):
         if not self.has_access_to_datasource(table.data_source):
             return False
 
-        # Check explicit private table selector
         from terno_dbi.core.models import PrivateTableSelector
         pts = PrivateTableSelector.objects.filter(data_source=table.data_source).first()
         if pts and pts.tables.filter(id=table.id).exists():
@@ -434,8 +459,6 @@ class ServiceToken(models.Model):
         if not self.has_access_to_table(column.table):
             return False
 
-        # Check explicit private column selector
-        from terno_dbi.core.models import PrivateColumnSelector
         pcs = PrivateColumnSelector.objects.filter(data_source=column.table.data_source).first()
         if pcs and pcs.columns.filter(id=column.id).exists():
             return False
@@ -448,7 +471,6 @@ class ServiceToken(models.Model):
         Supports wildcard matching, e.g. 'query:*' matches 'query:read'.
         """
         if not self.scopes:
-            # Legacy tokens without scopes: fall back to token_type check
             if required_scope.startswith('query:') and self.token_type == self.TokenType.QUERY:
                 return True
             if required_scope.startswith('admin:') and self.token_type == self.TokenType.ADMIN:
@@ -458,9 +480,8 @@ class ServiceToken(models.Model):
         for scope in self.scopes:
             if scope == required_scope:
                 return True
-            # Wildcard support: 'query:*' matches 'query:read'
             if scope.endswith(':*'):
-                prefix = scope[:-1]  # 'query:'
+                prefix = scope[:-1]
                 if required_scope.startswith(prefix):
                     return True
         return False

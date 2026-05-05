@@ -6,7 +6,6 @@ their numeric ID or display name, enabling the hybrid lookup pattern.
 import logging
 from typing import Union
 from django.http import Http404
-
 from terno_dbi.core.models import DataSource
 
 logger = logging.getLogger(__name__)
@@ -15,23 +14,7 @@ logger = logging.getLogger(__name__)
 def resolve_datasource(identifier: Union[int, str], enabled_only: bool = True) -> DataSource:
     """
     Resolve a datasource by ID (int) or display_name (str).
-
-    Args:
-        identifier: Either an integer ID or string display_name.
-        enabled_only: If True, only return enabled datasources.
-
-    Returns:
-        DataSource object.
-
-    Raises:
-        Http404: If datasource not found.
-
-    Examples:
-        >>> resolve_datasource(1)  # By ID
-        >>> resolve_datasource("my_postgres")  # By name
-        >>> resolve_datasource("123")  # String that looks like ID - tries ID first
     """
-    # Build base queryset
     qs = DataSource.objects.all()
     if enabled_only:
         qs = qs.filter(enabled=True)

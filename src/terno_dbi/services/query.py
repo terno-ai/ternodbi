@@ -8,7 +8,6 @@ import pandas as pd
 from django.http import HttpResponse
 from django.utils import timezone
 from typing import Optional, List, Dict, Any
-
 from terno_dbi.connectors import ConnectorFactory
 from terno_dbi.services.pagination import (
     PaginationService,
@@ -16,46 +15,82 @@ from terno_dbi.services.pagination import (
     PaginationMode,
     OrderColumn,
 )
+import sqlglot
+from terno_dbi.core import models
 
 logger = logging.getLogger(__name__)
-
-
-_sqlglot_warned = False
 
 
 def _infer_order_from_sql(sql: str) -> List:
     """
     Extract ORDER BY columns from SQL using sqlglot.
     Returns empty list if parsing fails, no ORDER BY found,
-    or query contains GROUP BY (aggregation results are not
-    suitable for keyset/cursor pagination).
+    or ORDER BY contains only non-column expressions (e.g., RANDOM()).
     """
-    global _sqlglot_warned
     try:
-        import sqlglot
         parsed = sqlglot.parse_one(sql)
-        # GROUP BY queries produce small, non-deterministic result sets
-        # that are better served by offset pagination.
-        if parsed.find(sqlglot.exp.Group):
-            return []
         order = parsed.find(sqlglot.exp.Order)
         if not order:
             return []
-        return [
-            OrderColumn(
-                column=expr.this.alias_or_name,
-                direction="DESC" if expr.args.get("desc") else "ASC"
+        columns = []
+        for expr in order.expressions:
+            col_name = expr.this.alias_or_name
+            if not col_name or isinstance(expr.this, sqlglot.exp.Anonymous):
+                continue
+            columns.append(
+                OrderColumn(
+                    column=col_name,
+                    direction="DESC" if expr.args.get("desc") else "ASC"
+                )
             )
-            for expr in order.expressions
-        ]
-    except ImportError:
-        if not _sqlglot_warned:
-            logger.warning(
-                "sqlglot is not installed; ORDER BY auto-detection disabled. "
-                "Cursor mode will fall back to offset when no explicit order_by is provided."
-            )
-            _sqlglot_warned = True
+        return columns
+    except Exception:
         return []
+
+
+def _find_primary_key_order(sql: str, datasource_id: int) -> List:
+    """
+    When no ORDER BY is present, try to auto-detect the table's primary key
+    from metadata and use it for cursor pagination.
+    """
+    try:
+        parsed = sqlglot.parse_one(sql)
+
+        from_clause = parsed.find(sqlglot.exp.From)
+        if not from_clause:
+            return []
+
+        table_expr = from_clause.this
+        table_name = table_expr.alias_or_name
+        if not table_name:
+            return []
+
+        table_obj = models.Table.objects.filter(
+            data_source_id=datasource_id,
+            name=table_name
+        ).first()
+
+        if not table_obj:
+            table_obj = models.Table.objects.filter(
+                data_source_id=datasource_id,
+                public_name=table_name
+            ).first()
+
+        if not table_obj:
+            return []
+
+        pk_columns = models.TableColumn.objects.filter(
+            table=table_obj,
+            primary_key=True
+        ).values_list('name', flat=True)
+
+        if not pk_columns:
+            return []
+
+        return [
+            OrderColumn(column=col, direction="ASC")
+            for col in pk_columns
+        ]
     except Exception:
         return []
 
@@ -114,9 +149,9 @@ def execute_paginated_query(
                 for o in order_by
             ]
 
-        # Defense-in-depth: clamp per_page regardless of caller
         per_page = min(per_page, 500)
 
+        auto_injected_order = False
         if mode == PaginationMode.CURSOR and not order_columns:
             order_columns = _infer_order_from_sql(native_sql)
             if order_columns:
@@ -125,11 +160,24 @@ def execute_paginated_query(
                     [(o.column, o.direction) for o in order_columns]
                 )
             else:
-                logger.info(
-                    "Cursor mode: no ORDER BY found in SQL for datasource=%s, "
-                    "falling back to offset.", datasource.id
+                order_columns = _find_primary_key_order(
+                    native_sql, datasource.id
                 )
-                mode = PaginationMode.OFFSET
+                if order_columns:
+                    auto_injected_order = True
+                    logger.info(
+                        "Cursor mode: auto-injected primary key ORDER BY "
+                        "for datasource=%s: %s",
+                        datasource.id,
+                        [(o.column, o.direction) for o in order_columns]
+                    )
+                else:
+                    logger.info(
+                        "Cursor mode: no ORDER BY and no primary key found "
+                        "for datasource=%s, falling back to offset.",
+                        datasource.id
+                    )
+                    mode = PaginationMode.OFFSET
 
         config = PaginationConfig(
             mode=mode,
@@ -146,7 +194,27 @@ def execute_paginated_query(
             dialect=datasource.dialect_name or datasource.type
         )
 
-        result = service.paginate(native_sql, config)
+        try:
+            result = service.paginate(native_sql, config)
+        except Exception as cursor_err:
+            if auto_injected_order:
+                logger.warning(
+                    "Cursor pagination failed with auto-injected ORDER BY "
+                    "(likely an aggregate/complex query), falling back to "
+                    "offset. Error: %s", cursor_err
+                )
+                config = PaginationConfig(
+                    mode=PaginationMode.OFFSET,
+                    page=page,
+                    per_page=per_page,
+                    cursor=None,
+                    direction=direction,
+                    order_by=[],
+                    include_count=include_count
+                )
+                result = service.paginate(native_sql, config)
+            else:
+                raise
 
         table_data = {
             'columns': result.columns,

@@ -1,69 +1,96 @@
 import os
 import sys
 import json
+import django
+import logging
+from django.contrib.auth import get_user_model
+from django.core.management import execute_from_command_line
+
+logger = logging.getLogger(__name__)
+
+# ANSI Colors for CLI styling
+CYAN = "\033[96m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RESET = "\033[0m"
 
 
 def print_welcome_message(port):
     server_url = f"http://127.0.0.1:{port}"
     admin_url = f"{server_url}/admin"
 
-    print("\n" + "="*60)
-    print("TernoDBI Server Started Successfully!")
-    print("="*60)
-    print(f"\nAPI Server:  {server_url}")
-    print(f"Admin Panel: {admin_url}")
+    banner = f"""
+{BOLD}TernoDBI server is live and ready.{RESET}
 
-    print("-" * 60)
-    print("Next Steps")
-    print("-" * 60)
-    print("1. Open the Admin Panel and login.(default Username: admin, Password: admin)")
-    print("2. Add your Datasource connection in the Admin UI.")
-    print("3. To connect AI agents (Claude Desktop, Cursor) via MCP,")
-    print("   open a new terminal tab and run:")
-    print("   > ternodbi mcp-config")
-    print("-" * 60 + "\n")
+{BOLD}ACCESS POINTS{RESET}
+{DIM}────────────────────────────────────────────────────────────────{RESET}
+  {BOLD}Local API{RESET}    {CYAN}{server_url}{RESET}
+  {BOLD}Admin UI{RESET}     {CYAN}{admin_url}{RESET}
+
+{BOLD}GETTING STARTED{RESET}
+{DIM}────────────────────────────────────────────────────────────────{RESET}
+  {BOLD}1. Authenticate{RESET}
+     Sign in to the Admin UI with {CYAN}admin / admin{RESET}.
+
+  {BOLD}2. Connect Data{RESET}
+     Register your databases through the Administration panel.
+
+  {BOLD}3. AI Integration{RESET}
+     Configure AI agents (Claude, Cursor) via MCP:
+     {CYAN}> ternodbi mcp-config{RESET}
+
+{DIM}────────────────────────────────────────────────────────────────{RESET}
+{DIM}Process running. Press Ctrl+C to terminate.{RESET}
+"""
+    logger.info(banner)
 
 
 def create_default_superuser():
-    import django
     django.setup()
-    from django.contrib.auth import get_user_model
     User = get_user_model()
 
     if not User.objects.filter(is_superuser=True).exists():
-        print("\nFirst Boot Detected: Creating default admin user...")
-        # Create a default superuser
+        logger.info("\nFirst Boot Detected: Creating default admin user...")
         User.objects.create_superuser('admin', 'admin@example.com', 'admin')
-        print("Default Login created! Username: admin, Password: admin")
-        print("WARNING: Please change this in production!\n")
+        logger.info("Default Login created! Username: admin, Password: admin")
+        logger.warning("WARNING: Please change this in production!\n")
 
 
 def main():
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'terno_dbi.server.settings')
 
     if len(sys.argv) < 2:
-        print("Usage: ternodbi <command>")
-        print("\nAvailable commands:")
-        print("  start      Start the TernoDBI server (auto-runs migrations)")
-        print("  mcp-config Print the MCP configuration snippet for Claude Desktop")
-        print("  manage     Run standard Django management commands (e.g., manage issue_token)")
+        logger.info("Usage: ternodbi <command>")
+        logger.info("\nAvailable commands:")
+        logger.info("  start [port]  Start the TernoDBI server (default port: 8376)")
+        logger.info("  mcp-config    Print the MCP configuration snippet for Claude Desktop")
+        logger.info("  manage        Run standard Django management commands")
         sys.exit(1)
 
     command = sys.argv[1]
 
     if command == "start":
-        from django.core.management import execute_from_command_line
+        port = "8376"
+        if len(sys.argv) > 2:
+            try:
+                provided_port = int(sys.argv[2])
+                if not (1 <= provided_port <= 65535):
+                    raise ValueError
+                port = str(provided_port)
+            except ValueError:
+                logger.error(f"Error: '{sys.argv[2]}' is not a valid port number (1-65535).")
+                sys.exit(1)
 
-        # 1. Run Migrations automatically and silently
-        print("Initializing TernoDBI Database (this may take a moment)...")
+        # Run Migrations automatically
+        logger.info(f"{DIM}Initializing database schema...{RESET}")
         execute_from_command_line(['manage.py', 'migrate', '--verbosity', '0'])
-        print("Database ready.")
 
-        # 2. Check and create default superuser
+        # Check and create default superuser
+        logger.info(f"{DIM}Verifying account security...{RESET}")
         create_default_superuser()
 
-        # 3. Start the server on port 8376
-        port = "8376"
+        # Start the server
+        logger.info(f"{DIM}Finalizing server boot...{RESET}")
         print_welcome_message(port)
 
         sys.argv = ['manage.py', 'runserver', '--noreload', f"127.0.0.1:{port}"]
@@ -72,7 +99,7 @@ def main():
     elif command == "mcp-config":
         port = "8376"
         server_url = f"http://127.0.0.1:{port}"
-        print("\nMCP Configuration Snippet (for claude_desktop_config.json):")
+        logger.info("\nMCP Configuration Snippet (for claude_desktop_config.json):")
         mcp_config = {
             "mcpServers": {
                 "ternodbi-query": {
@@ -93,16 +120,15 @@ def main():
                 }
             }
         }
-        print(json.dumps(mcp_config, indent=2))
-        print("\n")
+        logger.info(json.dumps(mcp_config, indent=2))
+        logger.info("\n")
 
     elif command == "manage":
-        from django.core.management import execute_from_command_line
         django_args = ['manage.py'] + sys.argv[2:]
         execute_from_command_line(django_args)
 
     else:
-        print(f"Unknown command: {command}")
+        logger.error(f"Unknown command: {command}")
         sys.exit(1)
 
 

@@ -6,6 +6,11 @@ from .models import LLMConfiguration, PromptExample
 from django.db.models import Q
 
 from terno_dbi.core import models
+from django.contrib import messages
+from terno_dbi.services.schema_utils import sync_metadata
+from terno_dbi.core.models import ServiceToken
+from django.utils.html import format_html
+from terno_dbi.services.auth import generate_service_token
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +60,12 @@ if not PARENT_APP_INSTALLED:
         actions = ['trigger_sync_metadata']
 
         def save_model(self, request, obj, form, change):
-            from django.contrib import messages
 
             super().save_model(request, obj, form, change)
             logger.info("DataSource saved via admin: id=%s, name='%s', change=%s", obj.id, obj.display_name, change)
 
             if not change and obj.enabled:
                 try:
-                    from terno_dbi.services.schema_utils import sync_metadata
                     sync_result = sync_metadata(obj.id)
 
                     if 'error' in sync_result:
@@ -87,8 +90,6 @@ if not PARENT_APP_INSTALLED:
                     )
 
         def trigger_sync_metadata(self, request, queryset):
-            from django.contrib import messages
-            from terno_dbi.services.schema_utils import sync_metadata
             logger.info("Metadata sync triggered via admin for %d datasources", queryset.count())
             for ds in queryset:
                 if not ds.enabled:
@@ -209,10 +210,6 @@ if not PARENT_APP_INSTALLED:
         search_fields = ('group__name', 'organisation__name')
         raw_id_fields = ('group', 'organisation')
 
-    from terno_dbi.core.models import ServiceToken
-    from django.contrib import messages
-    from django.utils.html import format_html
-    from terno_dbi.services.auth import generate_service_token
 
     @admin.register(ServiceToken)
     class ServiceTokenAdmin(admin.ModelAdmin):

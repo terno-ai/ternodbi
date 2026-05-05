@@ -268,12 +268,19 @@ class TestMySQLConnector:
     """Tests specific to MySQL connector."""
 
     def test_creates_with_valid_connection_string(self):
-        """Should initialize with valid connection string."""
+        """Should initialize with valid connection string, falling back to pymysql if MySQLdb missing."""
         from terno_dbi.connectors.mysql import MySQLConnector
         
-        connector = MySQLConnector('mysql://localhost/test')
+        # Scenario 1: MySQLdb is NOT installed (should fallback to pymysql)
+        with patch('builtins.__import__', side_effect=lambda name, *args, **kwargs: 
+                  (lambda: exec('raise ImportError') if name == 'MySQLdb' else __import__(name, *args, **kwargs))()):
+            # We need to re-import or reload if it was already cached, but since it's a new instance:
+            connector = MySQLConnector('mysql://localhost/test')
+            assert connector.connection_string == 'mysql+pymysql://localhost/test'
         
-        assert connector.connection_string == 'mysql+pymysql://localhost/test'
+        # Scenario 2: Connection string already has a driver (should remain unchanged)
+        connector = MySQLConnector('mysql+mysqldb://localhost/test')
+        assert connector.connection_string == 'mysql+mysqldb://localhost/test'
 
     @pytest.mark.skip(reason="Requires live MySQL database")
     def test_dialect_info(self):
