@@ -314,45 +314,47 @@ class OrganisationFilterMixin:
                 kwargs["queryset"] = db_field.related_model.objects.none()
         return super().formfield_for_manytomany(db_field, request, **kwargs)
 
-@admin.register(LLMConfiguration)
-class LLMConfigurationAdmin(admin.ModelAdmin):
+if not PARENT_APP_INSTALLED:
+    @admin.register(LLMConfiguration)
+    class LLMConfigurationAdmin(admin.ModelAdmin):
 
-    list_display = ('organisation', 'llm_type', 'masked_api_key', 'model_name', 'enabled')
-    list_filter = ('llm_type', 'enabled', 'organisation')
-    search_fields = ('llm_type', 'model_name')
+        list_display = ('organisation', 'llm_type', 'masked_api_key', 'model_name', 'enabled')
+        list_filter = ('llm_type', 'enabled', 'organisation')
+        search_fields = ('llm_type', 'model_name')
 
-    fieldsets = (
-        ('Basic Configuration', {
-            'fields': ('organisation', 'llm_type', 'api_key', 'enabled'),
-        }),
-        ('Advanced Configuration (Optional)', {
-            'classes': ('collapse',),
-            'fields': ('model_name', 'temperature', 'top_p', 'top_k', 'max_tokens', 'custom_parameters'),
-        }),
-    )
+        fieldsets = (
+            ('Basic Configuration', {
+                'fields': ('organisation', 'llm_type', 'api_key', 'enabled'),
+            }),
+            ('Advanced Configuration (Optional)', {
+                'classes': ('collapse',),
+                'fields': ('model_name', 'temperature', 'top_p', 'top_k', 'max_tokens', 'custom_parameters'),
+            }),
+        )
 
-    # Mask API key
-    def masked_api_key(self, obj):
-        if obj.api_key:
-            return obj.api_key[:6] + "****"
-        return ""
-    masked_api_key.short_description = "API Key"
+        # Mask API key
+        def masked_api_key(self, obj):
+            if obj.api_key:
+                return obj.api_key[:6] + "****"
+            return ""
+        masked_api_key.short_description = "API Key"
 
-    # Make API key readonly after creation
-    def get_readonly_fields(self, request, obj=None):
-        if obj:
-            return ('api_key',)
-        return ()
+        # Make API key readonly after creation
+        def get_readonly_fields(self, request, obj=None):
+            if obj:
+                return ('api_key',)
+            return ()
 
-    def save_model(self, request, obj, form, change):
-        if obj.enabled:
-            # Disable other enabled LLMs for same org
-            LLMConfiguration.objects.filter(
-                organisation=obj.organisation,
-                enabled=True
-            ).exclude(id=obj.id).update(enabled=False)
+        def save_model(self, request, obj, form, change):
+            if obj.enabled:
+                # Disable other enabled LLMs for same org
+                LLMConfiguration.objects.filter(
+                    organisation=obj.organisation,
+                    enabled=True
+                ).exclude(id=obj.id).update(enabled=False)
 
-        super().save_model(request, obj, form, change)
+            super().save_model(request, obj, form, change)
+
 
 @admin.register(models.PromptExample)
 class PromptExampleAdmin(OrganisationFilterMixin, admin.ModelAdmin):

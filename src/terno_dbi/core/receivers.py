@@ -190,7 +190,10 @@ def handle_prompt_example_save(sender, instance, **kwargs):
         return
 
     try:
-        sync_prompt_example(instance)
+        # Use LLM attached by the caller if available, otherwise let
+        # sync_prompt_example fall back to the default DBI factory.
+        llm = getattr(instance, "_llm", None)
+        sync_prompt_example(instance, llm=llm)
     except Exception as e:
         print(f"[Milvus Sync Error - SAVE]: {e}")
 

@@ -42,13 +42,45 @@ class BaseLLM(ABC):
 
 
 class LLMFactory:
+    """
+    Pluggable LLM factory for terno_dbi.
+
+    Default behaviour: reads LLMConfiguration from the database and creates
+    a direct provider instance (OpenAI, Gemini, etc.).
+
+    Host applications (e.g. terno-ai SaaS) can call
+    ``LLMFactory.register(factory_fn)`` at startup to override the default
+    behaviour.  The registered function must accept
+    ``(organisation, model_name_override=None)`` and return a ``BaseLLM``.
+    """
+
+    _override = None
+
+    @classmethod
+    def register(cls, factory_fn):
+        """
+        Register an override factory function.
+
+        When set, ``create_llm()`` delegates to this function instead of the
+        default provider logic.
+
+        Args:
+            factory_fn: callable(organisation, model_name_override=None) -> BaseLLM
+        """
+        cls._override = factory_fn
 
     @staticmethod
     def create_llm(organisation, model_name_override=None) -> BaseLLM:
         """
         Returns an LLM instance for a given CoreOrganisation.
         """
+        # If a host app registered an override, delegate to it
+        if LLMFactory._override:
+            return LLMFactory._override(
+                organisation, model_name_override=model_name_override
+            )
 
+        # Default: read LLMConfiguration, create direct provider
         try:
             config = LLMConfiguration.objects.filter(
                 organisation=organisation,
@@ -101,10 +133,6 @@ class LLMFactory:
         elif llm_type == "ollama":
             from .ollama import OllamaLLM
             return OllamaLLM(**custom_params)
-
-        elif llm_type == "custom":
-            from .custom_llm import CustomLLM
-            return CustomLLM(**common_params, **custom_params)
 
         else:
             raise ValueError(f"Unsupported LLM type: {llm_type}")

@@ -62,8 +62,9 @@ def get_or_create_example_collection():
     return collection
 
 
-def extract_examples_from_conversation(org, conversation):
-    llm = LLMFactory.create_llm(org)
+def extract_examples_from_conversation(org, conversation, llm=None):
+    if llm is None:
+        llm = LLMFactory.create_llm(org)
 
     prompt = f"""
 You are an expert system that extracts reusable prompt examples.
@@ -105,12 +106,13 @@ Conversation:
         return []
 
 
-def compress_examples(organisation, new_example: dict, similar_examples):
+def compress_examples(organisation, new_example: dict, similar_examples, llm=None):
 
     if not similar_examples:
         return [new_example]
 
-    llm = LLMFactory.create_llm(organisation)
+    if llm is None:
+        llm = LLMFactory.create_llm(organisation)
 
     examples_text = "\n\n".join([
         f"KEY: {e['key']}\nVALUE: {e['value']}"
@@ -164,11 +166,12 @@ Note: You can create new keys as well if you think it can better represent the c
         return []
 
 
-def deduplicate_and_store(id, key, embedding, value, example_type, org_id):
+def deduplicate_and_store(id, key, embedding, value, example_type, org_id, llm=None):
     print(f"[DEDUP] Start for ID={id}")
 
     org = CoreOrganisation.objects.get(id=org_id)
-    llm = LLMFactory.create_llm(org)
+    if llm is None:
+        llm = LLMFactory.create_llm(org)
 
     threshold = 0.85
 
@@ -214,7 +217,7 @@ def deduplicate_and_store(id, key, embedding, value, example_type, org_id):
     cluster_ids = list(set(cluster_ids + [id]))
 
     # Step 5: compress entire cluster
-    new_examples = compress_examples(org, new_example, examples_for_compression)
+    new_examples = compress_examples(org, new_example, examples_for_compression, llm=llm)
     print(f"[DEDUP] Compressed examples: {new_examples}")
 
     # SAFETY CHECK
@@ -318,12 +321,13 @@ def insert_example_vector(id, key, embedding, value, example_type, org_id):
     )
 
 
-def sync_prompt_example(example: PromptExample):
+def sync_prompt_example(example: PromptExample, llm=None):
     """
     Insert/update in Milvus
     """
     print(f"[SYNC] Triggered for ID={example.id}, KEY={example.key}")
-    llm = LLMFactory.create_llm(example.organisation)
+    if llm is None:
+        llm = LLMFactory.create_llm(example.organisation)
     embedding = llm.generate_vector(example.key)
     print("[SYNC] Embedding generated, calling dedup...")
     deduplicate_and_store(
@@ -332,7 +336,8 @@ def sync_prompt_example(example: PromptExample):
         value=example.value,
         embedding=embedding,
         example_type=example.example_type,
-        org_id=example.organisation_id
+        org_id=example.organisation_id,
+        llm=llm
     )
 
 
