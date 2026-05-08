@@ -8,7 +8,8 @@ from terno_dbi.core import conf
 from terno_dbi.services.query import (
     execute_native_sql,
     execute_paginated_query,
-    export_native_sql_result
+    export_native_sql_result,
+    execute_streaming_query,
 )
 from terno_dbi.services.shield import prepare_mdb, generate_native_sql
 from terno_dbi.services.access import get_admin_config_object
@@ -124,7 +125,8 @@ def list_table_columns(request, datasource_identifier, table_identifier):
                 'id': c.id,
                 'name': c.public_name,
                 'data_type': c.data_type,
-                'description': c.description or ""
+                'description': c.description or "",
+                'primary_key': c.primary_key,
             }
             for c in columns
         ]
@@ -285,6 +287,86 @@ def execute_query(request, datasource_identifier=None):
         }, status=400)
     except Exception as e:
         logger.exception(f"Query execution error: {e}")
+        return JsonResponse({
+            "status": "error",
+            "error": str(e)
+        }, status=500)
+
+
+@csrf_exempt
+@require_service_auth()
+@require_http_methods(["POST"])
+def stream_query(request, datasource_identifier=None):
+    """Stream query results using SQLAlchemy server-side cursors.
+    """
+    try:
+        body = json.loads(request.body)
+
+        if datasource_identifier and hasattr(request, 'resolved_datasource'):
+            ds = request.resolved_datasource
+        else:
+            ds_identifier = body.get("datasource") or body.get("datasourceId")
+            if not ds_identifier:
+                return JsonResponse({
+                    "status": "error",
+                    "error": "Datasource name or ID required"
+                }, status=400)
+
+            try:
+                ds = resolve_datasource(ds_identifier)
+
+                if not request.allowed_datasources.filter(id=ds.id).exists():
+                    return JsonResponse({
+                        "status": "error",
+                        "error": "Access denied to datasource"
+                    }, status=403)
+            except Exception as e:
+                return JsonResponse({
+                    "status": "error",
+                    "error": str(e)
+                }, status=404)
+
+        sql = body.get("sql")
+        if not sql:
+            return JsonResponse({
+                "status": "error",
+                "error": "Missing 'sql' in request body"
+            }, status=400)
+
+        role_ids = body.get("roles", [])
+        roles = _resolve_roles(request, role_ids if role_ids else None)
+
+        max_rows = body.get("max_rows")
+        if max_rows is not None and isinstance(max_rows, int):
+            sql = f"SELECT * FROM ({sql}) AS __query_wrapper LIMIT {max_rows}"
+
+        mDb = prepare_mdb(ds, roles)
+        logger.info("Stream query: datasource='%s'", ds.display_name)
+        transform_result = generate_native_sql(mDb, sql, ds.dialect_name)
+
+        if transform_result.get('status') == 'error':
+            return JsonResponse({
+                "status": "error",
+                "error": transform_result.get('error', 'SQL transformation failed')
+            }, status=400)
+
+        native_sql = transform_result.get('native_sql', sql)
+        logger.debug("Stream SQL: %s", native_sql)
+
+        from django.http import StreamingHttpResponse
+        response = StreamingHttpResponse(
+            execute_streaming_query(ds, native_sql),
+            content_type='application/x-ndjson'
+        )
+        return response
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            "status": "error",
+            "error": "Invalid JSON in request body"
+        }, status=400)
+    except Exception as e:
+        logger.exception(f"Stream query error: {e}")
         return JsonResponse({
             "status": "error",
             "error": str(e)

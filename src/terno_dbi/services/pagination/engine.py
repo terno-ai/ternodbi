@@ -122,10 +122,7 @@ class PaginationService:
         if config.cursor:
             cursor_data = self.cursor_codec.decode(config.cursor)
 
-        order_clause = ", ".join([
-            f"{o.column} {o.direction} NULLS {o.nulls}"
-            for o in config.order_by
-        ])
+        order_clause = self._build_order_clause(config.order_by)
 
         cursor_where = self._build_cursor_where(cursor_data, config.order_by)
 
@@ -197,10 +194,7 @@ class PaginationService:
         inverted_order = [o.inverted() for o in config.order_by]
 
         cursor_where = self._build_cursor_where(cursor_data, inverted_order)
-        order_clause = ", ".join([
-            f"{o.column} {o.direction} NULLS {o.nulls}"
-            for o in inverted_order
-        ])
+        order_clause = self._build_order_clause(inverted_order)
         paginated_sql = f"""
             SELECT * FROM ({sql}) AS _q
             WHERE {cursor_where}
@@ -300,6 +294,16 @@ class PaginationService:
 
             if batch:
                 yield batch
+
+    def _build_order_clause(self, order_by: List[OrderColumn]) -> str:
+        """Build dialect-aware ORDER BY clause."""
+        parts = []
+        for o in order_by:
+            part = f"{o.column} {o.direction}"
+            if self.dialect != "mysql":
+                part += f" NULLS {o.nulls}"
+            parts.append(part)
+        return ", ".join(parts)
 
     def _build_cursor_where(
         self,

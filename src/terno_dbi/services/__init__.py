@@ -10,6 +10,7 @@ from terno_dbi.services.query import (
     export_native_sql_result,
     execute_paginated_query,
     export_native_sql_streaming,
+    execute_streaming_query,
 )
 from terno_dbi.services.access import (
     get_all_group_tables,
@@ -30,6 +31,7 @@ __all__ = [
     'export_native_sql_result',
     'execute_paginated_query',
     'export_native_sql_streaming',
+    'execute_streaming_query',
     # access
     'get_all_group_tables',
     'get_all_group_columns',
