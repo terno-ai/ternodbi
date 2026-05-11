@@ -17,18 +17,19 @@ from terno_dbi.services.pagination import (
 )
 import sqlglot
 from terno_dbi.core import models
+import json as _json
 
 logger = logging.getLogger(__name__)
 
 
-def _infer_order_from_sql(sql: str) -> List:
+def _infer_order_from_sql(sql: str, dialect: str = None) -> List:
     """
     Extract ORDER BY columns from SQL using sqlglot.
     Returns empty list if parsing fails, no ORDER BY found,
     or ORDER BY contains only non-column expressions (e.g., RANDOM()).
     """
     try:
-        parsed = sqlglot.parse_one(sql)
+        parsed = sqlglot.parse_one(sql, read=dialect)
         order = parsed.find(sqlglot.exp.Order)
         if not order:
             return []
@@ -48,13 +49,13 @@ def _infer_order_from_sql(sql: str) -> List:
         return []
 
 
-def _find_primary_key_order(sql: str, datasource_id: int) -> List:
+def _find_primary_key_order(sql: str, datasource_id: int, dialect: str = None) -> List:
     """
     When no ORDER BY is present, try to auto-detect the table's primary key
     from metadata and use it for cursor pagination.
     """
     try:
-        parsed = sqlglot.parse_one(sql)
+        parsed = sqlglot.parse_one(sql, read=dialect)
 
         from_clause = parsed.find(sqlglot.exp.From)
         if not from_clause:
@@ -87,10 +88,35 @@ def _find_primary_key_order(sql: str, datasource_id: int) -> List:
         if not pk_columns:
             return []
 
-        return [
-            OrderColumn(column=col, direction="ASC")
-            for col in pk_columns
-        ]
+        has_star = False
+        source_to_alias = {}
+        for expr in parsed.expressions:
+            if isinstance(expr, sqlglot.exp.Star):
+                has_star = True
+                break
+            if isinstance(expr, sqlglot.exp.Alias):
+                source = expr.this
+                if isinstance(source, sqlglot.exp.Column):
+                    source_name = source.alias_or_name
+                    if source_name:
+                        source_to_alias[source_name.lower()] = expr.alias
+            elif isinstance(expr, sqlglot.exp.Column):
+                col_name = expr.alias_or_name
+                if col_name:
+                    source_to_alias[col_name.lower()] = col_name
+
+        if has_star:
+            return [
+                OrderColumn(column=col, direction="ASC")
+                for col in pk_columns
+            ]
+        resolved = []
+        for col in pk_columns:
+            alias = source_to_alias.get(col.lower())
+            if alias:
+                resolved.append(OrderColumn(column=alias, direction="ASC"))
+
+        return resolved
     except Exception:
         return []
 
@@ -152,8 +178,13 @@ def execute_paginated_query(
         per_page = min(per_page, 500)
 
         auto_injected_order = False
+
+        dialect = datasource.dialect_name or datasource.type
+        if dialect and not isinstance(dialect, str):
+            dialect = None
+
         if mode == PaginationMode.CURSOR and not order_columns:
-            order_columns = _infer_order_from_sql(native_sql)
+            order_columns = _infer_order_from_sql(native_sql, dialect=dialect)
             if order_columns:
                 logger.info(
                     "Cursor mode: auto-detected ORDER BY from SQL: %s",
@@ -161,7 +192,7 @@ def execute_paginated_query(
                 )
             else:
                 order_columns = _find_primary_key_order(
-                    native_sql, datasource.id
+                    native_sql, datasource.id, dialect=dialect
                 )
                 if order_columns:
                     auto_injected_order = True
@@ -342,6 +373,55 @@ def export_native_sql_streaming(datasource, native_sql):
     response = StreamingHttpResponse(generate_csv(), content_type='text/csv')
     response['Content-Disposition'] = f'attachment; filename={file_name}'
     return response
+
+
+def execute_streaming_query(datasource, native_sql, yield_size=1000):
+    """
+    Execute a query using SQLAlchemy server-side cursors and yield
+    results as NDJSON (newline-delimited JSON) chunks.
+    """
+    try:
+        connector = ConnectorFactory.create_connector(
+            datasource.type,
+            datasource.connection_str,
+            credentials=datasource.connection_json
+        )
+
+        with connector.get_connection() as con:
+            result = con.execute(
+                sqlalchemy.text(native_sql),
+                execution_options={
+                    "yield_per": yield_size,
+                    "stream_results": True
+                }
+            )
+            columns = list(result.keys())
+
+            yield _json.dumps({"columns": columns}) + "\n"
+
+            row_count = 0
+            batch = []
+            for row in result:
+                row_data = {
+                    col: _make_json_safe(row[i])
+                    for i, col in enumerate(columns)
+                }
+                batch.append(_json.dumps(row_data))
+                row_count += 1
+                
+                # Yield in batches of 1000 to avoid massive HTTP chunking overhead
+                if len(batch) >= 1000:
+                    yield "\n".join(batch) + "\n"
+                    batch.clear()
+
+            if batch:
+                yield "\n".join(batch) + "\n"
+
+            yield _json.dumps({"__done__": True, "row_count": row_count}) + "\n"
+
+    except Exception as e:
+        logger.exception(f"Streaming query error: {e}")
+        yield _json.dumps({"__error__": str(e)}) + "\n"
 
 
 def _make_json_safe(value):

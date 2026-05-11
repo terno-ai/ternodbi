@@ -10,6 +10,7 @@ urlpatterns = [
          views.list_table_columns, name="list_table_columns"),
     path("datasources/<str:datasource_identifier>/foreign-keys/", views.list_foreign_keys, name="list_foreign_keys"),
     path("datasources/<str:datasource_identifier>/query/", views.execute_query, name="execute_query"),
+    path("datasources/<str:datasource_identifier>/stream/", views.stream_query, name="stream_query"),
     path("datasources/<str:datasource_identifier>/export/", views.export_query, name="export_query"),
     path("tables/<int:table_id>/sample/", views.get_sample_data, name="get_sample_data"),
     path("query/", views.execute_query, name="execute_query_legacy"),
