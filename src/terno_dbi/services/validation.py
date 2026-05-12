@@ -95,6 +95,16 @@ def validate_datasource_input(type_, conn_str, connection_json=None):
             pass
         connector.close()
     except Exception as e:
-        return f"Could not connect to database: {str(e)}"
+        logger.error(f"Connection validation failed for {type_}: {e}", exc_info=True)
+        error_str = str(e).lower()
+        if "password authentication failed" in error_str or "access denied" in error_str:
+            return "Could not connect to database: Authentication failed. Please check your username and password."
+        elif "could not translate host name" in error_str or "could not connect to server" in error_str:
+            return "Could not connect to database: Unable to reach the server. Please check the hostname and port."
+        elif "does not exist" in error_str:
+            return "Could not connect to database: The specified database does not exist."
+        elif "timeout" in error_str or "timed out" in error_str:
+            return "Could not connect to database: Connection timed out. Please check the host and firewall settings."
+        return "Could not connect to database. Please verify all connection details are correct."
 
     return None
