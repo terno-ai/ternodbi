@@ -4,6 +4,8 @@ from django.dispatch import receiver
 from terno_dbi.core import models
 from terno_dbi.vector_store.utils import sync_prompt_example, delete_from_milvus
 from terno_dbi.services.shield import delete_cache
+from django.apps import apps
+from terno_dbi.llm.base import LLMFactory, NoActiveLLMException
 
 logger = logging.getLogger(__name__)
 
@@ -185,17 +187,28 @@ def invalidate_cache_on_m2m_change(sender, instance, action, reverse, pk_set, **
 
 @receiver(post_save, sender=models.PromptExample)
 def handle_prompt_example_save(sender, instance, **kwargs):
-    if getattr(instance, "_skip_signal", False):
-        print(f"[SYNC] Skipping signal for ID={instance.id}")
+    """Auto vector sync for standalone mode (MCP, self-hosted).
+    When the parent application (django-app) is installed, it handles
+    vector sync via its own signal handler with its own LLM.
+    """
+    if apps.is_installed('terno'):
+        # Parent app handles vector sync with its own LLM.
+        return
+
+    if getattr(instance, "_skip_vector_sync", False):
         return
 
     try:
-        # Use LLM attached by the caller if available, otherwise let
-        # sync_prompt_example fall back to the default DBI factory.
-        llm = getattr(instance, "_llm", None)
+        llm = LLMFactory.create_llm(instance.organisation)
         sync_prompt_example(instance, llm=llm)
+    except NoActiveLLMException:
+        logger.info(
+            "No LLM configured for org %s — skipping auto vector sync. "
+            "Configure an LLM in the admin panel to enable it.",
+            instance.organisation_id,
+        )
     except Exception as e:
-        print(f"[Milvus Sync Error - SAVE]: {e}")
+        logger.warning("[Milvus Sync Error - SAVE] PromptExample %s: %s", instance.id, e)
 
 
 @receiver(post_delete, sender=models.PromptExample)
@@ -203,4 +216,5 @@ def handle_prompt_example_delete(sender, instance, **kwargs):
     try:
         delete_from_milvus(instance.id)
     except Exception as e:
-        print(f"[Milvus Sync Error - DELETE]: {e}")
+        logger.warning("[Milvus Sync Error - DELETE] PromptExample %s: %s", instance.id, e)
+

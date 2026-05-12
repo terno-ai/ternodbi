@@ -56,3 +56,17 @@ class OllamaLLM(BaseLLM):
         print("This is generated schema Json", generated_csv_schema)
         return generated_csv_schema_json
 
+    def generate_vector(self, prompt):
+        """Generate an embedding vector using Ollama's embeddings API."""
+        model = self.get_model_instance()
+        response = model.embeddings(model=self.model_name, prompt=prompt)
+        return response['embedding']
+
+    def get_simple_response(self, prompt: str) -> str:
+        """Send a single prompt and return just the text content."""
+        model = self.get_model_instance()
+        response = model.chat(
+            model=self.model_name,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response['message']['content'].strip()

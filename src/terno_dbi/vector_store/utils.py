@@ -1,10 +1,12 @@
 from pymilvus import MilvusClient, DataType, FieldSchema, CollectionSchema
 from terno_dbi.core import conf
-from terno_dbi.llm.base import LLMFactory
 from terno_dbi.core.models import PromptExample, CoreOrganisation
 from django.db import transaction
 import json
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 
 def get_milvus_client():
@@ -62,9 +64,7 @@ def get_or_create_example_collection():
     return collection
 
 
-def extract_examples_from_conversation(org, conversation, llm=None):
-    if llm is None:
-        llm = LLMFactory.create_llm(org)
+def extract_examples_from_conversation(org, conversation, llm):
 
     prompt = f"""
 You are an expert system that extracts reusable prompt examples.
@@ -106,13 +106,10 @@ Conversation:
         return []
 
 
-def compress_examples(organisation, new_example: dict, similar_examples, llm=None):
+def compress_examples(organisation, new_example: dict, similar_examples, llm):
 
     if not similar_examples:
         return [new_example]
-
-    if llm is None:
-        llm = LLMFactory.create_llm(organisation)
 
     examples_text = "\n\n".join([
         f"KEY: {e['key']}\nVALUE: {e['value']}"
@@ -166,12 +163,10 @@ Note: You can create new keys as well if you think it can better represent the c
         return []
 
 
-def deduplicate_and_store(id, key, embedding, value, example_type, org_id, llm=None):
-    print(f"[DEDUP] Start for ID={id}")
+def deduplicate_and_store(id, key, embedding, value, example_type, org_id, llm):
+    logger.debug("[DEDUP] Start for ID=%s", id)
 
     org = CoreOrganisation.objects.get(id=org_id)
-    if llm is None:
-        llm = LLMFactory.create_llm(org)
 
     threshold = 0.85
 
@@ -226,14 +221,14 @@ def deduplicate_and_store(id, key, embedding, value, example_type, org_id, llm=N
         return
 
     # Step 6: delete ENTIRE cluster from DB + Milvus
+    # post_delete signal handles Milvus deletion automatically.
     with transaction.atomic():
-        print(f"[DEDUP] Deleting full cluster: {cluster_ids}")
+        logger.debug("[DEDUP] Deleting full cluster: %s", cluster_ids)
         PromptExample.objects.filter(id__in=cluster_ids).delete()
-        delete_from_milvus(cluster_ids)
 
         # Step 7: insert new canonical examples
         for ex in new_examples:
-            print(f"[DEDUP] Inserting new canonical example: {ex}")
+            logger.debug("[DEDUP] Inserting new canonical example: %s", ex)
 
             new_obj = PromptExample(
                 organisation=org,
@@ -242,7 +237,7 @@ def deduplicate_and_store(id, key, embedding, value, example_type, org_id, llm=N
                 value=ex["value"]
             )
 
-            new_obj._skip_signal = True
+            new_obj._skip_vector_sync = True
             new_obj.save()
 
             new_embedding = llm.generate_vector(ex["key"])
@@ -321,13 +316,11 @@ def insert_example_vector(id, key, embedding, value, example_type, org_id):
     )
 
 
-def sync_prompt_example(example: PromptExample, llm=None):
+def sync_prompt_example(example: PromptExample, llm):
     """
     Insert/update in Milvus
     """
-    print(f"[SYNC] Triggered for ID={example.id}, KEY={example.key}")
-    if llm is None:
-        llm = LLMFactory.create_llm(example.organisation)
+    logger.debug("[SYNC] Triggered for ID=%s, KEY=%s", example.id, example.key)
     embedding = llm.generate_vector(example.key)
     print("[SYNC] Embedding generated, calling dedup...")
     deduplicate_and_store(

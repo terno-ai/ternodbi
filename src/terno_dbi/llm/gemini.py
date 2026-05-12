@@ -116,3 +116,19 @@ class GeminiLLM(BaseLLM):
         generated_csv_schema_json = json.loads(generated_csv_schema)
         print("This is generated schema Json", generated_csv_schema)
         return generated_csv_schema_json
+
+    def generate_vector(self, prompt):
+        """Generate an embedding vector using Gemini's embedding model."""
+        result = genai.embed_content(
+            model="models/text-embedding-004",
+            content=prompt,
+        )
+        return result['embedding']
+
+    def get_simple_response(self, prompt: str) -> str:
+        """Send a single prompt and return just the text content."""
+        genai.configure(api_key=self.api_key)
+        model = genai.GenerativeModel(model_name=self.model_name)
+        response = model.generate_content(prompt)
+        return response.text.strip()
+

@@ -91,3 +91,19 @@ class AnthropicLLM(BaseLLM):
         generated_csv_schema_json = json.loads(generated_csv_schema)
         print("This is generated schema Json", generated_csv_schema)
         return generated_csv_schema_json
+
+    def generate_vector(self, prompt):
+        raise NotImplementedError(
+            "Anthropic does not offer an embeddings API. "
+            "Configure an embedding provider or use the TernoLLM proxy."
+        )
+
+    def get_simple_response(self, prompt: str) -> str:
+        """Send a single prompt and return just the text content."""
+        client = self.get_model_instance()
+        response = client.messages.create(
+            model=self.model_name,
+            max_tokens=self.max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text.strip()

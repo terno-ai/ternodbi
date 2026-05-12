@@ -21,3 +21,9 @@ class FakeLLM(BaseLLM):
 
     def csv_llm_response(self, messages):
         return {"generated_csv_schema": "mock_schema"}
+
+    def generate_vector(self, prompt):
+        return [0.0] * 1536
+
+    def get_simple_response(self, prompt: str) -> str:
+        return '[]'
