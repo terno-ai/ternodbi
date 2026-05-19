@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "terno-dbi"
-version = "0.1.17"
+version = "0.1.18"
 description = "Database Intelligence Layer - Multi-database connectivity with SQLShield integration"
 readme = "README.md"
 license = "Apache-2.0"
@@ -45,6 +45,13 @@ dependencies = [
     "databricks-sql-connector>=2.0",
     "oracledb>=1.4",
     "django-reversion>=5.1.0",
+    # Prompt Example & LLM dependencies
+    "pymilvus>=2.5.0",
+    "openai>=1.0.0",
+    "anthropic>=0.30.0",
+    "google-generativeai>=0.7.0",
+    "ollama>=0.3.0",
+    "tiktoken>=0.7.0",
 ]
 
 [project.optional-dependencies]
