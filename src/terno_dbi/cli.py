@@ -51,9 +51,22 @@ def create_default_superuser():
 
     if not User.objects.filter(is_superuser=True).exists():
         logger.info("\nFirst Boot Detected: Creating default admin user...")
-        User.objects.create_superuser('admin', 'admin@example.com', 'admin')
+        admin_user = User.objects.create_superuser('admin', 'admin@example.com', 'admin')
         logger.info("Default Login created! Username: admin, Password: admin")
         logger.warning("WARNING: Please change this in production!\n")
+    else:
+        admin_user = User.objects.filter(is_superuser=True).first()
+
+    from terno_dbi.core.models import CoreOrganisation, OrganisationUser
+    
+    org, created = CoreOrganisation.objects.get_or_create(
+        subdomain="default",
+        defaults={"name": "Default Organisation", "owner": admin_user, "is_active": True, "verified": True}
+    )
+    
+    if created:
+        OrganisationUser.objects.get_or_create(user=admin_user, organisation=org)
+        logger.info("Default Organisation 'default' created and assigned to admin.\n")
 
 
 def main():

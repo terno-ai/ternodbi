@@ -40,24 +40,29 @@ if not PARENT_APP_INSTALLED:
 
     @admin.register(DataSource)
     class DataSourceAdmin(reversion.admin.VersionAdmin):
-        list_display = ('display_name', 'type', 'enabled', 'dialect_name', 'dialect_version')
-        list_filter = ('type', 'enabled', 'dialect_name')
-        search_fields = ('display_name', 'description')
+        list_display = ('display_name', 'type', 'enabled', 'dialect_name', 'dialect_version', 'organisation')
+        list_filter = ('type', 'enabled', 'dialect_name', 'organisation')
+        search_fields = ('display_name', 'description', 'organisation__name')
         readonly_fields = ('dialect_name', 'dialect_version')
-        fieldsets = (
-            (None, {
-                'fields': ('display_name', 'description', 'enabled')
-            }),
-            ('Connection', {
-                'fields': ('type', 'connection_str', 'connection_json'),
-                'classes': ('collapse',),
-            }),
-            ('Dialect Info', {
-                'fields': ('dialect_name', 'dialect_version'),
-                'classes': ('collapse',),
-            }),
+        fields = (
+            'display_name',
+            'type',
+            'organisation',
+            'enabled',
+            'connection_str',
+            'connection_json',
+            'description',
+            'dialect_name',
+            'dialect_version',
         )
         actions = ['trigger_sync_metadata']
+
+        def get_changeform_initial_data(self, request):
+            initial = super().get_changeform_initial_data(request)
+            org_user = OrganisationUser.objects.filter(user=request.user).first()
+            if org_user:
+                initial['organisation'] = org_user.organisation_id
+            return initial
 
         def save_model(self, request, obj, form, change):
 

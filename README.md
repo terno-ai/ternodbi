@@ -23,13 +23,17 @@ The easiest way to get started is to run TernoDBI locally and connect your favor
    ```bash
    ternodbi start [port]
    ```
-   *(By default, this starts the server on `127.0.0.1:8376`. It also automatically runs migrations and creates a default `admin`/`admin` user if they don't exist.)*
+   *(By default, this starts the server on `127.0.0.1:8376`. It automatically runs migrations, creates a default `admin`/`admin` user, and sets up a default organisation on first boot.)*
 3. **Configure your Database**
    Open the admin panel at [http://127.0.0.1:8376/admin](http://127.0.0.1:8376/admin) and add your datasource connections.
 4. **Generate an Access Token**
    Generate a token from the Admin UI or via the CLI:
    ```bash
+   # Query Token (for AI Agents)
    ternodbi manage issue_token --name "My Agent" --type query
+
+   # Admin Token (for full system access)
+   ternodbi manage issue_token --name "System Admin" --type admin
    ```
 5. **Configure MCP** (See [MCP Integration](#ternodbi-as-an-mcp-server) below)
 6. **Start chatting with your enterprise data!**

@@ -116,10 +116,26 @@ class DataSource(models.Model):
         help_text="Flag to indicate if the datasource is an ERP system."
     )
     connection_str = models.TextField(
-        max_length=1000, help_text="Connection string for the datasource")
+        max_length=1000, 
+        help_text=(
+            "Connection string for the datasource.<br><br>"
+            "<b>Examples:</b><br>"
+            "&bull; <b>Postgres:</b> <code>postgresql://user:password@host:port/dbname</code><br>"
+            "&bull; <b>MySQL:</b> <code>mysql+pymysql://user:password@host:port/dbname</code><br>"
+            "&bull; <b>Oracle:</b> <code>oracle+oracledb://user:password@host:port/?service_name=service_name</code><br>"
+            "&bull; <b>Snowflake:</b> <code>snowflake://user:password@account_identifier/dbname/schema_name?warehouse=warehouse_name</code><br>"
+            "&bull; <b>BigQuery:</b> <code>bigquery://project_id/dataset_id</code> <i>(Requires Connection JSON)</i><br>"
+            "&bull; <b>DataBricks:</b> <code>databricks://token:dapi_token@host:port?http_path=/sql/1.0/endpoints/12345</code>"
+        )
+    )
     connection_json = models.JSONField(
         null=True, blank=True,
-        help_text="JSON key file contents for authentication")
+        help_text=(
+            "JSON key file contents for authentication.<br><br>"
+            "<b>Examples:</b><br>"
+            "&bull; <b>BigQuery:</b> Paste the entire contents of your Google Cloud Service Account JSON key file here."
+        )
+    )
     description = models.TextField(
         max_length=1024, null=True, blank=True, default='',
         help_text="Give description of your datasource/schema.")
