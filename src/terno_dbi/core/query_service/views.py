@@ -21,6 +21,7 @@ from terno_dbi.services.access import get_admin_config_object
 from terno_dbi.services.resolver import resolve_datasource
 from terno_dbi.decorators import require_service_auth
 from django.contrib.auth.models import Group
+from django.contrib.auth.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -454,7 +455,6 @@ def get_similar_examples_for_agent(request):
             org_id = request.token_organisation.id
 
         query = body.get("query", "")
-        example_types = body.get("example_types", ["query_sql"])
         threshold = body.get("threshold", 0.85)
         limit = body.get("limit", 3)
 
@@ -472,7 +472,7 @@ def get_similar_examples_for_agent(request):
         similar = find_similar_examples(
             embedding=embedding,
             org_id=org_id,
-            example_types=example_types,
+            user_id=body.get("user_id"),
             threshold=threshold,
             limit=limit
         )
@@ -501,7 +501,8 @@ def add_prompt_example(request):
 
         key = body.get("key", "")
         value = body.get("value", "")
-        example_type = body.get("example_type", "query_sql")
+        user_id = body.get("user_id")
+        is_shared = body.get("is_shared", False)
 
         if not org_id:
             return JsonResponse({"status": "error", "error": "org_id is required"}, status=400)
@@ -511,12 +512,19 @@ def add_prompt_example(request):
         except models.CoreOrganisation.DoesNotExist:
             return JsonResponse({"status": "error", "error": "Organisation not found"}, status=404)
 
-        example = PromptExample.objects.create(
-            organisation=org,
-            key=key,
-            value=value,
-            example_type=example_type
-        )
+        create_kwargs = {
+            "organisation": org,
+            "key": key,
+            "value": value,
+            "is_shared": is_shared,
+        }
+        if user_id:
+            try:
+                create_kwargs["created_by"] = User.objects.get(id=user_id)
+            except User.DoesNotExist:
+                pass
+
+        example = PromptExample.objects.create(**create_kwargs)
 
         sync_prompt_example(example)
 

@@ -26,9 +26,10 @@ def get_or_create_example_collection():
         FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=False),
         FieldSchema(name="key", dtype=DataType.VARCHAR, max_length=512),
         FieldSchema(name="value", dtype=DataType.VARCHAR, max_length=4096),
-        FieldSchema(name="example_type", dtype=DataType.VARCHAR, max_length=512, is_primary=False, default=None),
         FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=1536),
         FieldSchema(name="org_id", dtype=DataType.INT64, is_primary=False, default=None),
+        FieldSchema(name="user_id", dtype=DataType.INT64, is_primary=False, default=0),
+        FieldSchema(name="is_shared", dtype=DataType.BOOL, is_primary=False, default=False),
     ]
     schema = CollectionSchema(fields, description="Prompt Example Vectors")
     existing = milvus_client.list_collections()
@@ -66,35 +67,37 @@ def get_or_create_example_collection():
 
 def extract_examples_from_conversation(org, conversation, llm):
 
+    # Filter to only user messages — we only extract from user-provided information
+    user_messages = [msg for msg in conversation if msg.get("role") == "user"]
+    if not user_messages:
+        return []
+
+    user_text = "\n\n".join([msg["content"] for msg in user_messages])
+
     prompt = f"""
-You are an expert system that extracts reusable prompt examples.
+You are an expert system that extracts reusable domain knowledge from user-provided information.
 
-Prompt examples are the key value pairs for information or internal logics. These prompt examples are fetched using the key and added to the user’s question for further use as few-shot examples. These prompt examples are stored in a vector store and are fetched using the key. So, for a recommended prompt example, we need a key-value pair.
-we also have example_type field to differentiate different types of examples, for example, "query_sql" for SQL query examples the value contains pure or pseudo python and SQLcode and "question_plan" for planning examples the value contains the logical reasoning and internal logic this may conatin filtering logic, tables and columns names even FK relationships.
+Your job is to identify valuable DOMAIN KNOWLEDGE, BUSINESS RULES, TERMINOLOGY, and INTERNAL LOGIC that the user has explicitly shared in their messages. These will be stored as question-answer pairs (key-value) and used as few-shot examples to help the AI answer similar future questions.
 
-You may get learnings from:
-- From the user's question, there might be inputs
-- From the different approaches tried, to find the answer
-
-Rules:
-- Keep key short and natural (user query) as key will be matched with user's query
-- Value should be clean SQL only
-- Ignore explanations
-- For updating existing prompt example provided to assistant just add a new one, we have deduplicate implemented by default
+IMPORTANT RULES:
+- ONLY extract information explicitly stated by the user in their messages
+- DO NOT extract SQL queries, code, or agent-generated content
+- DO NOT extract generic questions that don't contain domain-specific knowledge
+- Key should be a natural question that a future user might ask (this is used for semantic matching)
+- Value should be the domain knowledge, business rule, or contextual information that helps answer the question
+- Focus on: business terminology, internal naming conventions, calculation logic, filtering rules, entity relationships, data interpretation rules
+- If the user hasn't provided any meaningful domain knowledge, return an empty list []
 
 Return JSON list:
 [
   {{
     "key": "...",
-    "value": "...",
-    "example_type": "..." ("query_sql" or "question_plan" according to value content)
+    "value": "..."
   }}
 ]
 
-From the conversation below, extract HIGH QUALITY examples. You can create as many prompt example as you want.
-
-Conversation:
-{conversation}
+User messages:
+{user_text}
 """
 
     response = llm.get_simple_response(prompt)
@@ -117,37 +120,32 @@ def compress_examples(organisation, new_example: dict, similar_examples, llm):
     ])
 
     prompt = f"""
-You are expert in optimizing prompt examples. prompt examples are the key value pairs for information or internal logics. These prompt examples are stored and fetched using the key and the corresponding values are added to the user’s question for further use as few-shot examples.
-we also have example_type field to differentiate different types of examples, for example, "query_sql" for SQL query examples the value contains pure or pseudo python and SQLcode and "question_plan" for planning examples the value contains the logical reasoning and internal logic this may conatin filtering logic, tables and columns names even FK relationships.
+You are expert in optimizing prompt examples. Prompt examples are question-answer pairs that store domain knowledge, business rules, and internal logic. They are stored in a vector store and fetched by semantic matching on the key (question), with the value (answer) injected as few-shot context.
 
 CONTEXT:
 - Keys are used for semantic search (embedding match)
-- Values are used as execution examples
-- Example Type is used for categorization and filtering during retrieval
+- Values contain domain knowledge, business rules, and contextual information
 
 STRICT RULES:
 - Always return at least 1 example
 - NEVER return empty list
-- Merge nearly identical examples into one with combined information(key and value both). Don't just pick one and drop others.
+- Merge nearly identical examples into one with combined information (key and value both). Don't just pick one and drop others.
 - Values should be concise and clean
 - Keep minimum number of examples
 - Preserve all unique information in values
-- You may merge examples with different example type and assign correct example type to merged example based on value content.
 
 Existing examples:
 {examples_text}
 
 New example:
 KEY: {new_example["key"]}
-VALUE:{new_example["value"]}
-EXAMPLE_TYPE:{new_example["example_type"]}
+VALUE: {new_example["value"]}
 
 Return JSON list:
 [
   {{
     "key": "...",
-    "value": "...",
-    "example_type": "..." ("query_sql" or "question_plan" according to value content)
+    "value": "..."
   }}
 ]
 
@@ -163,15 +161,18 @@ Note: You can create new keys as well if you think it can better represent the c
         return []
 
 
-def deduplicate_and_store(id, key, embedding, value, example_type, org_id, llm):
+def deduplicate_and_store(id, key, embedding, value, org_id, user_id, is_shared, llm):
     logger.debug("[DEDUP] Start for ID=%s", id)
 
     org = CoreOrganisation.objects.get(id=org_id)
 
     threshold = 0.85
 
-    # Step 1: find cluster (ALL similar examples)
-    similar = find_similar_examples(embedding, org_id, ["query_sql", "question_plan"], threshold, limit=5)
+    # Step 1: find similar examples owned by same user (not org-shared ones)
+    similar = find_similar_examples(
+        embedding, org_id, user_id=user_id,
+        threshold=threshold, limit=5
+    )
 
     print(f"[DEDUP] Raw similar: {similar}")
 
@@ -182,8 +183,9 @@ def deduplicate_and_store(id, key, embedding, value, example_type, org_id, llm):
             key=key,
             embedding=embedding,
             value=value,
-            example_type=example_type,
             org_id=org_id,
+            user_id=user_id,
+            is_shared=is_shared,
         )
         return
 
@@ -203,12 +205,12 @@ def deduplicate_and_store(id, key, embedding, value, example_type, org_id, llm):
 
     # Step 4: build compression input
     examples_for_compression = [
-        {"key": e.key, "value": e.value, "example_type": e.example_type}
+        {"key": e.key, "value": e.value}
         for e in cluster_examples
     ]
 
     # include current input
-    new_example = {"key": key, "value": value, "example_type": example_type}
+    new_example = {"key": key, "value": value}
     cluster_ids = list(set(cluster_ids + [id]))
 
     # Step 5: compress entire cluster
@@ -232,7 +234,8 @@ def deduplicate_and_store(id, key, embedding, value, example_type, org_id, llm):
 
             new_obj = PromptExample(
                 organisation=org,
-                example_type=ex["example_type"],
+                created_by_id=user_id if user_id else None,
+                is_shared=is_shared,
                 key=ex["key"],
                 value=ex["value"]
             )
@@ -247,17 +250,28 @@ def deduplicate_and_store(id, key, embedding, value, example_type, org_id, llm):
                 key=new_obj.key,
                 embedding=new_embedding,
                 value=new_obj.value,
-                example_type=new_obj.example_type,
                 org_id=org_id,
+                user_id=user_id,
+                is_shared=is_shared,
             )
 
 
-def find_similar_examples(embedding, org_id, example_types, threshold=0.75, limit=3):
-    print(f"[MILVUS SEARCH] Running search for org_id={org_id}")
+def find_similar_examples(embedding, org_id, user_id=None, threshold=0.75, limit=3):
+    """
+    Layered retrieval:
+    - If user_id is provided: fetch user's own + org-level shared memories
+    - If user_id is None: fetch all org memories (admin/service context)
+    """
+    print(f"[MILVUS SEARCH] Running search for org_id={org_id}, user_id={user_id}")
     client = get_milvus_client()
     collection = "query_example"
-    type_conditions = " || ".join([f'example_type == "{t}"' for t in example_types])
-    expr = f'org_id == {org_id} && ({type_conditions})'
+
+    if user_id:
+        # Layered: user's own memories + org-level shared memories
+        expr = f'org_id == {org_id} && (user_id == {user_id} || is_shared == true)'
+    else:
+        # Service/admin context: all org memories
+        expr = f'org_id == {org_id}'
 
     results = client.search(
         collection_name=collection,
@@ -266,7 +280,7 @@ def find_similar_examples(embedding, org_id, example_types, threshold=0.75, limi
         metric_type="COSINE",
         limit=limit,
         filter=expr,
-        output_fields=["id", "key", "value", "example_type", "org_id"],
+        output_fields=["id", "key", "value", "org_id", "user_id", "is_shared"],
     )
     print(f"[MILVUS SEARCH] Raw results count: {len(results[0])}")
 
@@ -280,7 +294,8 @@ def find_similar_examples(embedding, org_id, example_types, threshold=0.75, limi
                 "id": hit["id"],
                 "key": hit["entity"]["key"],
                 "value": hit["entity"]["value"],
-                "example_type": hit["entity"]["example_type"],
+                "user_id": hit["entity"].get("user_id", 0),
+                "is_shared": hit["entity"].get("is_shared", False),
                 "similarity": hit["distance"]
             })
 
@@ -290,7 +305,7 @@ def find_similar_examples(embedding, org_id, example_types, threshold=0.75, limi
     return matches
 
 
-def insert_example_vector(id, key, embedding, value, example_type, org_id):
+def insert_example_vector(id, key, embedding, value, org_id, user_id=0, is_shared=False):
     client = get_milvus_client()
     collection = "query_example"
 
@@ -310,8 +325,9 @@ def insert_example_vector(id, key, embedding, value, example_type, org_id):
             "key": key,
             "value": value,
             "embedding": embedding,
-            "example_type": example_type,
-            "org_id": org_id
+            "org_id": org_id,
+            "user_id": user_id or 0,
+            "is_shared": is_shared,
         }]
     )
 
@@ -328,8 +344,9 @@ def sync_prompt_example(example: PromptExample, llm):
         key=example.key,
         value=example.value,
         embedding=embedding,
-        example_type=example.example_type,
         org_id=example.organisation_id,
+        user_id=example.created_by_id or 0,
+        is_shared=example.is_shared,
         llm=llm
     )
 

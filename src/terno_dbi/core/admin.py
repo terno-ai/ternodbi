@@ -363,7 +363,8 @@ if not PARENT_APP_INSTALLED:
 
 @admin.register(models.PromptExample)
 class PromptExampleAdmin(OrganisationFilterMixin, admin.ModelAdmin):
-    list_display = ('example_type', 'key', 'value', 'created_at', 'updated_at')
+    list_display = ('key', 'value', 'created_by', 'is_shared', 'created_at', 'updated_at')
+    list_filter = ('is_shared',)
     organisation_related_field_names = ['organisation']
     exclude = ['organisation']
 
@@ -371,4 +372,6 @@ class PromptExampleAdmin(OrganisationFilterMixin, admin.ModelAdmin):
         org_id = request.org_id
         org = models.CoreOrganisation.objects.get(pk=org_id)
         obj.organisation = org
+        if not change and not obj.created_by_id:
+            obj.is_shared = True
         super().save_model(request, obj, form, change)

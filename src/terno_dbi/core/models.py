@@ -561,28 +561,26 @@ class LLMConfiguration(models.Model):
 
 
 class PromptExample(models.Model):
-    ExampleType = [
-        ("query_sql", "Query - SQL"),
-        ("question_plan", "Question - Plan"),
-        ("input_response", "Input Response"),
-        ("lib_script", "Library Script")
-    ]
 
     organisation = models.ForeignKey(
         CoreOrganisation, on_delete=models.CASCADE, null=True, blank=True,
         related_name='prompt_examples')
-    example_type = models.CharField(
-        max_length=50,
-        choices=ExampleType,
-        default=ExampleType[0][0],
-        help_text="Type of example, e.g., Query - SQL or Question - Plan."
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='prompt_examples',
+        help_text="Owner of this memory. NULL = org-level shared knowledge."
+    )
+    is_shared = models.BooleanField(
+        default=False,
+        help_text="If True, this memory is visible to all users in the organisation. "
+                  "Only org admins can set this."
     )
     key = models.CharField(
         max_length=255,
-        help_text="The key or variable name used in the prompt template."
+        help_text="The question or query key used for semantic matching."
     )
     value = models.TextField(
-        help_text="The example value corresponding to the key."
+        help_text="The domain knowledge, business rule, or contextual answer."
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -591,3 +589,7 @@ class PromptExample(models.Model):
         db_table = "terno_promptexample"
         verbose_name = "Prompt Example"
         verbose_name_plural = "Prompt Examples"
+
+    def __str__(self):
+        owner = self.created_by.username if self.created_by else "org-shared"
+        return f"[{owner}] {self.key[:50]}"
