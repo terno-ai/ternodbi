@@ -187,7 +187,7 @@ def deduplicate_and_store(id, key, embedding, value, org_id, user_id, is_shared,
             user_id=user_id,
             is_shared=is_shared,
         )
-        return
+        return None
 
     # Step 2: collect all IDs in cluster
     cluster_ids = list(set([
@@ -220,10 +220,11 @@ def deduplicate_and_store(id, key, embedding, value, org_id, user_id, is_shared,
     # SAFETY CHECK
     if not new_examples:
         print("[DEDUP] Compression failed → aborting delete")
-        return
+        return None
 
     # Step 6: delete ENTIRE cluster from DB + Milvus
     # post_delete signal handles Milvus deletion automatically.
+    created_examples = []
     with transaction.atomic():
         logger.debug("[DEDUP] Deleting full cluster: %s", cluster_ids)
         PromptExample.objects.filter(id__in=cluster_ids).delete()
@@ -254,6 +255,13 @@ def deduplicate_and_store(id, key, embedding, value, org_id, user_id, is_shared,
                 user_id=user_id,
                 is_shared=is_shared,
             )
+            created_examples.append({
+                "id": new_obj.id,
+                "key": new_obj.key,
+                "value": new_obj.value,
+            })
+
+    return {"deleted_ids": cluster_ids, "new_examples": created_examples}
 
 
 def find_similar_examples(embedding, org_id, user_id=None, threshold=0.75, limit=3):
@@ -333,13 +341,10 @@ def insert_example_vector(id, key, embedding, value, org_id, user_id=0, is_share
 
 
 def sync_prompt_example(example: PromptExample, llm):
-    """
-    Insert/update in Milvus
-    """
     logger.debug("[SYNC] Triggered for ID=%s, KEY=%s", example.id, example.key)
     embedding = llm.generate_vector(example.key)
     print("[SYNC] Embedding generated, calling dedup...")
-    deduplicate_and_store(
+    return deduplicate_and_store(
         id=example.id,
         key=example.key,
         value=example.value,
