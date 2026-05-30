@@ -266,10 +266,10 @@ class OrganisationFilterMixin:
     organisation_manytomany_field_names = {}
 
     def get_user_organisation(self, request):
-        organisation = CoreOrganisation.objects.get(pk=request.org_id)
-        if not OrganisationUser.objects.filter(
+        organisation = models.CoreOrganisation.objects.get(pk=request.org_id)
+        if not models.OrganisationUser.objects.filter(
                 user=request.user,
-                organisation=organisation.core).exists():
+                organisation=organisation).exists():
             return None
         return organisation
 
