@@ -166,7 +166,7 @@ def deduplicate_and_store(id, key, embedding, value, org_id, user_id, is_shared,
 
     org = CoreOrganisation.objects.get(id=org_id)
 
-    threshold = 0.85
+    threshold = 0.90
 
     # Step 1: find similar examples owned by same user (not org-shared ones)
     similar = find_similar_examples(
@@ -176,8 +176,11 @@ def deduplicate_and_store(id, key, embedding, value, org_id, user_id, is_shared,
 
     print(f"[DEDUP] Raw similar: {similar}")
 
+    # Exclude self from similar results — an example is always similar to itself
+    similar = [s for s in similar if s["id"] != id]
+
     if not similar:
-        print(f"[DEDUP] No similar found → inserting ID={id}")
+        print(f"[DEDUP] No other similar found → inserting/updating ID={id}")
         insert_example_vector(
             id=id,
             key=key,
