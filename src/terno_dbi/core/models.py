@@ -171,6 +171,11 @@ class Table(models.Model):
     public_name = models.CharField(max_length=255, null=True, blank=True)
     data_source = models.ForeignKey(DataSource, on_delete=models.CASCADE)
     description = models.CharField(max_length=500, null=True, blank=True)
+    notes = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Internal notes for this table."
+    )
     complete_description = models.BooleanField(
         default=False,
         help_text="Denotes if description is generated for the table and all its columns."
@@ -200,6 +205,7 @@ class Table(models.Model):
 
     def __str__(self):
         return f"{self.data_source.display_name} - {self.name}"
+    
 
 
 class TableColumn(models.Model):
