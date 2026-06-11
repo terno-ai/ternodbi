@@ -80,6 +80,7 @@ def list_tables(request, datasource_identifier):
             'id': table.id,
             'name': table.public_name,
             'description': table.description or "",
+            'notes': table.notes or "",
             'estimated_row_count': table.estimated_row_count
         })
 
@@ -90,6 +91,7 @@ def list_tables(request, datasource_identifier):
         table_data.append({
             'table_name': table.public_name,
             'table_description': table.description,
+            'table_notes': table.notes or "",
             'column_data': column_data
         })
 
