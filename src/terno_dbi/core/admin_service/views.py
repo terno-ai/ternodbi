@@ -184,6 +184,9 @@ def update_table(request, table_id):
         if "description" in body:
             table.description = body["description"]
             updated.append("description")
+        if "notes" in body:
+            table.notes = body["notes"]
+            updated.append("notes")
         if "is_hidden" in body:
             table.is_hidden = bool(body["is_hidden"])
             updated.append("is_hidden")
@@ -201,6 +204,7 @@ def update_table(request, table_id):
                 "name": table.public_name,
                 "actual_name": table.name,
                 "description": table.description,
+                "notes": table.notes,
                 "is_hidden": table.is_hidden,
             }
         })
@@ -273,7 +277,7 @@ def list_hidden(request, datasource_identifier):
 
     hidden_tables = models.Table.objects.filter(
         data_source=ds, is_hidden=True
-    ).values('id', 'name', 'public_name', 'description', 'metadata_updated_at')
+    ).values('id', 'name', 'public_name', 'description', 'notes','metadata_updated_at')
 
     hidden_columns = models.TableColumn.objects.filter(
         table__data_source=ds, is_hidden=True
@@ -414,6 +418,7 @@ def get_table_info(request, datasource_identifier, table_name):
         "table": {
             "name": table.public_name,
             "description": table.description,
+            "notes": table.notes,
             "columns": list(columns),
             "sample_rows": sample_rows
         }

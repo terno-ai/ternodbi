@@ -103,6 +103,7 @@ class TernoDBIClient:
         table_id: int,
         public_name: Optional[str] = None,
         description: Optional[str] = None,
+        notes:Optional[str] = None,
         is_hidden: Optional[bool] = None
     ) -> Dict:
         url = f"{self.base_url}/api/admin/tables/{table_id}/"
@@ -111,6 +112,8 @@ class TernoDBIClient:
             payload["public_name"] = public_name
         if description is not None:
             payload["description"] = description
+        if notes is not None:
+            payload["notes"] = notes
         if is_hidden is not None:
             payload["is_hidden"] = is_hidden
 
