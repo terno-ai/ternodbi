@@ -18,6 +18,7 @@ class TestAdminServer(unittest.IsolatedAsyncioTestCase):
         expected_tools = [
             "rename_table",
             "update_table_description",
+            "update_table_notes",
             "rename_column",
             "validate_connection",
             "add_datasource",
@@ -66,6 +67,22 @@ class TestAdminServer(unittest.IsolatedAsyncioTestCase):
             mock_client.update_table.return_value = {"ok": True}
             await call_tool("update_table_description", {"table_id": 1, "description": "Desc"})
             mock_client.update_table.assert_called_with(1, description="Desc")
+
+            # 4b. update_table_notes
+            mock_client.update_table.reset_mock()
+            mock_client.update_table.return_value = {"ok": True}
+            await call_tool(
+                "update_table_notes",
+                {
+                    "table_id": 1,
+                    "notes": "Important business logic"
+                }
+            )
+            mock_client.update_table.assert_called_with(
+                1,
+                notes="Important business logic"
+            )
+
 
             # 5. rename_column
             mock_client.update_column.return_value = {"ok": True}
