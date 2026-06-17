@@ -3,6 +3,8 @@ import os
 import requests
 import logging
 from typing import Dict, List, Optional, Any, Union
+import json
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -146,71 +148,73 @@ class TernoDBIClient:
         self,
         datasource: DatasourceIdentifier,
         sql: str,
-        pagination_mode: str = "offset",
-        page: int = 1,
-        per_page: int = 50,
-        cursor: Optional[str] = None,
-        direction: str = "forward",
-        order_by: Optional[List[Dict[str, str]]] = None,
-        limit: Optional[int] = None,
-        include_count: bool = False
+        max_rows: Optional[int] = None,
     ) -> Dict:
         url = f"{self.base_url}/api/query/datasources/{datasource}/query/"
 
-        if limit is not None:
-            per_page = limit
-
         payload = {
             "sql": sql,
-            "pagination_mode": pagination_mode,
-            "page": page,
-            "per_page": min(per_page, 500),
-            "include_count": include_count,
         }
 
-        if cursor:
-            payload["cursor"] = cursor
-        if direction != "forward":
-            payload["direction"] = direction
-        if order_by:
-            payload["order_by"] = order_by
+        if max_rows is not None:
+            payload["max_rows"] = max_rows
 
         response = requests.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
-    def iter_query(
+    def stream_query(
         self,
         datasource: DatasourceIdentifier,
         sql: str,
-        per_page: int = 100,
-        order_by: Optional[List[Dict[str, str]]] = None
+        max_rows: Optional[int] = None,
     ):
-        cursor = None
-        while True:
-            result = self.execute_query(
-                datasource,
-                sql,
-                pagination_mode="cursor",
-                per_page=per_page,
-                cursor=cursor,
-                order_by=order_by
-            )
 
-            if result.get("status") == "error":
-                raise Exception(result.get("error", "Query failed"))
+        url = f"{self.base_url}/api/query/datasources/{datasource}/stream/"
+        payload = {"sql": sql}
+        if max_rows is not None:
+            payload["max_rows"] = max_rows
 
-            table_data = result.get("table_data", {})
-            data = table_data.get("data", [])
+        resp = requests.post(
+            url, json=payload, headers=self._get_headers(),
+            timeout=600, stream=True
+        )
+        resp.raise_for_status()
 
-            if data:
-                yield data
+        columns = None
+        rows = []
+        row_count = 0
+        header_received = False
+        stopped_early = False
 
-            if not table_data.get("has_next"):
-                break
+        for line in resp.iter_lines(decode_unicode=True):
+            if not line or not line.strip():
+                continue
 
-            cursor = table_data.get("next_cursor")
-            if not cursor:
-                break
+            obj = json.loads(line.strip())
+
+            if "__error__" in obj:
+                raise Exception(obj["__error__"])
+            elif not header_received:
+                columns = obj.get("columns", [])
+                header_received = True
+            elif "__done__" in obj:
+                row_count = obj.get("row_count", len(rows))
+            else:
+                rows.append(obj)
+                if max_rows and len(rows) >= max_rows:
+                    stopped_early = True
+                    break
+
+        # Close the HTTP connection early if we stopped before consuming all data
+        if stopped_early:
+            resp.close()
+            row_count = len(rows)
+
+        if columns is None:
+            columns = list(rows[0].keys()) if rows else []
+
+        df = pd.DataFrame(rows, columns=columns) if rows else pd.DataFrame(columns=columns or [])
+        return df
 
     def find_similar_examples(self, query: str, org_id: Optional[int] = None, user_id: Optional[int] = None, threshold: float = 0.85, limit: int = 3) -> Dict:
         url = f"{self.base_url}/api/query/similar-examples/"

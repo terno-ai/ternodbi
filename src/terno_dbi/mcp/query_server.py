@@ -62,15 +62,9 @@ async def list_tools() -> List[Tool]:
         ),
         Tool(
             name="execute_query",
-            description="""Execute a SQL query with pagination support.
+            description="""Execute a SQL query using high-performance server-side streaming.
 
-Pagination Modes:
-- offset: Traditional page-based (default). Returns has_next/has_prev.
-- cursor: High-performance keyset pagination for large datasets. Requires ORDER BY in the SQL or an explicit order_by parameter.
-
-The response includes pagination_mode_used to indicate which mode was actually applied. If cursor mode is requested but no ordering can be determined, the system auto-falls back to offset mode.
-
-To get total row count, set include_count=true (off by default for performance).""",
+Returns columns and data rows. Use max_rows to limit the number of rows returned.""",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -82,43 +76,9 @@ To get total row count, set include_count=true (off by default for performance).
                         "type": "string",
                         "description": "SQL query to execute (can use public names)"
                     },
-                    "pagination_mode": {
-                        "type": "string",
-                        "enum": ["offset", "cursor"],
-                        "description": "Pagination strategy (default: offset)"
-                    },
-                    "page": {
+                    "max_rows": {
                         "type": "integer",
-                        "description": "Page number for offset mode (1-indexed, default: 1)"
-                    },
-                    "per_page": {
-                        "type": "integer",
-                        "description": "Rows per page (default: 50, max: 500)"
-                    },
-                    "cursor": {
-                        "type": "string",
-                        "description": "Cursor from previous response (for cursor mode)"
-                    },
-                    "direction": {
-                        "type": "string",
-                        "enum": ["forward", "backward"],
-                        "description": "Direction for cursor pagination (default: forward)"
-                    },
-                    "order_by": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "column": {"type": "string"},
-                                "direction": {"type": "string", "enum": ["ASC", "DESC"]}
-                            },
-                            "required": ["column"]
-                        },
-                        "description": "Explicit ordering columns for cursor mode. If omitted, ORDER BY is auto-detected from the SQL."
-                    },
-                    "include_count": {
-                        "type": "boolean",
-                        "description": "If true, includes total row_count in response (default: false). Expensive on large tables."
+                        "description": "Maximum number of rows to return (optional, returns all rows if not set)"
                     }
                 },
                 "required": ["datasource", "sql"]
@@ -202,23 +162,11 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         elif name == "execute_query":
             datasource = arguments["datasource"]
             sql = arguments["sql"]
-            pagination_mode = arguments.get("pagination_mode", "offset")
-            page = arguments.get("page", 1)
-            per_page = arguments.get("per_page", 50)
-            cursor = arguments.get("cursor")
-            direction = arguments.get("direction", "forward")
-            order_by = arguments.get("order_by")
-            include_count = arguments.get("include_count", False)
+            max_rows = arguments.get("max_rows")
             result = client.execute_query(
                 datasource,
                 sql,
-                pagination_mode=pagination_mode,
-                page=page,
-                per_page=per_page,
-                cursor=cursor,
-                direction=direction,
-                order_by=order_by,
-                include_count=include_count
+                max_rows=max_rows,
             )
 
         elif name == "get_sample_data":
