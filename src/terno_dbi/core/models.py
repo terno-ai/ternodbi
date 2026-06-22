@@ -599,3 +599,53 @@ class PromptExample(models.Model):
     def __str__(self):
         owner = self.created_by.username if self.created_by else "org-shared"
         return f"[{owner}] {self.key[:50]}"
+    
+
+
+#DBI Guide
+class DBIGuide(models.Model):
+    """
+    Generated datasource-level knowledge guide.
+    This is the synthesized documentation generated from:
+    - datasource metadata
+    - tables
+    - columns
+    - foreign keys
+    - notes
+    - prompt examples
+    """
+
+    datasource = models.OneToOneField(
+        DataSource,
+        on_delete=models.CASCADE,
+        related_name="dbi_guide"
+    )
+
+    content = models.TextField(
+        help_text="Generated markdown guide"
+    )
+
+    generated_at = models.DateTimeField(
+        auto_now=True
+    )
+
+    generated_by = models.CharField(
+        max_length=100,
+        default="llm"
+    )
+
+    metadata_snapshot_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When datasource metadata was used to generate this guide"
+    )
+    is_stale = models.BooleanField(
+        default=False,
+        help_text="True when datasource metadata changed after guide generation"
+    )
+
+    class Meta:
+        db_table = "terno_dbiguide"
+
+    def __str__(self):
+        return f"DBI Guide - {self.datasource.display_name}"

@@ -7,6 +7,7 @@ from django.views.decorators.csrf import csrf_exempt
 from terno_dbi.core.models import PromptExample
 from terno_dbi.vector_store.utils import find_similar_examples, sync_prompt_example, extract_examples_from_conversation
 from terno_dbi.llm.base import LLMFactory
+from terno_dbi.services.dbi_guide_service import get_dbi_guide
 
 from terno_dbi.core import models
 from terno_dbi.core import conf
@@ -543,3 +544,35 @@ def add_prompt_example(request):
     except Exception as e:
         logger.exception("Error adding prompt example")
         return JsonResponse({"status": "error", "error": str(e)}, status=500)
+    
+
+
+
+#End point for get_dbi_guide
+@require_service_auth()
+@require_http_methods(["GET"])
+def get_dbi_guide_view(request, datasource_identifier):
+
+    ds = request.resolved_datasource
+
+    guide = get_dbi_guide(ds.id)
+
+    if not guide:
+        return JsonResponse(
+            {
+                "status": "error",
+                "error": "Guide not found"
+            },
+            status=404
+        )
+
+    return JsonResponse(
+        {
+            "status": "success",
+            "datasource_id": ds.id,
+            "datasource_name": ds.display_name,
+            "generated_at": guide.generated_at,
+            "is_stale": guide.is_stale,
+            "guide": guide.content,
+        }
+    )

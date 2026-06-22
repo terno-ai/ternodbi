@@ -25,7 +25,8 @@ class TestAdminServer(unittest.IsolatedAsyncioTestCase):
             "delete_datasource",
             "get_table_info",
             "update_column_description",
-            "sync_metadata"
+            "sync_metadata",
+            "regenerate_dbi_guide", 
         ]
         
         for name in expected_tools:
@@ -109,6 +110,26 @@ class TestAdminServer(unittest.IsolatedAsyncioTestCase):
             await call_tool("update_column_description", {"column_id": 3, "description": "D"})
             mock_client.update_column.assert_called_with(3, description="D")
 
+            # 10. regenerate_dbi_guide
+            mock_client.regenerate_dbi_guide.return_value = {
+                "status": "success",
+                "guide_id": 12
+            }
+
+            result = await call_tool(
+                "regenerate_dbi_guide",
+                {
+                    "datasource_id": 4
+                }
+            )
+
+            mock_client.regenerate_dbi_guide.assert_called_with(4)
+
+            data = json.loads(result[0].text)
+
+            assert data["status"] == "success"
+            assert data["guide_id"] == 12
+
 
     async def test_call_tool_error(self):
         """Should handle client errors gracefully."""
@@ -141,3 +162,49 @@ class TestAdminServer(unittest.IsolatedAsyncioTestCase):
             with patch.object(server, 'run', new_callable=AsyncMock) as mock_run:
                 await run_server()
                 mock_run.assert_called_once()
+
+
+
+    async def test_regenerate_dbi_guide(self):
+
+        with patch("terno_dbi.mcp.admin_server.client") as mock_client:
+
+            mock_client.regenerate_dbi_guide.return_value = {
+                "status": "success",
+                "guide_id": 99
+            }
+
+            result = await call_tool(
+                "regenerate_dbi_guide",
+                {
+                    "datasource_id": 4
+                }
+            )
+
+            mock_client.regenerate_dbi_guide.assert_called_once_with(4)
+
+            data = json.loads(result[0].text)
+
+            assert data["status"] == "success"
+            assert data["guide_id"] == 99
+
+
+    async def test_regenerate_dbi_guide_error(self):
+
+        with patch("terno_dbi.mcp.admin_server.client") as mock_client:
+
+            mock_client.regenerate_dbi_guide.side_effect = Exception(
+                "Generation failed"
+            )
+
+            result = await call_tool(
+                "regenerate_dbi_guide",
+                {
+                    "datasource_id": 4
+                }
+            )
+
+            data = json.loads(result[0].text)
+
+            assert "error" in data
+            assert "Generation failed" in data["error"]

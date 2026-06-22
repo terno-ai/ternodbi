@@ -15,6 +15,13 @@ from django.test import RequestFactory
 
 from terno_dbi.core.models import DataSource, Table, TableColumn, ServiceToken
 
+from unittest.mock import patch, Mock
+from django.test import RequestFactory
+
+from terno_dbi.core.admin_service.views import (
+    regenerate_dbi_guide
+)
+
 
 @pytest.fixture
 def request_factory():
@@ -411,4 +418,87 @@ class TestGetTableInfo:
         assert response.status_code == 200
         data = json.loads(response.content)
         assert 'columns' in data or 'table' in data
+
+
+
+
+
+
+@patch(
+    "terno_dbi.core.admin_service.views.generate_dbi_guide"
+)
+def test_regenerate_dbi_guide_success(
+    mock_generate
+):
+    ds = Mock()
+    ds.id = 4
+
+    guide = Mock()
+    guide.id = 99
+    guide.generated_by = "gpt-5.5"
+    guide.generated_at = "2026-06-21T12:00:00Z"
+
+    mock_generate.return_value = guide
+
+    request = RequestFactory().post("/")
+
+    request.resolved_datasource = ds
+
+    func = regenerate_dbi_guide
+    while hasattr(func, "__wrapped__"):
+        func = func.__wrapped__
+
+    response = func(
+        request,
+        datasource_identifier=4
+    )
+
+    assert response.status_code == 200
+
+    data = json.loads(
+        response.content.decode()
+    )
+
+    assert data["status"] == "success"
+    assert data["guide_id"] == 99
+    assert data["generated_by"] == "gpt-5.5"
+
+    mock_generate.assert_called_once_with(4)
+
+
+@patch(
+    "terno_dbi.core.admin_service.views.generate_dbi_guide"
+)
+def test_regenerate_dbi_guide_failure(
+    mock_generate
+):
+    ds = Mock()
+    ds.id = 4
+
+    mock_generate.side_effect = Exception(
+        "Generation failed"
+    )
+
+    request = RequestFactory().post("/")
+
+    request.resolved_datasource = ds
+
+    func = regenerate_dbi_guide
+    while hasattr(func, "__wrapped__"):
+        func = func.__wrapped__
+
+    response = func(
+        request,
+        datasource_identifier=4
+    )
+
+    assert response.status_code == 500
+
+    data = json.loads(
+        response.content.decode()
+    )
+
+    assert data["status"] == "error"
+    assert data["error"] == "Generation failed"
+
 

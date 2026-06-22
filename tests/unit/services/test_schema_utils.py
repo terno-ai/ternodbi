@@ -690,6 +690,109 @@ class TestSyncMetadataFull:
         # Pass logic works.
 
 
+
+    @patch("terno_dbi.services.schema_utils.generate_dbi_guide")
+    @patch("terno_dbi.services.schema_utils.ConnectorFactory")
+    def test_sync_generates_dbi_guide_on_schema_change(
+        self,
+        mock_factory,
+        mock_generate_guide,
+        db
+    ):
+        from terno_dbi.services.schema_utils import sync_metadata
+        from terno_dbi.core.models import DataSource
+
+        ds = DataSource.objects.create(
+            display_name="guide_test",
+            type="postgres",
+            connection_str="postgresql://",
+            enabled=True,
+        )
+
+        mock_guide = MagicMock()
+        mock_guide.id = 123
+        mock_guide.generated_by = "gpt-4"
+
+        mock_generate_guide.return_value = mock_guide
+
+        mock_connector = MagicMock()
+        mock_factory.create_connector.return_value = mock_connector
+        mock_connector.get_dialect_info.return_value = ("postgres", "15")
+
+        mock_table = MagicMock()
+        mock_table.name = "customers"
+
+        mock_col = MagicMock()
+        mock_col.type = Integer()
+        mock_col.primary_key = False
+
+        mock_table.columns = {"id": mock_col}
+        mock_table.Foreign_Keys = []
+
+        mock_mdb = MagicMock()
+        mock_mdb.tables = {"customers": mock_table}
+
+        mock_connector.get_metadata.return_value = mock_mdb
+
+        result = sync_metadata(ds.id)
+
+        mock_generate_guide.assert_called_once_with(ds.id)
+
+        assert result["dbi_guide"]["status"] == "success"
+        assert result["dbi_guide"]["guide_id"] == 123
+
+
+    @patch("terno_dbi.services.schema_utils.generate_dbi_guide")
+    @patch("terno_dbi.services.schema_utils.ConnectorFactory")
+    def test_sync_handles_dbi_guide_failure(
+        self,
+        mock_factory,
+        mock_generate_guide,
+        db
+    ):
+        from terno_dbi.services.schema_utils import sync_metadata
+        from terno_dbi.core.models import DataSource
+
+        ds = DataSource.objects.create(
+            display_name="guide_fail",
+            type="postgres",
+            connection_str="postgresql://",
+            enabled=True,
+        )
+
+        mock_generate_guide.side_effect = Exception(
+            "LLM unavailable"
+        )
+
+        mock_connector = MagicMock()
+        mock_factory.create_connector.return_value = mock_connector
+        mock_connector.get_dialect_info.return_value = ("postgres", "15")
+
+        mock_table = MagicMock()
+        mock_table.name = "customers"
+
+        mock_col = MagicMock()
+        mock_col.type = Integer()
+        mock_col.primary_key = False
+
+        mock_table.columns = {"id": mock_col}
+        mock_table.Foreign_Keys = []
+
+        mock_mdb = MagicMock()
+        mock_mdb.tables = {"customers": mock_table}
+
+        mock_connector.get_metadata.return_value = mock_mdb
+
+        result = sync_metadata(ds.id)
+
+        assert result["tables_created"] == 1
+
+        assert result["dbi_guide"]["status"] == "error"
+        assert "LLM unavailable" in result["dbi_guide"]["error"]
+
+
+
+
 @pytest.mark.django_db
 class TestSyncFromInformationSchemaFallback:
     """Tests for sync fallback logic."""

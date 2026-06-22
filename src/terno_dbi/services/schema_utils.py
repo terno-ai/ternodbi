@@ -12,6 +12,8 @@ from sqlalchemy.sql.sqltypes import (
 from terno_dbi.connectors import ConnectorFactory
 from terno_dbi.core import models
 
+from terno_dbi.services.dbi_guide_service import generate_dbi_guide
+
 logger = logging.getLogger(__name__)
 
 
@@ -712,6 +714,34 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
             logger.info(f"Deleted {count} stale tables from data source {datasource.display_name}")
 
         result["tables_synced"] = result["tables_created"] + result["tables_updated"]
+
+        schema_changed = (
+            result["tables_created"] > 0
+            or result["tables_updated"] > 0
+            or result["columns_created"] > 0
+            or result["columns_deleted"] > 0
+            or result.get("tables_deleted", 0) > 0
+        )
+        if schema_changed:
+            try:
+                guide = generate_dbi_guide(datasource_id)
+
+                result["dbi_guide"] = {
+                    "status": "success",
+                    "guide_id": guide.id,
+                    "generated_by": guide.generated_by,
+                }
+
+            except Exception as e:
+                logger.exception(
+                    f"Error generating DBI guide for datasource {datasource_id}: {e}"
+                )
+
+                result["dbi_guide"] = {
+                    "status": "error",
+                    "error": str(e),
+                }
+
         return result
 
     except Exception as e:

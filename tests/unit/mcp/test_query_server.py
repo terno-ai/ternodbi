@@ -20,7 +20,8 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             "list_tables",
             "list_table_columns",
             "execute_query",
-            "get_sample_data"
+            "get_sample_data",
+            "get_dbi_guide",
         ]
         
         for name in expected_tools:
@@ -70,6 +71,26 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             await call_tool("get_sample_data", {"table_id": 5, "rows": 10})
             mock_client.get_sample_data.assert_called_with(5, 10)
 
+            # 6. get_dbi_guide
+            mock_guide = MagicMock()
+            mock_guide.content = "# Database Guide"
+
+            mock_client.get_dbi_guide.return_value = mock_guide
+
+            result = await call_tool(
+                "get_dbi_guide",
+                {
+                    "datasource_id": 4
+                }
+            )
+
+            mock_client.get_dbi_guide.assert_called_with(4)
+
+            data = json.loads(result[0].text)
+
+            assert data["status"] == "success"
+            assert data["guide"] == "# Database Guide"
+
 
     async def test_call_tool_pagination(self):
         """Should pass pagination arguments correctly."""
@@ -114,3 +135,34 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             with patch.object(server, 'run', new_callable=AsyncMock) as mock_run:
                 await run_server()
                 mock_run.assert_called_once()
+
+    
+    async def test_get_dbi_guide_not_found(self):
+        """Should return success with guide=None when guide does not exist."""
+
+        with patch('terno_dbi.mcp.query_server.client') as mock_client:
+
+            mock_client.get_dbi_guide.return_value = None
+
+            result = await call_tool(
+                "get_dbi_guide",
+                {
+                    "datasource_id": 4
+                }
+            )
+
+            mock_client.get_dbi_guide.assert_called_with(4)
+
+            data = json.loads(result[0].text)
+
+            assert data["status"] == "success"
+            assert data["guide"] is None
+
+    
+    async def test_get_dbi_guide_tool_registered(self):
+
+        tools = await list_tools()
+
+        tool_names = [tool.name for tool in tools]
+
+        assert "get_dbi_guide" in tool_names

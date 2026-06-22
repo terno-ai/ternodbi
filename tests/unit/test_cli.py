@@ -2,9 +2,11 @@ import pytest
 import sys
 import json
 from unittest.mock import patch, MagicMock
+from unittest.mock import Mock, patch
 from io import StringIO
 
 from terno_dbi.cli import main, print_welcome_message, create_default_superuser
+from terno_dbi.client import TernoDBIClient
 
 
 @pytest.mark.django_db
@@ -17,31 +19,53 @@ class TestCLI:
         assert "TernoDBI server is live and ready." in output
         assert "http://127.0.0.1:8000" in output
 
-    @patch('terno_dbi.cli.django.setup')
+    @patch("terno_dbi.cli.django.setup")
     def test_create_default_superuser_new(self, mock_setup):
-        with patch('terno_dbi.cli.get_user_model') as mock_get_user_model:
+
+        with patch("terno_dbi.cli.get_user_model") as mock_get_user_model, \
+            patch("terno_dbi.core.models.CoreOrganisation.objects.get_or_create") as mock_org, \
+            patch("terno_dbi.core.models.OrganisationUser.objects.get_or_create"):
+
             mock_user_model = MagicMock()
             mock_get_user_model.return_value = mock_user_model
-
-            # Simulate no superuser exists
             mock_user_model.objects.filter().exists.return_value = False
 
-            create_default_superuser()
-            mock_setup.assert_called_once()
-            mock_user_model.objects.create_superuser.assert_called_once_with('admin', 'admin@example.com', 'admin')
+            mock_org.return_value = (
+                MagicMock(),
+                True,
+            )
 
-    @patch('terno_dbi.cli.django.setup')
+            create_default_superuser()
+
+            mock_setup.assert_called_once()
+
+            mock_user_model.objects.create_superuser.assert_called_once_with(
+                "admin",
+                "admin@example.com",
+                "admin",
+            )
+
+    @patch("terno_dbi.cli.django.setup")
     def test_create_default_superuser_existing(self, mock_setup):
-        with patch('terno_dbi.cli.get_user_model') as mock_get_user_model:
+
+        with patch("terno_dbi.cli.get_user_model") as mock_get_user_model, \
+            patch("terno_dbi.core.models.CoreOrganisation.objects.get_or_create") as mock_org, \
+            patch("terno_dbi.core.models.OrganisationUser.objects.get_or_create"):
+
             mock_user_model = MagicMock()
             mock_get_user_model.return_value = mock_user_model
 
-            # Simulate superuser already exists
             mock_user_model.objects.filter().exists.return_value = True
 
-            create_default_superuser()
-            mock_user_model.objects.create_superuser.assert_not_called()
+            mock_org.return_value = (
+                MagicMock(),
+                False,
+            )
 
+            create_default_superuser()
+
+            mock_user_model.objects.create_superuser.assert_not_called()
+    
     @patch('sys.exit')
     def test_main_no_args(self, mock_exit, caplog):
         mock_exit.side_effect = SystemExit(1)

@@ -10,6 +10,9 @@ from terno_dbi.services import schema_utils
 from terno_dbi.services.shield import delete_cache
 from terno_dbi.services.query import execute_native_sql
 
+
+from terno_dbi.services.dbi_guide_service import (generate_dbi_guide,)
+
 logger = logging.getLogger(__name__)
 
 @csrf_exempt
@@ -425,3 +428,40 @@ def get_table_info(request, datasource_identifier, table_name):
     })
 
 
+
+
+@csrf_exempt
+@require_service_auth()
+@require_scope('admin:write')
+@require_http_methods(["POST"])
+def regenerate_dbi_guide(request, datasource_identifier):
+    ds = request.resolved_datasource
+
+    try:
+
+        guide = generate_dbi_guide(
+            ds.id
+        )
+
+        return JsonResponse(
+            {
+                "status": "success",
+                "guide_id": guide.id,
+                "generated_at": guide.generated_at,
+                "generated_by": guide.generated_by,
+            }
+        )
+
+    except Exception as e:
+
+        logger.exception(
+            "Guide regeneration failed"
+        )
+
+        return JsonResponse(
+            {
+                "status": "error",
+                "error": str(e),
+            },
+            status=500,
+        )

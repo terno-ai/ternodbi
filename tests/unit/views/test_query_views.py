@@ -12,8 +12,9 @@ import pytest
 import json
 import hashlib
 from unittest.mock import patch, MagicMock
+from unittest.mock import Mock, patch
 from django.test import RequestFactory
-
+from terno_dbi.core.query_service.views import (get_dbi_guide_view)
 from terno_dbi.core.models import DataSource, Table, TableColumn, ServiceToken
 
 
@@ -681,3 +682,126 @@ class TestExecuteQueryEdges:
         response = execute_query(request, setup_test_data['datasource'].id)
         assert response.status_code == 400
         assert 'Cannot transform' in response.content.decode()
+
+
+
+@pytest.mark.django_db
+@patch(
+    "terno_dbi.core.query_service.views.get_dbi_guide"
+)
+def test_get_dbi_guide_success(
+    mock_get_guide,
+    request_factory,
+    setup_test_data
+):
+
+    datasource = setup_test_data["datasource"]
+
+    guide = Mock()
+    guide.generated_at = "2026-06-18T12:00:00Z"
+    guide.is_stale = False
+    guide.content = "# Database Guide"
+
+    mock_get_guide.return_value = guide
+
+    request = request_factory.get(
+        f"/api/query/datasources/{datasource.id}/guide/"
+    )
+
+    setup_request_for_view(
+        request,
+        setup_test_data["token"],
+        datasource=datasource
+    )
+
+    response = get_dbi_guide_view(
+        request,
+        datasource.id
+    )
+
+    assert response.status_code == 200
+
+    data = json.loads(
+        response.content.decode()
+    )
+
+    assert data["status"] == "success"
+    assert data["datasource_id"] == datasource.id
+    assert data["datasource_name"] == datasource.display_name
+    assert data["guide"] == "# Database Guide"
+    assert data["is_stale"] is False
+
+
+
+@pytest.mark.django_db
+@patch(
+    "terno_dbi.core.query_service.views.get_dbi_guide"
+)
+def test_get_dbi_guide_not_found(
+    mock_get_guide,
+    request_factory,
+    setup_test_data
+):
+
+    datasource = setup_test_data["datasource"]
+
+    mock_get_guide.return_value = None
+
+    request = request_factory.get(
+        f"/api/query/datasources/{datasource.id}/guide/"
+    )
+
+    setup_request_for_view(
+        request,
+        setup_test_data["token"],
+        datasource=datasource
+    )
+
+    response = get_dbi_guide_view(
+        request,
+        datasource.id
+    )
+
+    assert response.status_code == 404
+
+    data = json.loads(
+        response.content.decode()
+    )
+
+    assert data["status"] == "error"
+    assert data["error"] == "Guide not found"
+
+
+@pytest.mark.django_db
+@patch(
+    "terno_dbi.core.query_service.views.get_dbi_guide"
+)
+def test_get_dbi_guide_called_with_datasource_id(
+    mock_get_guide,
+    request_factory,
+    setup_test_data
+):
+
+    datasource = setup_test_data["datasource"]
+
+    mock_get_guide.return_value = None
+
+    request = request_factory.get(
+        f"/api/query/datasources/{datasource.id}/guide/"
+    )
+
+    setup_request_for_view(
+        request,
+        setup_test_data["token"],
+        datasource=datasource
+    )
+
+    get_dbi_guide_view(
+        request,
+        datasource.id
+    )
+
+    mock_get_guide.assert_called_once_with(
+        datasource.id
+    )
+

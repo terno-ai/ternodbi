@@ -9,6 +9,9 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 from terno_dbi.client import TernoDBIClient
+from terno_dbi.services.dbi_guide_service import get_dbi_guide
+
+
 logger = logging.getLogger(__name__)
 
 client = TernoDBIClient()
@@ -165,6 +168,20 @@ To get total row count, set include_count=true (off by default for performance).
                 "required": ["query"]
             }
         ),
+        Tool(
+            name="get_dbi_guide",
+            description="Get generated DBI Guide for a datasource",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "datasource_id": {
+                        "type": "integer",
+                        "description": "Datasource ID"
+                    }
+                },
+                "required": ["datasource_id"]
+            }
+        )
 
     ]
 
@@ -220,6 +237,16 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 order_by=order_by,
                 include_count=include_count
             )
+
+        elif name == "get_dbi_guide":
+            datasource_id = arguments["datasource_id"]
+
+            guide = client.get_dbi_guide(datasource_id)
+            
+            result = {
+                "status": "success",
+                "guide": guide.content if guide else None
+            }
 
         elif name == "get_sample_data":
             table_id = arguments["table_id"]

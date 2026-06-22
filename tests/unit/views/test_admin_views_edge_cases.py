@@ -183,6 +183,7 @@ class TestUpdateTableEdgeCases:
         table.name = "actual_name"
         table.public_name = "Pub"
         table.description = "Desc"
+        table.notes = ""
         table.is_hidden = False
         request.resolved_table = table
         
@@ -345,6 +346,7 @@ class TestGetTableInfoEdgeCases:
         table = MagicMock()
         table.public_name = "T1"
         table.description = "Desc"
+        table.notes = ""
         
         with patch('terno_dbi.core.models.Table.objects.get', return_value=table), \
              patch('terno_dbi.core.models.TableColumn.objects.filter') as mock_cols, \

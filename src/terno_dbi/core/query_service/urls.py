@@ -17,4 +17,5 @@ urlpatterns = [
     path("similar-examples/", views.get_similar_examples_for_agent, name="similar_examples"),
     path("add-examples/", views.add_prompt_example, name="add_examples"),
     path("export/", views.export_query, name="export_query_legacy"),
+    path("datasources/<str:datasource_identifier>/guide/",views.get_dbi_guide_view,name="get_dbi_guide"),
 ]
