@@ -21,7 +21,7 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             "list_table_columns",
             "execute_query",
             "get_sample_data",
-            "get_dbi_guide",
+            "get_db_guide",
         ]
         
         for name in expected_tools:
@@ -75,16 +75,16 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             mock_guide = MagicMock()
             mock_guide.content = "# Database Guide"
 
-            mock_client.get_dbi_guide.return_value = mock_guide
+            mock_client.get_db_guide.return_value = mock_guide
 
             result = await call_tool(
-                "get_dbi_guide",
+                "get_db_guide",
                 {
                     "datasource_id": 4
                 }
             )
 
-            mock_client.get_dbi_guide.assert_called_with(4)
+            mock_client.get_db_guide.assert_called_with(4)
 
             data = json.loads(result[0].text)
 
@@ -137,21 +137,21 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
                 mock_run.assert_called_once()
 
     
-    async def test_get_dbi_guide_not_found(self):
+    async def test_get_db_guide_not_found(self):
         """Should return success with guide=None when guide does not exist."""
 
         with patch('terno_dbi.mcp.query_server.client') as mock_client:
 
-            mock_client.get_dbi_guide.return_value = None
+            mock_client.get_db_guide.return_value = None
 
             result = await call_tool(
-                "get_dbi_guide",
+                "get_db_guide",
                 {
                     "datasource_id": 4
                 }
             )
 
-            mock_client.get_dbi_guide.assert_called_with(4)
+            mock_client.get_db_guide.assert_called_with(4)
 
             data = json.loads(result[0].text)
 
@@ -159,10 +159,10 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             assert data["guide"] is None
 
     
-    async def test_get_dbi_guide_tool_registered(self):
+    async def test_get_db_guide_tool_registered(self):
 
         tools = await list_tools()
 
         tool_names = [tool.name for tool in tools]
 
-        assert "get_dbi_guide" in tool_names
+        assert "get_db_guide" in tool_names

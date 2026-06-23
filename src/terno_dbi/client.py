@@ -76,13 +76,13 @@ class TernoDBIClient:
         response = requests.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
-    #regenerate_dbi_guide
-    def regenerate_dbi_guide(
+    #regenerate_db_guide
+    def regenerate_db_guide(
         self,
         datasource: DatasourceIdentifier,
     ) -> Dict:
         logger.info(
-            "Regenerating DBI Guide for datasource: %s",
+            "Regenerating DB Guide for datasource: %s",
             datasource
         )
 
@@ -278,8 +278,8 @@ class TernoDBIClient:
         return data
     
 
-#get_dbi_guide
-    def get_dbi_guide(self, datasource):
+#get_db_guide
+    def get_db_guide(self, datasource):
         url = (
             f"{self.base_url}"
             f"/api/query/datasources/{datasource}/guide/"

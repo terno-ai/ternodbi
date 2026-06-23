@@ -15,7 +15,7 @@ from terno_dbi.core.models import (
     TableColumn,
     ForeignKey,
     PromptExample,
-    DBIGuide,
+    DBGuide,
 )
 
 
@@ -49,7 +49,7 @@ def get_backend_llm():
 
 def collect_datasource_metadata(datasource_id):
     """
-    Collect all metadata needed to generate a DBI Guide.
+    Collect all metadata needed to generate a DB Guide.
     """
 
     datasource = DataSource.objects.get(id=datasource_id)
@@ -230,7 +230,7 @@ def extract_business_rules(prompt_examples_qs):
 
 def build_compact_generation_context(metadata):
     """
-    Compact context for DBI Guide generation.
+    Compact context for DB Guide generation.
 
     Goal:
     - Keep prompt size reasonable.
@@ -285,16 +285,12 @@ def build_compact_generation_context(metadata):
 
     "table_count": tables_qs.count(),
 
-    "important_tables": [
-        {
-            "name": table.public_name or table.name,
-            "description": (table.description or "")[:150],
-            "key_columns": key_columns[:5],
-        }
-        for table in selected_tables
-    ]
-}
+    "column_count": columns_qs.count(),
 
+    "important_tables": important_tables,
+
+    "business_rules": business_rules,
+}
 # ------------------------------------------------------------
 # Prompt Builder
 # ------------------------------------------------------------
@@ -304,7 +300,7 @@ def build_guide_prompt(context):
     return f"""
 You are a senior analytics engineer.
 
-Generate a concise DBI Guide for AI agents.
+Generate a concise DB Guide for AI agents.
 
 The agent already has access to:
 - schema metadata
@@ -382,7 +378,7 @@ Provide:
 
 def save_guide(datasource, markdown, generated_by="llm"):
 
-    guide, _ = DBIGuide.objects.update_or_create(
+    guide, _ = DBGuide.objects.update_or_create(
         datasource=datasource,
         defaults={
             "content": markdown,
@@ -399,10 +395,10 @@ def save_guide(datasource, markdown, generated_by="llm"):
 # Main Entry Point
 # ------------------------------------------------------------
 
-def generate_dbi_guide(datasource_id):
+def generate_db_guide(datasource_id):
 
     logger.info(
-        "Starting DBI guide generation for datasource=%s",
+        "Starting DB guide generation for datasource=%s",
         datasource_id
     )
 
@@ -448,7 +444,7 @@ def generate_dbi_guide(datasource_id):
     except Exception as exc:
 
         logger.exception(
-            "DBI Guide generation failed"
+            "DB Guide generation failed"
         )
 
         markdown = f"""
@@ -475,7 +471,7 @@ def generate_dbi_guide(datasource_id):
         )
     
     logger.info(
-        "Saving DBI guide for datasource=%s",
+        "Saving DB guide for datasource=%s",
         datasource.id
     )
 
@@ -486,7 +482,7 @@ def generate_dbi_guide(datasource_id):
     )
 
     logger.info(
-        "DBI guide saved. guide_id=%s content_length=%s",
+        "DB guide saved. guide_id=%s content_length=%s",
         guide.id,
         len(guide.content)
     )
@@ -509,16 +505,16 @@ def generate_guide_markdown(context):
     - Important Tables: {len(context["important_tables"])}
     """
 
-def get_dbi_guide(datasource_id):
+def get_db_guide(datasource_id):
     """
-    Retrieve latest DBI Guide for datasource.
+    Retrieve latest DB Guide for datasource.
     """
 
     try:
-        return DBIGuide.objects.get(
+        return DBGuide.objects.get(
             datasource_id=datasource_id
         )
-    except DBIGuide.DoesNotExist:
+    except DBGuide.DoesNotExist:
         return None
 
 

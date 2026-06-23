@@ -8,7 +8,7 @@ from terno_dbi.client import TernoDBIClient
 
 
 @patch("terno_dbi.client.requests.post")
-def test_regenerate_dbi_guide(mock_post):
+def test_regenerate_db_guide(mock_post):
 
     response = Mock()
     response.raise_for_status.return_value = None
@@ -23,7 +23,7 @@ def test_regenerate_dbi_guide(mock_post):
         base_url="http://testserver"
     )
 
-    result = client.regenerate_dbi_guide(4)
+    result = client.regenerate_db_guide(4)
 
     mock_post.assert_called_once_with(
         "http://testserver/api/admin/datasources/4/guide/regenerate/",
@@ -37,7 +37,7 @@ def test_regenerate_dbi_guide(mock_post):
 
 
 @patch("terno_dbi.client.requests.get")
-def test_get_dbi_guide(mock_get):
+def test_get_db_guide(mock_get):
 
     response = Mock()
     response.raise_for_status.return_value = None
@@ -52,7 +52,7 @@ def test_get_dbi_guide(mock_get):
         base_url="http://testserver"
     )
 
-    result = client.get_dbi_guide(4)
+    result = client.get_db_guide(4)
 
     mock_get.assert_called_once_with(
         "http://testserver/api/query/datasources/4/guide/",
@@ -66,7 +66,7 @@ def test_get_dbi_guide(mock_get):
 
 
 @patch("terno_dbi.client.requests.get")
-def test_get_dbi_guide_api_error(mock_get):
+def test_get_db_guide_api_error(mock_get):
 
     response = Mock()
 
@@ -85,6 +85,6 @@ def test_get_dbi_guide_api_error(mock_get):
     )
 
     with pytest.raises(Exception) as exc:
-        client.get_dbi_guide(999)
+        client.get_db_guide(999)
 
     assert "Guide not found" in str(exc.value)

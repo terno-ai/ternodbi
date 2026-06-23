@@ -14,7 +14,7 @@ import hashlib
 from unittest.mock import patch, MagicMock
 from unittest.mock import Mock, patch
 from django.test import RequestFactory
-from terno_dbi.core.query_service.views import (get_dbi_guide_view)
+from terno_dbi.core.query_service.views import (get_db_guide_view)
 from terno_dbi.core.models import DataSource, Table, TableColumn, ServiceToken
 
 
@@ -687,9 +687,9 @@ class TestExecuteQueryEdges:
 
 @pytest.mark.django_db
 @patch(
-    "terno_dbi.core.query_service.views.get_dbi_guide"
+    "terno_dbi.core.query_service.views.get_db_guide"
 )
-def test_get_dbi_guide_success(
+def test_get_db_guide_success(
     mock_get_guide,
     request_factory,
     setup_test_data
@@ -714,7 +714,7 @@ def test_get_dbi_guide_success(
         datasource=datasource
     )
 
-    response = get_dbi_guide_view(
+    response = get_db_guide_view(
         request,
         datasource.id
     )
@@ -735,9 +735,9 @@ def test_get_dbi_guide_success(
 
 @pytest.mark.django_db
 @patch(
-    "terno_dbi.core.query_service.views.get_dbi_guide"
+    "terno_dbi.core.query_service.views.get_db_guide"
 )
-def test_get_dbi_guide_not_found(
+def test_get_db_guide_not_found(
     mock_get_guide,
     request_factory,
     setup_test_data
@@ -757,7 +757,7 @@ def test_get_dbi_guide_not_found(
         datasource=datasource
     )
 
-    response = get_dbi_guide_view(
+    response = get_db_guide_view(
         request,
         datasource.id
     )
@@ -774,9 +774,9 @@ def test_get_dbi_guide_not_found(
 
 @pytest.mark.django_db
 @patch(
-    "terno_dbi.core.query_service.views.get_dbi_guide"
+    "terno_dbi.core.query_service.views.get_db_guide"
 )
-def test_get_dbi_guide_called_with_datasource_id(
+def test_get_db_guide_called_with_datasource_id(
     mock_get_guide,
     request_factory,
     setup_test_data
@@ -796,7 +796,7 @@ def test_get_dbi_guide_called_with_datasource_id(
         datasource=datasource
     )
 
-    get_dbi_guide_view(
+    get_db_guide_view(
         request,
         datasource.id
     )

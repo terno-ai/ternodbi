@@ -691,9 +691,9 @@ class TestSyncMetadataFull:
 
 
 
-    @patch("terno_dbi.services.schema_utils.generate_dbi_guide")
+    @patch("terno_dbi.services.schema_utils.generate_db_guide")
     @patch("terno_dbi.services.schema_utils.ConnectorFactory")
-    def test_sync_generates_dbi_guide_on_schema_change(
+    def test_sync_generates_db_guide_on_schema_change(
         self,
         mock_factory,
         mock_generate_guide,
@@ -738,13 +738,13 @@ class TestSyncMetadataFull:
 
         mock_generate_guide.assert_called_once_with(ds.id)
 
-        assert result["dbi_guide"]["status"] == "success"
-        assert result["dbi_guide"]["guide_id"] == 123
+        assert result["db_guide"]["status"] == "success"
+        assert result["db_guide"]["guide_id"] == 123
 
 
-    @patch("terno_dbi.services.schema_utils.generate_dbi_guide")
+    @patch("terno_dbi.services.schema_utils.generate_db_guide")
     @patch("terno_dbi.services.schema_utils.ConnectorFactory")
-    def test_sync_handles_dbi_guide_failure(
+    def test_sync_handles_db_guide_failure(
         self,
         mock_factory,
         mock_generate_guide,
@@ -787,8 +787,8 @@ class TestSyncMetadataFull:
 
         assert result["tables_created"] == 1
 
-        assert result["dbi_guide"]["status"] == "error"
-        assert "LLM unavailable" in result["dbi_guide"]["error"]
+        assert result["db_guide"]["status"] == "error"
+        assert "LLM unavailable" in result["db_guide"]["error"]
 
 
 

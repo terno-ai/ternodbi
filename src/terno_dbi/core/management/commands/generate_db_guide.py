@@ -1,13 +1,13 @@
 from django.core.management.base import BaseCommand
 
-from terno_dbi.services.dbi_guide_service import (
-    generate_dbi_guide
+from terno_dbi.services.db_guide_service import (
+    generate_db_guide
 )
 
 
 class Command(BaseCommand):
 
-    help = "Generate DBI Guide"
+    help = "Generate DB Guide"
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -19,7 +19,7 @@ class Command(BaseCommand):
 
         datasource_id = options["datasource_id"]
 
-        guide = generate_dbi_guide(
+        guide = generate_db_guide(
             datasource_id
         )
 

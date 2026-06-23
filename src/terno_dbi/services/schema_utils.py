@@ -12,7 +12,7 @@ from sqlalchemy.sql.sqltypes import (
 from terno_dbi.connectors import ConnectorFactory
 from terno_dbi.core import models
 
-from terno_dbi.services.dbi_guide_service import generate_dbi_guide
+from terno_dbi.services.db_guide_service import generate_db_guide
 
 logger = logging.getLogger(__name__)
 
@@ -724,9 +724,9 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
         )
         if schema_changed:
             try:
-                guide = generate_dbi_guide(datasource_id)
+                guide = generate_db_guide(datasource_id)
 
-                result["dbi_guide"] = {
+                result["db_guide"] = {
                     "status": "success",
                     "guide_id": guide.id,
                     "generated_by": guide.generated_by,
@@ -734,10 +734,10 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
 
             except Exception as e:
                 logger.exception(
-                    f"Error generating DBI guide for datasource {datasource_id}: {e}"
+                    f"Error generating DB guide for datasource {datasource_id}: {e}"
                 )
 
-                result["dbi_guide"] = {
+                result["db_guide"] = {
                     "status": "error",
                     "error": str(e),
                 }

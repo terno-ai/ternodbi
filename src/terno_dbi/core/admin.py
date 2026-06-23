@@ -18,7 +18,7 @@ PARENT_APP_INSTALLED = apps.is_installed('terno')
 
 if not PARENT_APP_INSTALLED:
     from .models import (
-        DataSource, Table, TableColumn, ForeignKey, DBIGuide,
+        DataSource, Table, TableColumn, ForeignKey, DBGuide,
         PrivateTableSelector, GroupTableSelector,
         PrivateColumnSelector, GroupColumnSelector,
         GroupTableRowFilter, TableRowFilter,
@@ -147,8 +147,8 @@ if not PARENT_APP_INSTALLED:
         raw_id_fields = ('constrained_table', 'constrained_columns', 'referred_table', 'referred_columns')
 
     
-    @admin.register(DBIGuide)
-    class DBIGuideAdmin(reversion.admin.VersionAdmin):
+    @admin.register(DBGuide)
+    class DBGuideAdmin(reversion.admin.VersionAdmin):
         list_display = (
             "datasource",
             "generated_by",

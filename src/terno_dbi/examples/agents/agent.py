@@ -97,9 +97,6 @@ IMPORTANT:
 - Action Input must be a valid JSON dictionary. e.g. {{"datasource_id": 1}}
 - Do not output the "Observation:" part yourself. I will provide it.
 - Always check available datasources first if you don't know the ID.
-- Do not answer business questions using only table names and column names when a DBI Guide is available.
-- Before writing SQL for a datasource, use get_dbi_guide to understand: business meaning of the datasource, key dimensions, important metrics, business rules, common analytical use cases
-- Use the DBI Guide the source of truth for business meaning instead of guessing table meanings. 
 - Use get_sample_data to preview table contents before writing complex queries.
 """
 

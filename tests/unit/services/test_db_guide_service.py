@@ -5,15 +5,15 @@ from terno_dbi.core.models import (
     Table,
     TableColumn,
     ForeignKey,
-    DBIGuide,
+    DBGuide,
 )
-from terno_dbi.services.dbi_guide_service import (
+from terno_dbi.services.db_guide_service import (
     collect_datasource_metadata,
     build_compact_generation_context,
     build_guide_prompt,
     save_guide,
-    get_dbi_guide,
-    generate_dbi_guide,
+    get_db_guide,
+    generate_db_guide,
     get_key_columns,
 )
 
@@ -137,12 +137,11 @@ def test_build_prompt():
 
     prompt = build_guide_prompt(context)
 
-    assert "Database Guide" in prompt
-    assert "Executive Summary" in prompt
-    assert "Primary Business Use Cases" in prompt
-    assert "Key Business Dimensions" in prompt
-    assert "Important Tables" in prompt
-
+    assert "Datasource Purpose" in prompt
+    assert "Metadata Summary" in prompt
+    assert "Key Dimensions" in prompt
+    assert "Key Tables" in prompt
+    assert "Analyst Notes" in prompt
 
 @pytest.mark.django_db
 def test_context_contains_key_columns():
@@ -184,8 +183,8 @@ def test_context_contains_key_columns():
 
 
 @pytest.mark.django_db
-@patch("terno_dbi.services.dbi_guide_service.get_backend_llm")
-def test_generate_dbi_guide_fallback(
+@patch("terno_dbi.services.db_guide_service.get_backend_llm")
+def test_generate_db_guide_fallback(
     mock_llm
 ):
 
@@ -198,11 +197,11 @@ def test_generate_dbi_guide_fallback(
         type="sqlite",
     )
 
-    guide = generate_dbi_guide(ds.id)
+    guide = generate_db_guide(ds.id)
 
     assert guide.generated_by == "fallback"
 
-    assert "Generation failed" in guide.content
+    assert "Guide generation failed" in guide.content
 
 
 
@@ -227,7 +226,7 @@ def test_save_guide():
 
 
 @pytest.mark.django_db
-def test_get_dbi_guide():
+def test_get_db_guide():
 
     ds = DataSource.objects.create(
         display_name="Test",
@@ -240,7 +239,7 @@ def test_get_dbi_guide():
         "pytest"
     )
 
-    guide = get_dbi_guide(ds.id)
+    guide = get_db_guide(ds.id)
 
     assert guide is not None
     assert guide.content == "# Guide"
@@ -253,9 +252,9 @@ from unittest.mock import patch
 
 @pytest.mark.django_db
 @patch(
-    "terno_dbi.services.dbi_guide_service.get_backend_llm"
+    "terno_dbi.services.db_guide_service.get_backend_llm"
 )
-def test_generate_dbi_guide(mock_llm):
+def test_generate_db_guide(mock_llm):
 
     fake_llm = mock_llm.return_value
 
@@ -270,7 +269,7 @@ def test_generate_dbi_guide(mock_llm):
         type="sqlite"
     )
 
-    guide = generate_dbi_guide(ds.id)
+    guide = generate_db_guide(ds.id)
 
     assert guide.content == "# Generated Guide"
     assert guide.generated_by == "fake-model"

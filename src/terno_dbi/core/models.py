@@ -602,8 +602,8 @@ class PromptExample(models.Model):
     
 
 
-#DBI Guide
-class DBIGuide(models.Model):
+#DB Guide
+class DBGuide(models.Model):
     """
     Generated datasource-level knowledge guide.
     This is the synthesized documentation generated from:
@@ -618,7 +618,7 @@ class DBIGuide(models.Model):
     datasource = models.OneToOneField(
         DataSource,
         on_delete=models.CASCADE,
-        related_name="dbi_guide"
+        related_name="db_guide"
     )
 
     content = models.TextField(
@@ -645,7 +645,7 @@ class DBIGuide(models.Model):
     )
 
     class Meta:
-        db_table = "terno_dbiguide"
+        db_table = "terno_dbguide"
 
     def __str__(self):
-        return f"DBI Guide - {self.datasource.display_name}"
+        return f"DB Guide - {self.datasource.display_name}"

@@ -13,7 +13,7 @@ from terno_dbi.core.models import (
     DataSource, Table, TableColumn, ForeignKey,
     GroupTableRowFilter, ServiceToken, PrivateTableSelector,
     GroupTableSelector, PrivateColumnSelector, GroupColumnSelector,
-    DBIGuide
+    DBGuide
 )
 
 
@@ -58,9 +58,9 @@ def column(table):
 
 
 @pytest.fixture
-def dbi_guide(datasource):
-    """Create a test DBI guide."""
-    return DBIGuide.objects.create(
+def db_guide(datasource):
+    """Create a test DB guide."""
+    return DBGuide.objects.create(
         datasource=datasource,
         content="# Test Guide",
         generated_by="gpt-5.5"
@@ -325,13 +325,13 @@ class TestSelectorModels:
     
 
 @pytest.mark.django_db
-class TestDBIGuideModel:
-    """Tests for DBIGuide model."""
+class TestDBGuideModel:
+    """Tests for DBGuide model."""
 
-    def test_create_dbi_guide(self, datasource):
-        """Should create DBI guide successfully."""
+    def test_create_db_guide(self, datasource):
+        """Should create DB guide successfully."""
 
-        guide = DBIGuide.objects.create(
+        guide = DBGuide.objects.create(
             datasource=datasource,
             content="# Test Guide"
         )
@@ -343,19 +343,19 @@ class TestDBIGuideModel:
     def test_str_representation(self, datasource):
         """__str__ should return datasource name."""
 
-        guide = DBIGuide.objects.create(
+        guide = DBGuide.objects.create(
             datasource=datasource,
             content="Guide"
         )
 
         assert str(guide) == (
-            f"DBI Guide - {datasource.display_name}"
+            f"DB Guide - {datasource.display_name}"
         )
 
     def test_default_values(self, datasource):
         """Verify model defaults."""
 
-        guide = DBIGuide.objects.create(
+        guide = DBGuide.objects.create(
             datasource=datasource,
             content="Guide"
         )
@@ -367,7 +367,7 @@ class TestDBIGuideModel:
     def test_metadata_snapshot_nullable(self, datasource):
         """metadata_snapshot_at should be nullable."""
 
-        guide = DBIGuide.objects.create(
+        guide = DBGuide.objects.create(
             datasource=datasource,
             content="Guide"
         )
@@ -379,7 +379,7 @@ class TestDBIGuideModel:
 
         now = timezone.now()
 
-        guide = DBIGuide.objects.create(
+        guide = DBGuide.objects.create(
             datasource=datasource,
             content="Guide",
             metadata_snapshot_at=now
@@ -390,7 +390,7 @@ class TestDBIGuideModel:
     def test_mark_stale(self, datasource):
         """Guide can be marked stale."""
 
-        guide = DBIGuide.objects.create(
+        guide = DBGuide.objects.create(
             datasource=datasource,
             content="Guide"
         )
@@ -405,13 +405,13 @@ class TestDBIGuideModel:
     def test_one_to_one_constraint(self, datasource):
         """Only one guide should exist per datasource."""
 
-        DBIGuide.objects.create(
+        DBGuide.objects.create(
             datasource=datasource,
             content="Guide 1"
         )
 
         with pytest.raises(Exception):
-            DBIGuide.objects.create(
+            DBGuide.objects.create(
                 datasource=datasource,
                 content="Guide 2"
             )
@@ -419,7 +419,7 @@ class TestDBIGuideModel:
     def test_delete_datasource_cascades_guide(self, datasource):
         """Deleting datasource should delete guide."""
 
-        guide = DBIGuide.objects.create(
+        guide = DBGuide.objects.create(
             datasource=datasource,
             content="Guide"
         )
@@ -428,6 +428,6 @@ class TestDBIGuideModel:
 
         datasource.delete()
 
-        assert not DBIGuide.objects.filter(
+        assert not DBGuide.objects.filter(
             id=guide_id
         ).exists()

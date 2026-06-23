@@ -11,7 +11,7 @@ from terno_dbi.services.shield import delete_cache
 from terno_dbi.services.query import execute_native_sql
 
 
-from terno_dbi.services.dbi_guide_service import (generate_dbi_guide,)
+from terno_dbi.services.db_guide_service import (generate_db_guide,)
 
 logger = logging.getLogger(__name__)
 
@@ -434,12 +434,12 @@ def get_table_info(request, datasource_identifier, table_name):
 @require_service_auth()
 @require_scope('admin:write')
 @require_http_methods(["POST"])
-def regenerate_dbi_guide(request, datasource_identifier):
+def regenerate_db_guide(request, datasource_identifier):
     ds = request.resolved_datasource
 
     try:
 
-        guide = generate_dbi_guide(
+        guide = generate_db_guide(
             ds.id
         )
 

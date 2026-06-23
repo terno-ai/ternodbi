@@ -215,8 +215,8 @@ async def list_tools() -> List[Tool]:
             }
         ),
         Tool(
-        name="regenerate_dbi_guide",
-        description="Generate or regenerate a datasource DBI Guide",
+        name="regenerate_db_guide",
+        description="Generate or regenerate a datasource DB Guide",
         inputSchema={
             "type": "object",
             "properties": {
@@ -293,9 +293,9 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             overwrite = arguments.get("overwrite", False)
             result = client.sync_metadata(datasource_id, overwrite=overwrite)
 
-        elif name == "regenerate_dbi_guide":
+        elif name == "regenerate_db_guide":
             datasource_id = arguments["datasource_id"]
-            result = client.regenerate_dbi_guide(datasource_id)
+            result = client.regenerate_db_guide(datasource_id)
 
         else:
             result = {"error": f"Unknown tool: {name}"}

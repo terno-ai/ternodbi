@@ -19,7 +19,7 @@ from unittest.mock import patch, Mock
 from django.test import RequestFactory
 
 from terno_dbi.core.admin_service.views import (
-    regenerate_dbi_guide
+    regenerate_db_guide
 )
 
 
@@ -425,9 +425,9 @@ class TestGetTableInfo:
 
 
 @patch(
-    "terno_dbi.core.admin_service.views.generate_dbi_guide"
+    "terno_dbi.core.admin_service.views.generate_db_guide"
 )
-def test_regenerate_dbi_guide_success(
+def test_regenerate_db_guide_success(
     mock_generate
 ):
     ds = Mock()
@@ -444,7 +444,7 @@ def test_regenerate_dbi_guide_success(
 
     request.resolved_datasource = ds
 
-    func = regenerate_dbi_guide
+    func = regenerate_db_guide
     while hasattr(func, "__wrapped__"):
         func = func.__wrapped__
 
@@ -467,9 +467,9 @@ def test_regenerate_dbi_guide_success(
 
 
 @patch(
-    "terno_dbi.core.admin_service.views.generate_dbi_guide"
+    "terno_dbi.core.admin_service.views.generate_db_guide"
 )
-def test_regenerate_dbi_guide_failure(
+def test_regenerate_db_guide_failure(
     mock_generate
 ):
     ds = Mock()
@@ -483,7 +483,7 @@ def test_regenerate_dbi_guide_failure(
 
     request.resolved_datasource = ds
 
-    func = regenerate_dbi_guide
+    func = regenerate_db_guide
     while hasattr(func, "__wrapped__"):
         func = func.__wrapped__
 
