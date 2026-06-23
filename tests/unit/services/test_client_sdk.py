@@ -350,6 +350,32 @@ class TestClientMethods:
         
         assert 'data' in result
 
+    @responses.activate
+    def test_list_examples(self):
+        """Should call the list-examples endpoint with query params."""
+        from terno_dbi.client import TernoDBIClient
+
+        responses.add(
+            responses.GET,
+            'https://test.com/api/query/list-examples/',
+            json={
+                'status': 'success',
+                'examples': [{'id': 1, 'key': 'k', 'value': 'v'}],
+                'count': 1,
+                'total': 1,
+            },
+            status=200
+        )
+
+        client = TernoDBIClient(base_url='https://test.com', api_key='key')
+        result = client.list_examples(org_id=1, user_id=5, limit=10, offset=0)
+
+        assert len(responses.calls) == 1
+        sent_url = responses.calls[0].request.url
+        assert 'org_id=1' in sent_url
+        assert 'user_id=5' in sent_url
+        assert 'limit=10' in sent_url
+        assert result['total'] == 1
 
 
 class TestClientErrorHandling:

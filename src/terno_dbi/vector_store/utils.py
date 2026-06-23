@@ -83,8 +83,8 @@ IMPORTANT RULES:
 - ONLY extract information explicitly stated by the user in their messages
 - DO NOT extract SQL queries, code, or agent-generated content
 - DO NOT extract generic questions that don't contain domain-specific knowledge
-- Key should be a natural question that a future user might ask (this is used for semantic matching)
-- Value should be the domain knowledge, business rule, or contextual information that helps answer the question
+- Key should be a generalized question pattern, not the specific question asked. Replace any specific values (dates, names, numbers, metric names) with generic placeholders.
+- If the value contains only generic conceptual knowledge (definitions, common formulas) that any LLM already knows without domain context, skip that example entirely and do not include it.
 - Focus on: business terminology, internal naming conventions, calculation logic, filtering rules, entity relationships, data interpretation rules
 - If the user hasn't provided any meaningful domain knowledge, return an empty list []
 
@@ -120,19 +120,19 @@ def compress_examples(organisation, new_example: dict, similar_examples, llm):
     ])
 
     prompt = f"""
-You are expert in optimizing prompt examples. Prompt examples are question-answer pairs that store domain knowledge, business rules, and internal logic. They are stored in a vector store and fetched by semantic matching on the key (question), with the value (answer) injected as few-shot context.
+You are an expert at consolidating prompt examples. Each example is a question-answer pair (key-value) storing domain knowledge, business rules, or internal logic. Keys are embedded and semantically matched against future user queries; values are injected as few-shot context.
 
-CONTEXT:
-- Keys are used for semantic search (embedding match)
-- Values contain domain knowledge, business rules, and contextual information
+You are given a CLUSTER of semantically similar examples (existing + one new). Consolidate them into the smallest set of non-redundant examples.
 
-STRICT RULES:
-- Always return at least 1 example
-- NEVER return empty list
-- Merge nearly identical examples into one with combined information (key and value both). Don't just pick one and drop others.
-- Values should be concise and clean
-- Keep minimum number of examples
-- Preserve all unique information in values
+MERGING CRITERIA:
+- Merge examples that describe the SAME domain context — i.e. the same dataset, entity, or metric — even if they phrase different sub-questions about it. Combine their values into one richer answer and write a single key that covers the combined knowledge.
+- Keep examples SEPARATE only when they concern UNRELATED domains/metrics (e.g. a Nielsen sales-value rule vs a fill-rate rule).
+- When merging, preserve every unique, non-conflicting detail from each value. If the new example contradicts an old fact, the new one wins.
+
+KEY:
+- Write each key as a natural question a user might actually ask (it is embedding-matched against user queries).
+VALUE:
+- Concise, clean, factual.
 
 Existing examples:
 {examples_text}
@@ -166,7 +166,7 @@ def deduplicate_and_store(id, key, embedding, value, org_id, user_id, is_shared,
 
     org = CoreOrganisation.objects.get(id=org_id)
 
-    threshold = 0.90
+    threshold = 0.80
 
     # Step 1: find similar examples owned by same user (not org-shared ones)
     similar = find_similar_examples(
@@ -276,6 +276,9 @@ def find_similar_examples(embedding, org_id, user_id=None, threshold=0.75, limit
     print(f"[MILVUS SEARCH] Running search for org_id={org_id}, user_id={user_id}")
     client = get_milvus_client()
     collection = "query_example"
+    
+    get_or_create_example_collection()
+    client.load_collection(collection)
 
     if user_id:
         # Layered: user's own memories + org-level shared memories
@@ -299,15 +302,18 @@ def find_similar_examples(embedding, org_id, user_id=None, threshold=0.75, limit
     print(f"Raw search results for examples: {results}")
 
     for i, hit in enumerate(results[0]):
-        print(hit["distance"], hit["entity"]["key"], hit["entity"]["value"])
-        if hit["distance"] > threshold:
+        cosine_distance = hit["distance"]
+        cosine_similarity = 1-cosine_distance
+        
+        print(cosine_similarity, hit["entity"]["key"], hit["entity"]["value"])
+        if cosine_similarity > threshold:
             matches.append({
                 "id": hit["id"],
                 "key": hit["entity"]["key"],
                 "value": hit["entity"]["value"],
                 "user_id": hit["entity"].get("user_id", 0),
                 "is_shared": hit["entity"].get("is_shared", False),
-                "similarity": hit["distance"]
+                "similarity": cosine_similarity
             })
 
     matches = sorted(matches, key=lambda x: x["similarity"], reverse=True)

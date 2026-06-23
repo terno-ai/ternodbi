@@ -165,6 +165,30 @@ To get total row count, set include_count=true (off by default for performance).
                 "required": ["query"]
             }
         ),
+        Tool(
+            name="list_prompt_examples",
+            description="List all prompt examples (domain knowledge, business rules) available for the organisation.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "user_id": {
+                        "type": "integer",
+                        "description": "Optional: include this user's private examples alongside org-shared ones"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of examples to return (default: 100)",
+                        "default": 100
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Number of examples to skip for pagination (default: 0)",
+                        "default": 0
+                    }
+                },
+                "required": []
+            }
+        ),
 
     ]
 
@@ -232,6 +256,13 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             result = client.find_similar_examples(
                 query=query_str,
                 limit=limit
+            )
+
+        elif name == "list_prompt_examples":
+            result = client.list_examples(
+                user_id=arguments.get("user_id"),
+                limit=arguments.get("limit", 100),
+                offset=arguments.get("offset", 0)
             )
 
         else:

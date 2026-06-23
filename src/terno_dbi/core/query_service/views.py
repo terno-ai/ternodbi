@@ -3,6 +3,7 @@ import logging
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
+from django.db.models import Q
 
 from terno_dbi.core.models import PromptExample
 from terno_dbi.vector_store.utils import find_similar_examples, sync_prompt_example, extract_examples_from_conversation
@@ -540,4 +541,77 @@ def add_prompt_example(request):
         return JsonResponse({"status": "error", "error": "Invalid JSON"}, status=400)
     except Exception as e:
         logger.exception("Error adding prompt example")
+        return JsonResponse({"status": "error", "error": str(e)}, status=500)
+
+
+@require_service_auth()
+@require_http_methods(["GET"])
+def list_prompt_examples(request):
+    """List all prompt examples (domain knowledge / business rules) for an organisation.
+
+    Returns org-shared examples plus, when ``user_id`` is supplied, that user's own
+    private examples. Supports optional pagination via ``limit`` and ``offset``.
+    """
+    try:
+        org_id = request.GET.get("org_id")
+        if not org_id and getattr(request, 'token_organisation', None):
+            org_id = request.token_organisation.id
+
+        if not org_id:
+            return JsonResponse({"status": "error", "error": "org_id is required"}, status=400)
+
+        try:
+            org = models.CoreOrganisation.objects.get(id=org_id)
+        except models.CoreOrganisation.DoesNotExist:
+            return JsonResponse({"status": "error", "error": "Organisation not found"}, status=404)
+
+        examples = PromptExample.objects.filter(organisation=org)
+
+        user_id = request.GET.get("user_id")
+        if not user_id:
+            user_id = getattr(request.service_token, "created_by_id", None)
+
+        if user_id:
+            # This user's own examples PLUS org-shared knowledge.
+            examples = examples.filter(Q(is_shared=True) | Q(created_by_id=user_id))
+        else:
+            # No user context at all -> only org-shared knowledge.
+            examples = examples.filter(is_shared=True)
+
+        examples = examples.order_by("-updated_at")
+
+        total = examples.count()
+
+        try:
+            limit = min(int(request.GET.get("limit", 100)), 500)
+        except ValueError:
+            limit = 100
+        try:
+            offset = max(int(request.GET.get("offset", 0)), 0)
+        except ValueError:
+            offset = 0
+
+        page = examples[offset:offset + limit]
+
+        data = [
+            {
+                "id": ex.id,
+                "key": ex.key,
+                "value": ex.value,
+                "is_shared": ex.is_shared,
+                "created_by": ex.created_by_id,
+                "created_at": ex.created_at.isoformat() if ex.created_at else None,
+                "updated_at": ex.updated_at.isoformat() if ex.updated_at else None,
+            }
+            for ex in page
+        ]
+
+        return JsonResponse({
+            "status": "success",
+            "examples": data,
+            "count": len(data),
+            "total": total,
+        })
+    except Exception as e:
+        logger.exception("Error listing prompt examples")
         return JsonResponse({"status": "error", "error": str(e)}, status=500)

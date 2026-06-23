@@ -241,6 +241,18 @@ class TernoDBIClient:
         response = requests.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
+    def list_examples(self, org_id: Optional[int] = None, user_id: Optional[int] = None,
+                      limit: int = 100, offset: int = 0) -> Dict:
+        url = f"{self.base_url}/api/query/list-examples/"
+        params: Dict[str, Any] = {"limit": limit, "offset": offset}
+        if org_id is not None:
+            params["org_id"] = org_id
+        if user_id is not None:
+            params["user_id"] = user_id
+
+        response = requests.get(url, params=params, headers=self._get_headers())
+        return self._handle_response(response)
+
     def get_sample_data(self, table_id: int, rows: int = 10) -> Dict:
         url = f"{self.base_url}/api/query/tables/{table_id}/sample/"
         response = requests.get(

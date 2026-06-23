@@ -20,7 +20,8 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             "list_tables",
             "list_table_columns",
             "execute_query",
-            "get_sample_data"
+            "get_sample_data",
+            "list_prompt_examples",
         ]
         
         for name in expected_tools:
@@ -69,6 +70,15 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             mock_client.get_sample_data.return_value = []
             await call_tool("get_sample_data", {"table_id": 5, "rows": 10})
             mock_client.get_sample_data.assert_called_with(5, 10)
+            
+            # 6. list_prompt_examples
+            mock_client.list_examples.return_value = {"examples": [], "total": 0}
+            await call_tool("list_prompt_examples", {
+                "user_id": 5, "limit": 10, "offset": 0
+            })
+            mock_client.list_examples.assert_called_with(
+                user_id=5, limit=10, offset=0
+            )
 
 
     async def test_call_tool_pagination(self):

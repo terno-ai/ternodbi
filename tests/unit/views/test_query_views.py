@@ -14,7 +14,7 @@ import hashlib
 from unittest.mock import patch, MagicMock
 from django.test import RequestFactory
 
-from terno_dbi.core.models import DataSource, Table, TableColumn, ServiceToken
+from terno_dbi.core.models import DataSource, Table, TableColumn, ServiceToken, CoreOrganisation, PromptExample
 
 
 @pytest.fixture
@@ -650,3 +650,90 @@ class TestExecuteQueryEdges:
         response = execute_query(request, setup_test_data['datasource'].id)
         assert response.status_code == 400
         assert 'Cannot transform' in response.content.decode()
+
+
+class TestListPromptExamples:
+    """Tests for /api/query/list-examples/"""
+
+    def _make_org(self, setup_test_data):
+        """Org with 2 shared examples + 1 private example owned by a SEPARATE user.
+
+        The token's owner (queryviewuser) is intentionally NOT the private
+        example's owner, so the view's token-based user fallback doesn't pick it up.
+        """
+        from django.contrib.auth.models import User
+
+        owner = setup_test_data['user']
+        org = CoreOrganisation.objects.create(name='Acme', subdomain='acme', owner=owner)
+        other_user = User.objects.create_user('exampleowner', 'owner@example.com', 'pw')
+
+        PromptExample.objects.create(
+            organisation=org, key='fiscal year', value='Starts in April', is_shared=True
+        )
+        PromptExample.objects.create(
+            organisation=org, key='revenue', value='Use net revenue', is_shared=True
+        )
+        PromptExample.objects.create(
+            organisation=org, key='my note', value='private', is_shared=False, created_by=other_user
+        )
+        return org, other_user
+
+    def test_returns_shared_examples_only(self, request_factory, setup_test_data):
+        """No user_id, and token owner owns no private examples -> only shared returned."""
+        from terno_dbi.core.query_service.views import list_prompt_examples
+
+        org, _ = self._make_org(setup_test_data)
+        request = request_factory.get(f'/api/query/list-examples/?org_id={org.id}')
+        setup_request_for_view(request, setup_test_data['token'])
+
+        response = list_prompt_examples(request)
+
+        assert response.status_code == 200
+        data = json.loads(response.content)
+        assert data['status'] == 'success'
+        assert data['total'] == 2
+        assert {e['key'] for e in data['examples']} == {'fiscal year', 'revenue'}
+
+    def test_includes_private_with_user_id(self, request_factory, setup_test_data):
+        """Passing the private example's owner id returns shared + that user's private."""
+        from terno_dbi.core.query_service.views import list_prompt_examples
+
+        org, other_user = self._make_org(setup_test_data)
+        request = request_factory.get(
+            f'/api/query/list-examples/?org_id={org.id}&user_id={other_user.id}'
+        )
+        setup_request_for_view(request, setup_test_data['token'])
+
+        response = list_prompt_examples(request)
+
+        assert response.status_code == 200
+        data = json.loads(response.content)
+        assert data['total'] == 3
+
+    def test_requires_org_id(self, request_factory, setup_test_data):
+        """Missing org_id (and no token org) returns 400."""
+        from terno_dbi.core.query_service.views import list_prompt_examples
+
+        request = request_factory.get('/api/query/list-examples/')
+        setup_request_for_view(request, setup_test_data['token'])
+
+        response = list_prompt_examples(request)
+
+        assert response.status_code == 400
+        assert 'org_id' in json.loads(response.content)['error']
+
+    def test_pagination_limits_results(self, request_factory, setup_test_data):
+        """limit caps the page; total still reflects all matches."""
+        from terno_dbi.core.query_service.views import list_prompt_examples
+
+        org, other_user = self._make_org(setup_test_data)
+        request = request_factory.get(
+            f'/api/query/list-examples/?org_id={org.id}&user_id={other_user.id}&limit=1'
+        )
+        setup_request_for_view(request, setup_test_data['token'])
+
+        response = list_prompt_examples(request)
+
+        data = json.loads(response.content)
+        assert data['count'] == 1
+        assert data['total'] == 3

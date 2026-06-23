@@ -16,5 +16,6 @@ urlpatterns = [
     path("query/", views.execute_query, name="execute_query_legacy"),
     path("similar-examples/", views.get_similar_examples_for_agent, name="similar_examples"),
     path("add-examples/", views.add_prompt_example, name="add_examples"),
+    path("list-examples/", views.list_prompt_examples, name="list_examples"),
     path("export/", views.export_query, name="export_query_legacy"),
 ]
