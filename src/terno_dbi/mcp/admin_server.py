@@ -57,6 +57,24 @@ async def list_tools() -> List[Tool]:
             }
         ),
         Tool(
+            name="update_table_notes",
+            description="Update the notes of a table",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "table_id": {
+                        "type": "integer",
+                        "description": "ID of the table"
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "New notes for the table"
+                    }
+                },
+            "required": ["table_id", "notes"]
+    }
+),
+        Tool(
             name="rename_column",
             description="Update the public display name of a column",
             inputSchema={
@@ -215,6 +233,10 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             table_id = arguments["table_id"]
             description = arguments["description"]
             result = client.update_table(table_id, description=description)
+        elif name == "update_table_notes":
+            table_id = arguments["table_id"]
+            notes = arguments["notes"]
+            result = client.update_table(table_id, notes=notes)
 
         elif name == "rename_column":
             column_id = arguments["column_id"]

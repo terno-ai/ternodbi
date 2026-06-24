@@ -43,7 +43,8 @@ def setup_test_data(db):
         name='users',
         public_name='Users',
         data_source=ds,
-        description='User accounts'
+        description='User accounts',
+        notes='Contains customer login information'
     )
     table2 = Table.objects.create(
         name='orders',
@@ -215,6 +216,36 @@ class TestListDatasources:
 @pytest.mark.django_db
 class TestListTables:
     """Tests for /api/query/datasources/<id>/tables/"""
+
+    def test_returns_table_notes(self, request_factory, setup_test_data):
+        """Should return notes in table metadata."""
+        from terno_dbi.core.query_service.views import list_tables
+
+        request = request_factory.get(
+            f'/api/query/datasources/{setup_test_data["datasource"].id}/tables/'
+        )
+
+        setup_request_for_view(
+            request,
+            setup_test_data['token'],
+            datasource=setup_test_data['datasource']
+        )
+
+        response = list_tables(
+            request,
+            setup_test_data['datasource'].id
+        )
+
+        assert response.status_code == 200
+
+        data = json.loads(response.content)
+
+        users_table = next(
+            t for t in data["tables"]
+            if t["name"] == "Users"
+        )
+
+        assert users_table["notes"] == "Contains customer login information"
 
     def test_returns_tables_in_datasource(self, request_factory, setup_test_data):
         """Should return tables for the datasource."""

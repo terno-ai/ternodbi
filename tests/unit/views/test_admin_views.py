@@ -39,7 +39,8 @@ def setup_admin_data(db):
         name='products',
         public_name='Products',
         data_source=ds,
-        description='Product catalog'
+        description='Product catalog',
+        notes='Old notes'
     )
     
     col1 = TableColumn.objects.create(
@@ -211,6 +212,38 @@ class TestDeleteDatasource:
 @pytest.mark.django_db
 class TestUpdateTable:
     """Tests for PATCH /api/admin/tables/<id>/"""
+
+    def test_updates_table_notes(self, request_factory, setup_admin_data):
+        """Should update table notes."""
+        from terno_dbi.core.admin_service.views import update_table
+
+        request = request_factory.patch(
+            f'/api/admin/tables/{setup_admin_data["table1"].id}/',
+            data=json.dumps({
+                'notes': 'Contains pricing and inventory information'
+            }),
+            content_type='application/json'
+        )
+
+        setup_request_for_admin(
+            request,
+            setup_admin_data['token'],
+            table=setup_admin_data['table1']
+        )
+
+        response = update_table(
+            request,
+            setup_admin_data['table1'].id
+        )
+
+        assert response.status_code == 200
+
+        setup_admin_data['table1'].refresh_from_db()
+
+        assert (
+            setup_admin_data['table1'].notes
+            == 'Contains pricing and inventory information'
+        )
 
     def test_updates_public_name(self, request_factory, setup_admin_data):
         """Should update table public name."""
