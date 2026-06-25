@@ -147,148 +147,210 @@ def execute_native_sql(datasource, native_sql, page=1, per_page=50):
 def execute_paginated_query(
     datasource,
     native_sql: str,
-    pagination_mode: str = "offset",
-    page: int = 1,
-    per_page: int = 50,
-    cursor: Optional[str] = None,
-    direction: str = "forward",
-    order_by: Optional[List[Dict[str, str]]] = None,
-    include_count: bool = False
+    max_rows: Optional[int] = None,
 ) -> Dict[str, Any]:
+    """
+    Execute a query using the streaming engine (server-side cursors).
+    Returns a flat JSON dict: {"status": "success", "columns": [...], "data": [...]}.
+    If max_rows is set, stops collecting after that many rows.
+    """
     try:
-        connector = ConnectorFactory.create_connector(
-            datasource.type,
-            datasource.connection_str,
-            credentials=datasource.connection_json
-        )
+        columns = None
+        rows = []
+        row_count = 0
 
-        mode = PaginationMode(pagination_mode)
+        for chunk in execute_streaming_query(datasource, native_sql):
+            for line in chunk.split("\n"):
+                if not line or not line.strip():
+                    continue
 
-        order_columns = None
-        if order_by:
-            order_columns = [
-                OrderColumn(
-                    column=o.get("column", "id"),
-                    direction=o.get("direction", "DESC"),
-                    nulls=o.get("nulls", "LAST")
-                )
-                for o in order_by
-            ]
+                obj = _json.loads(line.strip())
 
-        per_page = min(per_page, 500)
-
-        auto_injected_order = False
-
-        dialect = datasource.dialect_name or datasource.type
-        if dialect and not isinstance(dialect, str):
-            dialect = None
-
-        if mode == PaginationMode.CURSOR and not order_columns:
-            order_columns = _infer_order_from_sql(native_sql, dialect=dialect)
-            if order_columns:
-                logger.info(
-                    "Cursor mode: auto-detected ORDER BY from SQL: %s",
-                    [(o.column, o.direction) for o in order_columns]
-                )
-            else:
-                order_columns = _find_primary_key_order(
-                    native_sql, datasource.id, dialect=dialect
-                )
-                if order_columns:
-                    auto_injected_order = True
-                    logger.info(
-                        "Cursor mode: auto-injected primary key ORDER BY "
-                        "for datasource=%s: %s",
-                        datasource.id,
-                        [(o.column, o.direction) for o in order_columns]
-                    )
+                if "__error__" in obj:
+                    return {
+                        'status': 'error',
+                        'error': obj["__error__"]
+                    }
+                elif columns is None and "columns" in obj:
+                    columns = obj["columns"]
+                elif "__done__" in obj:
+                    row_count = obj.get("row_count", len(rows))
                 else:
-                    logger.info(
-                        "Cursor mode: no ORDER BY and no primary key found "
-                        "for datasource=%s, falling back to offset.",
-                        datasource.id
-                    )
-                    mode = PaginationMode.OFFSET
+                    rows.append(obj)
+                    if max_rows and len(rows) >= max_rows:
+                        break
 
-        config = PaginationConfig(
-            mode=mode,
-            page=page,
-            per_page=per_page,
-            cursor=cursor,
-            direction=direction,
-            order_by=order_columns if order_columns else [],
-            include_count=include_count
-        )
+            if max_rows and len(rows) >= max_rows:
+                rows = rows[:max_rows]
+                break
 
-        service = PaginationService(
-            connector=connector,
-            dialect=datasource.dialect_name or datasource.type
-        )
+        if columns is None:
+            columns = list(rows[0].keys()) if rows else []
 
-        try:
-            result = service.paginate(native_sql, config)
-        except Exception as cursor_err:
-            if auto_injected_order:
-                logger.warning(
-                    "Cursor pagination failed with auto-injected ORDER BY "
-                    "(likely an aggregate/complex query), falling back to "
-                    "offset. Error: %s", cursor_err
-                )
-                config = PaginationConfig(
-                    mode=PaginationMode.OFFSET,
-                    page=page,
-                    per_page=per_page,
-                    cursor=None,
-                    direction=direction,
-                    order_by=[],
-                    include_count=include_count
-                )
-                result = service.paginate(native_sql, config)
-            else:
-                raise
-
-        table_data = {
-            'columns': result.columns,
-            'data': [
-                {
-                    col: _make_json_safe(row[i])
-                    for i, col in enumerate(result.columns)
-                }
-                for row in result.data
-            ],
-            'page': result.page,
-            'per_page': result.per_page,
-            'row_count': result.total_count,
-            'total_pages': result.total_pages,
-            'has_next': result.has_next,
-            'has_prev': result.has_prev,
-            'next_cursor': result.next_cursor,
-            'prev_cursor': result.prev_cursor,
-        }
-
-        response = {
-            'status': 'success',
-            'table_data': table_data,
-            'pagination_mode_used': config.mode.value
-        }
-
-        if result.warnings:
-            response['warnings'] = result.warnings
-
-        return response
-
-    except ValueError as e:
-        logger.warning(f"Pagination error: {e}")
         return {
-            'status': 'error',
-            'error': str(e)
+            'status': 'success',
+            'columns': columns,
+            'data': rows,
+            'row_count': row_count if row_count else len(rows),
         }
+
     except Exception as e:
         logger.exception(f"Query execution error: {e}")
         return {
             'status': 'error',
             'error': str(e)
         }
+
+
+# ---------------------------------------------------------------------------
+# Legacy: Old execute_paginated_query using PaginationService (offset/cursor).
+# Preserved for future use. Uncomment if needed.
+# ---------------------------------------------------------------------------
+# def _execute_paginated_query_legacy(
+#     datasource,
+#     native_sql: str,
+#     pagination_mode: str = "offset",
+#     page: int = 1,
+#     per_page: int = 50,
+#     cursor: Optional[str] = None,
+#     direction: str = "forward",
+#     order_by: Optional[List[Dict[str, str]]] = None,
+#     include_count: bool = False
+# ) -> Dict[str, Any]:
+#     try:
+#         connector = ConnectorFactory.create_connector(
+#             datasource.type,
+#             datasource.connection_str,
+#             credentials=datasource.connection_json
+#         )
+#
+#         mode = PaginationMode(pagination_mode)
+#
+#         order_columns = None
+#         if order_by:
+#             order_columns = [
+#                 OrderColumn(
+#                     column=o.get("column", "id"),
+#                     direction=o.get("direction", "DESC"),
+#                     nulls=o.get("nulls", "LAST")
+#                 )
+#                 for o in order_by
+#             ]
+#
+#         per_page = min(per_page, 500)
+#
+#         auto_injected_order = False
+#
+#         dialect = datasource.dialect_name or datasource.type
+#         if dialect and not isinstance(dialect, str):
+#             dialect = None
+#
+#         if mode == PaginationMode.CURSOR and not order_columns:
+#             order_columns = _infer_order_from_sql(native_sql, dialect=dialect)
+#             if order_columns:
+#                 logger.info(
+#                     "Cursor mode: auto-detected ORDER BY from SQL: %s",
+#                     [(o.column, o.direction) for o in order_columns]
+#                 )
+#             else:
+#                 order_columns = _find_primary_key_order(
+#                     native_sql, datasource.id, dialect=dialect
+#                 )
+#                 if order_columns:
+#                     auto_injected_order = True
+#                     logger.info(
+#                         "Cursor mode: auto-injected primary key ORDER BY "
+#                         "for datasource=%s: %s",
+#                         datasource.id,
+#                         [(o.column, o.direction) for o in order_columns]
+#                     )
+#                 else:
+#                     logger.info(
+#                         "Cursor mode: no ORDER BY and no primary key found "
+#                         "for datasource=%s, falling back to offset.",
+#                         datasource.id
+#                     )
+#                     mode = PaginationMode.OFFSET
+#
+#         config = PaginationConfig(
+#             mode=mode,
+#             page=page,
+#             per_page=per_page,
+#             cursor=cursor,
+#             direction=direction,
+#             order_by=order_columns if order_columns else [],
+#             include_count=include_count
+#         )
+#
+#         service = PaginationService(
+#             connector=connector,
+#             dialect=datasource.dialect_name or datasource.type
+#         )
+#
+#         try:
+#             result = service.paginate(native_sql, config)
+#         except Exception as cursor_err:
+#             if auto_injected_order:
+#                 logger.warning(
+#                     "Cursor pagination failed with auto-injected ORDER BY "
+#                     "(likely an aggregate/complex query), falling back to "
+#                     "offset. Error: %s", cursor_err
+#                 )
+#                 config = PaginationConfig(
+#                     mode=PaginationMode.OFFSET,
+#                     page=page,
+#                     per_page=per_page,
+#                     cursor=None,
+#                     direction=direction,
+#                     order_by=[],
+#                     include_count=include_count
+#                 )
+#                 result = service.paginate(native_sql, config)
+#             else:
+#                 raise
+#
+#         table_data = {
+#             'columns': result.columns,
+#             'data': [
+#                 {
+#                     col: _make_json_safe(row[i])
+#                     for i, col in enumerate(result.columns)
+#                 }
+#                 for row in result.data
+#             ],
+#             'page': result.page,
+#             'per_page': result.per_page,
+#             'row_count': result.total_count,
+#             'total_pages': result.total_pages,
+#             'has_next': result.has_next,
+#             'has_prev': result.has_prev,
+#             'next_cursor': result.next_cursor,
+#             'prev_cursor': result.prev_cursor,
+#         }
+#
+#         response = {
+#             'status': 'success',
+#             'table_data': table_data,
+#             'pagination_mode_used': config.mode.value
+#         }
+#
+#         if result.warnings:
+#             response['warnings'] = result.warnings
+#
+#         return response
+#
+#     except ValueError as e:
+#         logger.warning(f"Pagination error: {e}")
+#         return {
+#             'status': 'error',
+#             'error': str(e)
+#         }
+#     except Exception as e:
+#         logger.exception(f"Query execution error: {e}")
+#         return {
+#             'status': 'error',
+#             'error': str(e)
+#         }
 
 
 def execute_native_sql_return_df(datasource, native_sql):

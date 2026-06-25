@@ -451,10 +451,26 @@ class ServiceToken(models.Model):
         if self.datasources.exists():
             return self.datasources.filter(enabled=True)
         elif self.organisation:
-            return DataSource.objects.filter(
-                Q(organisation=self.organisation) | Q(is_global=True),
-                enabled=True
-            )
+            # Check if show_demo_data is enabled for the organisation
+            show_demo_data = False
+            if hasattr(self.organisation, 'terno_organisation'):
+                try:
+                    show_demo_data = self.organisation.terno_organisation.show_demo_data
+                except Exception:
+                    pass
+            elif hasattr(self.organisation, 'show_demo_data'):
+                show_demo_data = self.organisation.show_demo_data
+
+            if show_demo_data:
+                return DataSource.objects.filter(
+                    Q(organisation=self.organisation) | Q(is_global=True),
+                    enabled=True
+                )
+            else:
+                return DataSource.objects.filter(
+                    organisation=self.organisation,
+                    enabled=True
+                )
         else:
             if conf.get('ALLOW_SUPERTOKEN'):
                 logger.warning("Supertoken access granted to token '%s' (no org/ds scope)", self.name)

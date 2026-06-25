@@ -55,6 +55,7 @@ class TestAutoOrderInjection:
         assert result[0].direction == "ASC"
 
 
+@pytest.mark.skip(reason="Legacy pagination logic has been commented out")
 @pytest.mark.django_db
 class TestTryAndFallback:
     """Tests for the try-and-fallback pagination pattern."""

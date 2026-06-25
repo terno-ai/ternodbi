@@ -187,6 +187,79 @@ class TestOrgScopedToken:
         assert ds1_org1 not in accessible
         assert ds2_org1 not in accessible
 
+    def test_show_demo_data_disabled_excludes_global_ds(self, org1, ds1_org1):
+        """Token should not see global datasources if show_demo_data is False or not present."""
+        global_ds = DataSource.objects.create(
+            display_name="Global DS",
+            type="postgresql",
+            connection_str="postgresql://localhost/global_ds",
+            is_global=True,
+            enabled=True,
+            organisation=None
+        )
+
+        token = ServiceToken.objects.create(
+            name="Org1 Token",
+            key_hash="testhash_demo_disabled",
+            key_prefix="dbi_query_",
+            organisation=org1
+        )
+
+        accessible = token.get_accessible_datasources()
+        # Should not include global_ds
+        assert global_ds not in accessible
+
+    def test_show_demo_data_enabled_includes_global_ds_via_attribute(self, org1, ds1_org1):
+        """Token should see global datasources if show_demo_data attribute is True."""
+        global_ds = DataSource.objects.create(
+            display_name="Global DS 2",
+            type="postgresql",
+            connection_str="postgresql://localhost/global_ds2",
+            is_global=True,
+            enabled=True,
+            organisation=None
+        )
+
+        org1.show_demo_data = True
+
+        token = ServiceToken.objects.create(
+            name="Org1 Token with attr",
+            key_hash="testhash_demo_enabled_attr",
+            key_prefix="dbi_query_",
+            organisation=org1
+        )
+
+        accessible = token.get_accessible_datasources()
+        # Should include global_ds
+        assert global_ds in accessible
+
+    def test_show_demo_data_enabled_includes_global_ds_via_relation(self, org1, ds1_org1):
+        """Token should see global datasources if terno_organisation.show_demo_data is True."""
+        global_ds = DataSource.objects.create(
+            display_name="Global DS 3",
+            type="postgresql",
+            connection_str="postgresql://localhost/global_ds3",
+            is_global=True,
+            enabled=True,
+            organisation=None
+        )
+
+        class MockTernoOrg:
+            show_demo_data = True
+
+        org1.terno_organisation = MockTernoOrg()
+
+        token = ServiceToken.objects.create(
+            name="Org1 Token with rel",
+            key_hash="testhash_demo_enabled_rel",
+            key_prefix="dbi_query_",
+            organisation=org1
+        )
+
+        accessible = token.get_accessible_datasources()
+        # Should include global_ds
+        assert global_ds in accessible
+
 
 # =============================================================================
 # Test: Explicit datasource-scoped token

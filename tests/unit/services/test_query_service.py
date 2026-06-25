@@ -252,132 +252,31 @@ class TestExecuteNativeSql:
 class TestExecutePaginatedQuery:
     """Tests for execute_paginated_query function."""
 
-    @patch('terno_dbi.services.query.PaginationService')
-    @patch('terno_dbi.services.query.ConnectorFactory')
-    def test_returns_paginated_data(self, mock_factory, mock_pag_cls, datasource):
-        """Should return paginated query results."""
+    @patch('terno_dbi.services.query.execute_streaming_query')
+    def test_returns_streaming_data(self, mock_streaming, datasource):
+        """Should return streaming query results formatted as a flat dict."""
         from terno_dbi.services.query import execute_paginated_query
         
-        mock_connector = MagicMock()
-        mock_factory.create_connector.return_value = mock_connector
+        # Mock streaming result as an iterator of NDJSON strings
+        mock_streaming.return_value = iter([
+            '{"columns":["id","name"]}\n',
+            '{"id":1,"name":"Test"}\n',
+            '{"__done__":true,"row_count":1}\n'
+        ])
         
-        # Mock pagination result
-        mock_result = MagicMock()
-        mock_result.columns = ['id', 'name']
-        mock_result.data = [(1, 'Test')]
-        mock_result.page = 1
-        mock_result.per_page = 50
-        mock_result.total_count = 1
-        mock_result.total_pages = 1
-        mock_result.has_next = False
-        mock_result.has_prev = False
-        mock_result.next_cursor = None
-        mock_result.prev_cursor = None
-        mock_result.warnings = []
-        
-        mock_pag = MagicMock()
-        mock_pag.paginate.return_value = mock_result
-        mock_pag_cls.return_value = mock_pag
-        
-        result = execute_paginated_query(datasource, 'SELECT * FROM test')
+        result = execute_paginated_query(datasource, 'SELECT * FROM test', max_rows=100)
         
         assert result['status'] == 'success'
-        assert 'table_data' in result
-        assert result['table_data']['page'] == 1
+        assert result['columns'] == ['id', 'name']
+        assert len(result['data']) == 1
+        mock_streaming.assert_called_once_with(datasource, 'SELECT * FROM test')
 
-    @patch('terno_dbi.services.query.PaginationService')
-    @patch('terno_dbi.services.query.ConnectorFactory')
-    def test_with_order_by(self, mock_factory, mock_pag_cls, datasource):
-        """Should pass order_by to pagination service."""
-        from terno_dbi.services.query import execute_paginated_query
-        
-        mock_connector = MagicMock()
-        mock_factory.create_connector.return_value = mock_connector
-        
-        mock_result = MagicMock()
-        mock_result.columns = ['id']
-        mock_result.data = []
-        mock_result.page = 1
-        mock_result.per_page = 50
-        mock_result.total_count = 0
-        mock_result.total_pages = 0
-        mock_result.has_next = False
-        mock_result.has_prev = False
-        mock_result.next_cursor = None
-        mock_result.prev_cursor = None
-        mock_result.warnings = []
-        
-        mock_pag = MagicMock()
-        mock_pag.paginate.return_value = mock_result
-        mock_pag_cls.return_value = mock_pag
-        
-        result = execute_paginated_query(
-            datasource, 
-            'SELECT * FROM test',
-            order_by=[{"column": "created_at", "direction": "DESC"}]
-        )
-        
-        assert result['status'] == 'success'
-        mock_pag.paginate.assert_called_once()
-
-    @patch('terno_dbi.services.query.PaginationService')
-    @patch('terno_dbi.services.query.ConnectorFactory')
-    def test_with_warnings(self, mock_factory, mock_pag_cls, datasource):
-        """Should include warnings in response."""
-        from terno_dbi.services.query import execute_paginated_query
-        
-        mock_connector = MagicMock()
-        mock_factory.create_connector.return_value = mock_connector
-        
-        mock_result = MagicMock()
-        mock_result.columns = ['id']
-        mock_result.data = []
-        mock_result.page = 1
-        mock_result.per_page = 50
-        mock_result.total_count = 0
-        mock_result.total_pages = 0
-        mock_result.has_next = False
-        mock_result.has_prev = False
-        mock_result.next_cursor = None
-        mock_result.prev_cursor = None
-        mock_result.warnings = ["Query may not be deterministic"]
-        
-        mock_pag = MagicMock()
-        mock_pag.paginate.return_value = mock_result
-        mock_pag_cls.return_value = mock_pag
-        
-        result = execute_paginated_query(datasource, 'SELECT * FROM test')
-        
-        assert 'warnings' in result
-
-    @patch('terno_dbi.services.query.ConnectorFactory')
-    def test_handles_value_error(self, mock_factory, datasource):
-        """Should handle ValueError for invalid pagination mode."""
-        from terno_dbi.services.query import execute_paginated_query
-        
-        mock_connector = MagicMock()
-        mock_factory.create_connector.return_value = mock_connector
-        
-        result = execute_paginated_query(
-            datasource, 
-            'SELECT * FROM test',
-            pagination_mode='invalid_mode'
-        )
-        
-        assert result['status'] == 'error'
-
-    @patch('terno_dbi.services.query.PaginationService')
-    @patch('terno_dbi.services.query.ConnectorFactory')
-    def test_handles_general_exception(self, mock_factory, mock_pag_cls, datasource):
+    @patch('terno_dbi.services.query.execute_streaming_query')
+    def test_handles_general_exception(self, mock_streaming, datasource):
         """Should handle general exceptions."""
         from terno_dbi.services.query import execute_paginated_query
         
-        mock_connector = MagicMock()
-        mock_factory.create_connector.return_value = mock_connector
-        
-        mock_pag = MagicMock()
-        mock_pag.paginate.side_effect = Exception("Database error")
-        mock_pag_cls.return_value = mock_pag
+        mock_streaming.side_effect = Exception("Database error")
         
         result = execute_paginated_query(datasource, 'SELECT * FROM test')
         

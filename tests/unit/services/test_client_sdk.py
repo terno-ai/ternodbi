@@ -164,14 +164,14 @@ class TestClientMethods:
         assert result['status'] == 'success'
 
     @responses.activate
-    def test_execute_query_with_cursor(self):
-        """Should pass cursor parameter."""
+    def test_execute_query_with_max_rows(self):
+        """Should pass max_rows parameter."""
         from terno_dbi.client import TernoDBIClient
         
         responses.add(
             responses.POST,
             'https://test.com/api/query/datasources/1/query/',
-            json={'status': 'success', 'table_data': {}},
+            json={'status': 'success'},
             status=200
         )
         
@@ -179,33 +179,31 @@ class TestClientMethods:
         client.execute_query(
             datasource=1, 
             sql='SELECT * FROM test',
-            cursor='abc123',
-            direction='backward',
-            order_by=[{'column': 'id', 'direction': 'DESC'}]
+            max_rows=500
         )
         
         request_body = json.loads(responses.calls[0].request.body)
-        assert request_body['cursor'] == 'abc123'
-        assert request_body['direction'] == 'backward'
-        assert request_body['order_by'] == [{'column': 'id', 'direction': 'DESC'}]
+        assert request_body['max_rows'] == 500
 
     @responses.activate
-    def test_execute_query_with_limit(self):
-        """Should use limit as per_page."""
+    def test_stream_query(self):
+        """Should hit stream endpoint."""
         from terno_dbi.client import TernoDBIClient
         
         responses.add(
             responses.POST,
-            'https://test.com/api/query/datasources/1/query/',
-            json={'status': 'success', 'table_data': {}},
+            'https://test.com/api/query/datasources/1/stream/',
+            body='{"columns":["id"]}\n{"id":1}\n{"__done__":true,"row_count":1}\n',
             status=200
         )
         
         client = TernoDBIClient(base_url='https://test.com', api_key='key')
-        client.execute_query(datasource=1, sql='SELECT * FROM test', limit=100)
+        df = client.stream_query(datasource=1, sql='SELECT * FROM test')
         
         request_body = json.loads(responses.calls[0].request.body)
-        assert request_body['per_page'] == 100
+        assert request_body['sql'] == 'SELECT * FROM test'
+        assert list(df.columns) == ['id']
+        assert len(df) == 1
 
     @responses.activate
     def test_create_datasource(self):

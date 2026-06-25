@@ -248,22 +248,13 @@ def execute_query(request, datasource_identifier=None):
                 "error": "Missing 'sql' in request body"
             }, status=400)
 
-        pagination_mode = body.get("pagination_mode", "offset")
-        page = body.get("page", 1)
-        per_page = min(
-            body.get("per_page", conf.get("DEFAULT_PAGE_SIZE")),
-            conf.get("MAX_PAGE_SIZE")
-        )
-        cursor = body.get("cursor")
-        direction = body.get("direction", "forward")
-        order_by = body.get("order_by")  # List of {"column": "name", "direction": "DESC"}
-        include_count = body.get("include_count", False)
+        max_rows = body.get("max_rows")
 
         role_ids = body.get("roles", [])
         roles = _resolve_roles(request, role_ids if role_ids else None)
 
         mDb = prepare_mdb(ds, roles)
-        logger.info("Execute query: datasource='%s', pagination=%s", ds.display_name, pagination_mode)
+        logger.info("Execute query: datasource='%s'", ds.display_name)
         transform_result = generate_native_sql(mDb, sql, ds.dialect_name)
 
         if transform_result.get('status') == 'error':
@@ -275,17 +266,10 @@ def execute_query(request, datasource_identifier=None):
         native_sql = transform_result.get('native_sql', sql)
         logger.debug("Resolved Native SQL: %s", native_sql)
 
-        # Use new paginated query API
         result = execute_paginated_query(
             datasource=ds,
             native_sql=native_sql,
-            pagination_mode=pagination_mode,
-            page=page,
-            per_page=per_page,
-            cursor=cursor,
-            direction=direction,
-            order_by=order_by,
-            include_count=include_count
+            max_rows=max_rows,
         )
         return JsonResponse(result)
 

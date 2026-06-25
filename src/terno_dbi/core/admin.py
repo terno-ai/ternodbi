@@ -222,10 +222,10 @@ if not PARENT_APP_INSTALLED:
         list_filter = ('token_type', 'is_active', 'organisation', 'created_at')
         search_fields = ('name', 'key_prefix', 'organisation__name')
         readonly_fields = ('key_hash', 'key_prefix', 'last_used', 'created_at', 'created_by')
-        fields = ('name', 'token_type', 'organisation', 'datasources', 'is_active', 'expires_at', 
+        fields = ('name', 'token_type', 'organisation', 'datasources', 'groups', 'is_active', 'expires_at', 
                   'key_hash', 'key_prefix', 'last_used', 'created_at', 'created_by')
 
-        filter_horizontal = ('datasources',)
+        filter_horizontal = ('datasources', 'groups')
         raw_id_fields = ('organisation',)
 
         def save_model(self, request, obj, form, change):
@@ -248,6 +248,10 @@ if not PARENT_APP_INSTALLED:
                 datasources = form.cleaned_data.get('datasources')
                 if datasources:
                     token.datasources.set(datasources)
+
+                groups = form.cleaned_data.get('groups')
+                if groups:
+                    token.groups.set(groups)
 
                 messages.set_level(request, messages.SUCCESS)
                 messages.success(request, format_html(
