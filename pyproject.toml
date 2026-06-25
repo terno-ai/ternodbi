@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "terno-dbi"
-version = "0.1.26"
+version = "0.1.27"
 description = "Database Intelligence Layer - Multi-database connectivity with SQLShield integration"
 readme = "README.md"
 license = "Apache-2.0"
@@ -28,7 +28,7 @@ classifiers = [
 dependencies = [
     "Django>=4.2",
     "sqlalchemy>=2.0",
-    "sqlshield>=0.0.20",
+    "sqlshield>=0.0.23",
     "pandas>=2.0",
     "pyarrow>=14.0",
     "sqlglot>=28.5.0",
