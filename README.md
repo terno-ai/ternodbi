@@ -70,6 +70,20 @@ ternodbi start
 ternodbi start 9000
 ```
 
+#### Sharing Database with an Existing Django Project (e.g. Terno-AI)
+If you are running TernoDBI alongside or embedding it inside an existing Django project that uses the `terno_dbi.core` package, you can configure TernoDBI to use the exact same SQLite database file. This avoids maintaining separate databases and allows real-time data sharing:
+
+```bash
+DJANGO_PROJECT_PATH=/path/to/your/django/project ternodbi start
+```
+
+For example, to share the database with Terno-AI:
+```bash
+DJANGO_PROJECT_PATH=/Users/navin/terno/terno-ai/terno ternodbi start
+```
+This forces the standalone server to read and write directly to `/Users/navin/terno/terno-ai/terno/db.sqlite3`.
+
+
 ### Management Commands (CLI)
 Automate your credential and access management simply via the built-in CLI:
 
