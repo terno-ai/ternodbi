@@ -15,7 +15,7 @@ def generate_table_note_updates(conversation_text, org_prompt, tables_info, llm)
     prompt = f"""You are helping maintain table-level business knowledge for SQL generation.
 When a user asks to save a note, based on a corrected query or business clarification for
 the conversation :
-1. Identify the single most appropriate table where the business rule belongs.
+1. Identify the most appropriate tables where the business rule belongs.
    - Prefer the fact table containing the columns used in the metric calculation.
    - Do not choose dimension tables unless the rule is specifically about dimension attributes.
 2. The existing notes for the relevant tables are provided below under EXISTING TABLE NOTES.

@@ -302,18 +302,15 @@ def find_similar_examples(embedding, org_id, user_id=None, threshold=0.75, limit
     print(f"Raw search results for examples: {results}")
 
     for i, hit in enumerate(results[0]):
-        cosine_distance = hit["distance"]
-        cosine_similarity = 1-cosine_distance
-        
-        print(cosine_similarity, hit["entity"]["key"], hit["entity"]["value"])
-        if cosine_similarity > threshold:
+        print(hit["distance"], hit["entity"]["key"], hit["entity"]["value"])
+        if hit["distance"] > threshold:
             matches.append({
                 "id": hit["id"],
                 "key": hit["entity"]["key"],
                 "value": hit["entity"]["value"],
                 "user_id": hit["entity"].get("user_id", 0),
                 "is_shared": hit["entity"].get("is_shared", False),
-                "similarity": cosine_similarity
+                "similarity": hit["distance"]
             })
 
     matches = sorted(matches, key=lambda x: x["similarity"], reverse=True)
