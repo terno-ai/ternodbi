@@ -56,6 +56,12 @@ class OrganisationUser(models.Model):
         blank=True,
         help_text="Fernet-encrypted raw key for the active sandbox token"
     )
+    groups = models.ManyToManyField(
+        Group,
+        related_name='org_user_memberships',
+        blank=True,
+        help_text="Per-org roles/capabilities for this user+org membership"
+    )
     created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
 

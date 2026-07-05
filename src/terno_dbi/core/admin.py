@@ -207,6 +207,7 @@ if not PARENT_APP_INSTALLED:
         list_filter = ('organisation',)
         search_fields = ('user__username', 'user__email', 'organisation__name')
         raw_id_fields = ('user', 'organisation')
+        filter_horizontal = ('groups',)
 
     @admin.register(OrganisationGroup)
     class OrganisationGroupAdmin(admin.ModelAdmin):
