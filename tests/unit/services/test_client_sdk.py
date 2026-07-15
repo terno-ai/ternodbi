@@ -426,3 +426,118 @@ class TestClientErrorHandling:
         assert result['error'] == 'DB Error'
 
 
+class TestClientMemoryMethods:
+    """Tests for memory API client methods."""
+
+    @responses.activate
+    def test_list_memories(self):
+        from terno_dbi.client import TernoDBIClient
+        
+        responses.add(
+            responses.GET,
+            'https://test.com/api/query/memory/?datasource_id=1&render=1',
+            json={'status': 'success', 'memories': []},
+            status=200
+        )
+        
+        client = TernoDBIClient(base_url='https://test.com', api_key='key')
+        result = client.list_memories(datasource_id=1, render=True)
+        
+        assert len(responses.calls) == 1
+        assert result['status'] == 'success'
+
+    @responses.activate
+    def test_get_memory(self):
+        from terno_dbi.client import TernoDBIClient
+        
+        responses.add(
+            responses.GET,
+            'https://test.com/api/query/memory/test-mem/?datasource_id=1',
+            json={'status': 'success', 'memory': {'name': 'test-mem'}},
+            status=200
+        )
+        
+        client = TernoDBIClient(base_url='https://test.com', api_key='key')
+        result = client.get_memory('test-mem', datasource_id=1)
+        
+        assert len(responses.calls) == 1
+        assert result['name'] == 'test-mem'
+
+    @responses.activate
+    def test_grep_memory(self):
+        from terno_dbi.client import TernoDBIClient
+        
+        responses.add(
+            responses.GET,
+            'https://test.com/api/query/memory/grep/?pattern=foo',
+            json={'status': 'success', 'matches': [{'name': 'test'}]},
+            status=200
+        )
+        
+        client = TernoDBIClient(base_url='https://test.com', api_key='key')
+        result = client.grep_memory('foo')
+        
+        assert len(responses.calls) == 1
+        assert len(result) == 1
+
+    @responses.activate
+    def test_save_memory(self):
+        from terno_dbi.client import TernoDBIClient
+        
+        responses.add(
+            responses.POST,
+            'https://test.com/api/query/memory/save/',
+            json={'status': 'success', 'memory': {'name': 'new-mem'}},
+            status=200
+        )
+        
+        client = TernoDBIClient(base_url='https://test.com', api_key='key')
+        result = client.save_memory(
+            name='new-mem', description='desc', content='c',
+            memory_type='project', store='user'
+        )
+        
+        assert len(responses.calls) == 1
+        request_body = json.loads(responses.calls[0].request.body)
+        assert request_body['name'] == 'new-mem'
+        assert request_body['store'] == 'user'
+
+    @responses.activate
+    def test_edit_memory(self):
+        from terno_dbi.client import TernoDBIClient
+        
+        responses.add(
+            responses.POST,
+            'https://test.com/api/query/memory/edit-mem/edit/',
+            json={'status': 'success'},
+            status=200
+        )
+        
+        client = TernoDBIClient(base_url='https://test.com', api_key='key')
+        result = client.edit_memory(
+            name='edit-mem', old_string='old', new_string='new',
+            expected_hash='hash123', store='user'
+        )
+        
+        assert len(responses.calls) == 1
+        request_body = json.loads(responses.calls[0].request.body)
+        assert request_body['old_string'] == 'old'
+        assert request_body['expected_hash'] == 'hash123'
+
+    @responses.activate
+    def test_delete_memory(self):
+        from terno_dbi.client import TernoDBIClient
+        
+        responses.add(
+            responses.POST,
+            'https://test.com/api/query/memory/del-mem/delete/',
+            json={'status': 'success'},
+            status=200
+        )
+        
+        client = TernoDBIClient(base_url='https://test.com', api_key='key')
+        result = client.delete_memory(name='del-mem', store='user')
+        
+        assert len(responses.calls) == 1
+        request_body = json.loads(responses.calls[0].request.body)
+        assert request_body['store'] == 'user'

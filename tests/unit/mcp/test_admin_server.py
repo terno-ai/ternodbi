@@ -24,7 +24,10 @@ class TestAdminServer(unittest.IsolatedAsyncioTestCase):
             "delete_datasource",
             "get_table_info",
             "update_column_description",
-            "sync_metadata"
+            "sync_metadata",
+            "save_memory",
+            "edit_memory",
+            "delete_memory"
         ]
         
         for name in expected_tools:
@@ -91,6 +94,25 @@ class TestAdminServer(unittest.IsolatedAsyncioTestCase):
             mock_client.update_column.reset_mock()
             await call_tool("update_column_description", {"column_id": 3, "description": "D"})
             mock_client.update_column.assert_called_with(3, description="D")
+
+            # 10. save_memory
+            mock_client.save_memory.return_value = {"saved": True}
+            await call_tool("save_memory", {"name": "mem", "description": "d", "content": "c", "store": "org"})
+            mock_client.save_memory.assert_called_with(
+                name="mem", description="d", content="c", memory_type="project", store="org", datasource_id=None, expected_hash=None
+            )
+
+            # 11. edit_memory
+            mock_client.edit_memory.return_value = {"edited": True}
+            await call_tool("edit_memory", {"name": "mem", "old_string": "old", "new_string": "new", "expected_hash": "h", "store": "org"})
+            mock_client.edit_memory.assert_called_with(
+                name="mem", old_string="old", new_string="new", expected_hash="h", store="org", replace_all=False, datasource_id=None
+            )
+
+            # 12. delete_memory
+            mock_client.delete_memory.return_value = {"deleted": True}
+            await call_tool("delete_memory", {"name": "mem", "store": "org"})
+            mock_client.delete_memory.assert_called_with(name="mem", store="org", datasource_id=None)
 
 
     async def test_call_tool_error(self):

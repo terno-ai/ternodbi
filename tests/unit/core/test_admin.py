@@ -234,3 +234,31 @@ class TestSelectorsAdmin:
         obj = MagicMock()
         obj.columns.count.return_value = 5
         assert admin.column_count(obj) == 5
+
+class TestMemoryAdmin:
+    def test_save_model(self):
+        from terno_dbi.core.admin import MemoryAdmin
+        from terno_dbi.core.models import Memory, CoreOrganisation
+        from django.contrib.admin.sites import AdminSite
+        
+        admin_instance = MemoryAdmin(Memory, AdminSite())
+        obj = MagicMock()
+        obj.created_by_id = None
+        
+        request = MagicMock()
+        request.org_id = 1
+        request.user = MagicMock()
+        
+        # Mock the CoreOrganisation.objects.get call
+        mock_org = MagicMock()
+        with patch('terno_dbi.core.models.CoreOrganisation.objects.get', return_value=mock_org) as mock_get:
+            with patch('reversion.admin.VersionAdmin.save_model') as mock_super_save:
+                admin_instance.save_model(request, obj, form=None, change=False)
+                
+                # Check org assignment
+                assert obj.organisation == mock_org
+                # Check user assignment since change=False and obj.created_by_id is None
+                assert obj.created_by == request.user
+                
+                mock_get.assert_called_once_with(pk=1)
+                mock_super_save.assert_called_once_with(request, obj, None, False)

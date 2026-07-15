@@ -20,7 +20,10 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             "list_tables",
             "list_table_columns",
             "execute_query",
-            "get_sample_data"
+            "get_sample_data",
+            "list_memories",
+            "get_memory",
+            "grep_memory"
         ]
         
         for name in expected_tools:
@@ -46,13 +49,7 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             })
             mock_client.execute_query.assert_called_with(
                 "ds1", "SELECT 1", 
-                pagination_mode="offset", 
-                page=1, 
-                per_page=50, 
-                cursor=None, 
-                direction="forward",
-                order_by=None,
-                include_count=False
+                max_rows=None
             )
 
             # 3. list_tables
@@ -70,27 +67,34 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             await call_tool("get_sample_data", {"table_id": 5, "rows": 10})
             mock_client.get_sample_data.assert_called_with(5, 10)
 
+            # 6. list_memories
+            mock_client.list_memories.return_value = [{"name": "test"}]
+            await call_tool("list_memories", {"datasource_id": 1})
+            mock_client.list_memories.assert_called_with(datasource_id=1)
 
-    async def test_call_tool_pagination(self):
-        """Should pass pagination arguments correctly."""
+            # 7. get_memory
+            mock_client.get_memory.return_value = {"name": "test"}
+            await call_tool("get_memory", {"name": "test", "datasource_id": 1})
+            mock_client.get_memory.assert_called_with("test", datasource_id=1)
+
+            # 8. grep_memory
+            mock_client.grep_memory.return_value = [{"name": "test"}]
+            await call_tool("grep_memory", {"pattern": "search", "datasource_id": 1})
+            mock_client.grep_memory.assert_called_with("search", datasource_id=1)
+
+
+    async def test_call_tool_max_rows(self):
+        """Should pass max_rows argument correctly."""
         with patch('terno_dbi.mcp.query_server.client') as mock_client:
             await call_tool("execute_query", {
                 "datasource": "ds1", 
                 "sql": "SELECT 1",
-                "pagination_mode": "cursor",
-                "cursor": "abc",
-                "per_page": 100
+                "max_rows": 100
             })
             
             mock_client.execute_query.assert_called_with(
                 "ds1", "SELECT 1",
-                pagination_mode="cursor",
-                page=1, # Default
-                per_page=100,
-                cursor="abc",
-                direction="forward", # Default
-                order_by=None,
-                include_count=False
+                max_rows=100
             )
 
 

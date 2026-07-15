@@ -72,3 +72,37 @@ class TestIssueTokenCommand:
             call_command('issue_token', '--name', 'fail', stdout=out)
             
             assert "Error creating token: DB Error" in out.getvalue()
+
+    def test_handle_org_and_user_success(self):
+        """Should issue token bound to org and user."""
+        from terno_dbi.core.models import CoreOrganisation
+        from django.contrib.auth import get_user_model
+        
+        User = get_user_model()
+        user = User.objects.create_user(username='tok_user')
+        org = CoreOrganisation.objects.create(name='Tok Org', subdomain='tok_org', owner=user)
+        
+        out = StringIO()
+        call_command('issue_token', '--name', 'bound_token', '--org', 'tok_org', '--user', 'tok_user', stdout=out)
+        
+        output = out.getvalue()
+        assert "ORG       : tok_org" in output
+        assert "USER      : tok_user" in output
+        
+        token = ServiceToken.objects.get(name='bound_token')
+        assert token.organisation == org
+        assert token.created_by == user
+
+    def test_handle_invalid_org(self):
+        """Should fail if organisation subdomain is invalid."""
+        from django.core.management.base import CommandError
+        out = StringIO()
+        with pytest.raises(CommandError, match="No organisation with subdomain 'bad_org'"):
+            call_command('issue_token', '--name', 'bad_org_token', '--org', 'bad_org', stdout=out)
+
+    def test_handle_invalid_user(self):
+        """Should fail if username is invalid."""
+        from django.core.management.base import CommandError
+        out = StringIO()
+        with pytest.raises(CommandError, match="No user 'bad_user'"):
+            call_command('issue_token', '--name', 'bad_user_token', '--user', 'bad_user', stdout=out)

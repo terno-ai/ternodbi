@@ -19,28 +19,31 @@ class TestCLI:
 
     @patch('terno_dbi.cli.django.setup')
     def test_create_default_superuser_new(self, mock_setup):
-        with patch('terno_dbi.cli.get_user_model') as mock_get_user_model:
-            mock_user_model = MagicMock()
-            mock_get_user_model.return_value = mock_user_model
-
-            # Simulate no superuser exists
-            mock_user_model.objects.filter().exists.return_value = False
-
-            create_default_superuser()
-            mock_setup.assert_called_once()
-            mock_user_model.objects.create_superuser.assert_called_once_with('admin', 'admin@example.com', 'admin')
+        from django.contrib.auth import get_user_model
+        from terno_dbi.core.models import CoreOrganisation
+        User = get_user_model()
+        User.objects.all().delete()
+        
+        create_default_superuser()
+        
+        mock_setup.assert_called_once()
+        assert User.objects.filter(username='admin').exists()
+        assert CoreOrganisation.objects.filter(subdomain='default').exists()
 
     @patch('terno_dbi.cli.django.setup')
     def test_create_default_superuser_existing(self, mock_setup):
-        with patch('terno_dbi.cli.get_user_model') as mock_get_user_model:
-            mock_user_model = MagicMock()
-            mock_get_user_model.return_value = mock_user_model
-
-            # Simulate superuser already exists
-            mock_user_model.objects.filter().exists.return_value = True
-
-            create_default_superuser()
-            mock_user_model.objects.create_superuser.assert_not_called()
+        from django.contrib.auth import get_user_model
+        from terno_dbi.core.models import CoreOrganisation
+        User = get_user_model()
+        User.objects.all().delete()
+        user = User.objects.create_superuser('existing_admin', 'admin@example.com', 'admin')
+        
+        create_default_superuser()
+        
+        # Should not create a new user named 'admin', should just use 'existing_admin'
+        assert not User.objects.filter(username='admin').exists()
+        org = CoreOrganisation.objects.get(subdomain='default')
+        assert org.owner == user
 
     @patch('sys.exit')
     def test_main_no_args(self, mock_exit, caplog):

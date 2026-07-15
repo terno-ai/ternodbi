@@ -12,7 +12,8 @@ from django.contrib.auth.models import User, Group
 from terno_dbi.core.models import (
     DataSource, Table, TableColumn, ForeignKey,
     GroupTableRowFilter, ServiceToken, PrivateTableSelector,
-    GroupTableSelector, PrivateColumnSelector, GroupColumnSelector
+    GroupTableSelector, PrivateColumnSelector, GroupColumnSelector,
+    Memory, CoreOrganisation
 )
 
 
@@ -309,3 +310,56 @@ class TestSelectorModels:
         
         assert column in selector.columns.all()
         assert selector.group == group
+
+class TestMemoryModel:
+    """Tests for the Memory model."""
+
+    @pytest.fixture
+    def org(self, user, db):
+        return CoreOrganisation.objects.create(name='Test Org', subdomain='testorg', owner=user)
+
+    def test_properties(self, org, user, datasource):
+        mem_global = Memory.objects.create(
+            organisation=org, store=Memory.Store.USER, created_by=user,
+            name='global-mem', description='desc', content='hello'
+        )
+        assert mem_global.scope == "global"
+        assert mem_global.content_hash == hashlib.sha256(b"hello").hexdigest()
+
+        mem_ds = Memory.objects.create(
+            organisation=org, store=Memory.Store.USER, created_by=user, data_source=datasource,
+            name='ds-mem', description='desc', content='world'
+        )
+        assert mem_ds.scope == f"datasource:{datasource.id}"
+        assert mem_ds.content_hash == hashlib.sha256(b"world").hexdigest()
+
+    def test_unique_constraints_user_store(self, org, user, datasource, db):
+        from django.db import IntegrityError
+        # Create user memory
+        Memory.objects.create(
+            organisation=org, store=Memory.Store.USER, created_by=user, data_source=datasource,
+            name='same-name', description='d', content='c'
+        )
+
+        # Same user, same name -> should fail
+        with pytest.raises(IntegrityError):
+            Memory.objects.create(
+                organisation=org, store=Memory.Store.USER, created_by=user, data_source=datasource,
+                name='same-name', description='d', content='c'
+            )
+
+    def test_unique_constraints_org_store(self, org, user, datasource, db):
+        from django.db import IntegrityError
+        # Create org memory
+        Memory.objects.create(
+            organisation=org, store=Memory.Store.ORG, created_by=user, data_source=datasource,
+            name='same-name', description='d', content='c'
+        )
+
+        # Another user, same name in org store -> should fail because name must be unique in org store
+        user2 = User.objects.create_user('user2', 'u2@example.com', 'pwd')
+        with pytest.raises(IntegrityError):
+            Memory.objects.create(
+                organisation=org, store=Memory.Store.ORG, created_by=user2, data_source=datasource,
+                name='same-name', description='d', content='c'
+            )
