@@ -126,6 +126,90 @@ Returns columns and data rows. Use max_rows to limit the number of rows returned
             }
         ),
 
+        # Tool(
+        #     name="get_datasource_context",
+        #     description=(
+        #         "Get the complete context package for a datasource in ONE call: "
+        #         "its schema (tables/columns with public names, types, descriptions) "
+        #         "PLUS a memory index of persistent facts (global + datasource-scoped). "
+        #         "The `memory_index` shows one line per fact — call `get_memory(name=...)` "
+        #         "for the full content of any entry that looks relevant before relying on it. "
+        #         "Call this first when you start working with a datasource."
+        #     ),
+        #     inputSchema={
+        #         "type": "object",
+        #         "properties": {
+        #             "datasource": {
+        #                 "type": "string",
+        #                 "description": "Datasource name or ID"
+        #             }
+        #         },
+        #         "required": ["datasource"]
+        #     }
+        # ),
+        Tool(
+            name="list_memories",
+            description=(
+                "List the memory index (name, one-line description, type, scope — "
+                "not full content) of persistent facts. Optionally scope to a datasource; "
+                "global memories are always included. Use `get_memory` to read a full fact."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "datasource_id": {
+                        "type": "integer",
+                        "description": "Optional: include this datasource's scoped memories alongside global ones"
+                    }
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="get_memory",
+            description=(
+                "Fetch the full content of one memory by its `name` (the slug shown in "
+                "the memory index). The response includes `content_hash` — pass it back as "
+                "`expected_hash` when you later edit or overwrite this memory."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The memory's name/slug, e.g. 'zydus-active-users-join'"
+                    },
+                    "datasource_id": {
+                        "type": "integer",
+                        "description": "Optional: datasource scope to prefer when resolving the name"
+                    }
+                },
+                "required": ["name"]
+            }
+        ),
+        Tool(
+            name="grep_memory",
+            description=(
+                "Regex-search the BODIES of memories and return matching index rows "
+                "(name/description/type/scope, no bodies). Use to find a fact when you "
+                "don't know its exact name."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Regular expression matched (case-insensitive) against memory content"
+                    },
+                    "datasource_id": {
+                        "type": "integer",
+                        "description": "Optional: restrict to global + this datasource's memories"
+                    }
+                },
+                "required": ["pattern"]
+            }
+        ),
+
     ]
 
 
@@ -181,6 +265,23 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 query=query_str,
                 limit=limit
             )
+
+        # elif name == "get_datasource_context":
+        #     datasource = arguments["datasource"]
+        #     result = client.get_datasource_context(datasource)
+
+        elif name == "list_memories":
+            result = client.list_memories(datasource_id=arguments.get("datasource_id"))
+
+        elif name == "get_memory":
+            mem_name = arguments["name"]
+            datasource_id = arguments.get("datasource_id")
+            result = {"memory": client.get_memory(mem_name, datasource_id=datasource_id)}
+
+        elif name == "grep_memory":
+            matches = client.grep_memory(arguments["pattern"],
+                                         datasource_id=arguments.get("datasource_id"))
+            result = {"matches": matches, "count": len(matches)}
 
         else:
             result = {"error": f"Unknown tool: {name}"}

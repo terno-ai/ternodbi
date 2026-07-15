@@ -196,6 +196,64 @@ async def list_tools() -> List[Tool]:
                 "required": ["datasource_id"]
             }
         ),
+        Tool(
+            name="save_memory",
+            description=(
+                "Create or fully replace a persistent memory (a single fact recalled "
+                "across sessions). One fact per memory. Set `datasource_id` when the fact "
+                "is specific to one database's tables/columns/joins/rules; omit it for a "
+                "global fact. `store`: 'user' (private to the caller) or 'org' (shared "
+                "org-wide, admin only). To REPLACE an existing memory you must first read "
+                "it (get_memory) and pass its `content_hash` as `expected_hash`."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "kebab-case slug, unique within scope, e.g. 'zydus-active-users-join'"},
+                    "description": {"type": "string", "description": "One-line hook shown in the memory index"},
+                    "content": {"type": "string", "description": "The full fact body (add Why/How-to-apply for feedback/project types)"},
+                    "memory_type": {"type": "string", "enum": ["user", "feedback", "project", "reference"], "description": "Kind of fact (default: project)"},
+                    "store": {"type": "string", "enum": ["user", "org"], "description": "user = private to caller; org = shared org-wide (default user)"},
+                    "datasource_id": {"type": "integer", "description": "Optional: scope this fact to one datasource"},
+                    "expected_hash": {"type": "string", "description": "Required when replacing an existing memory: its current content_hash from get_memory"}
+                },
+                "required": ["name", "description", "content"]
+            }
+        ),
+        Tool(
+            name="edit_memory",
+            description=(
+                "Edit an existing memory by exact string replacement, preserving the rest "
+                "of its content. `old_string` must be present and unique unless replace_all=true. "
+                "Read the memory first (get_memory) and pass its `content_hash` as `expected_hash`."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The memory's slug"},
+                    "old_string": {"type": "string", "description": "Exact text to replace"},
+                    "new_string": {"type": "string", "description": "Replacement text"},
+                    "expected_hash": {"type": "string", "description": "The memory's current content_hash from get_memory (read-before-write)"},
+                    "replace_all": {"type": "boolean", "description": "Replace every occurrence (default false)"},
+                    "store": {"type": "string", "enum": ["user", "org"], "description": "Which store the memory is in (default user)"},
+                    "datasource_id": {"type": "integer", "description": "Scope of the memory to edit"}
+                },
+                "required": ["name", "old_string", "new_string", "expected_hash"]
+            }
+        ),
+        Tool(
+            name="delete_memory",
+            description="Delete a persistent memory by name within its scope.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The memory's slug"},
+                    "store": {"type": "string", "enum": ["user", "org"], "description": "Which store the memory is in (default user)"},
+                    "datasource_id": {"type": "integer", "description": "Scope of the memory to delete"}
+                },
+                "required": ["name"]
+            }
+        ),
     ]
 
 
@@ -255,6 +313,35 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             datasource_id = arguments["datasource_id"]
             overwrite = arguments.get("overwrite", False)
             result = client.sync_metadata(datasource_id, overwrite=overwrite)
+
+        elif name == "save_memory":
+            result = client.save_memory(
+                name=arguments["name"],
+                description=arguments["description"],
+                content=arguments["content"],
+                memory_type=arguments.get("memory_type", "project"),
+                store=arguments.get("store", "user"),
+                datasource_id=arguments.get("datasource_id"),
+                expected_hash=arguments.get("expected_hash"),
+            )
+
+        elif name == "edit_memory":
+            result = client.edit_memory(
+                name=arguments["name"],
+                old_string=arguments["old_string"],
+                new_string=arguments["new_string"],
+                expected_hash=arguments["expected_hash"],
+                store=arguments.get("store", "user"),
+                replace_all=arguments.get("replace_all", False),
+                datasource_id=arguments.get("datasource_id"),
+            )
+
+        elif name == "delete_memory":
+            result = client.delete_memory(
+                name=arguments["name"],
+                store=arguments.get("store", "user"),
+                datasource_id=arguments.get("datasource_id"),
+            )
 
         else:
             result = {"error": f"Unknown tool: {name}"}

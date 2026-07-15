@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 import logging
 import secrets
 import hashlib
+import reversion
 from cryptography.fernet import Fernet
 from django.conf import settings
 
@@ -615,3 +616,101 @@ class PromptExample(models.Model):
     def __str__(self):
         owner = self.created_by.username if self.created_by else "org-shared"
         return f"[{owner}] {self.key[:50]}"
+
+
+@reversion.register()
+class Memory(models.Model):
+    """
+    Two independent axes:
+
+    * ``store`` — who can see it:
+        - ``user`` — private to :attr:`created_by`.
+        - ``org``  — shared across the whole organisation; writing it needs an
+          admin-scoped token.
+    * ``data_source`` — the scope axis:
+        - NULL -> global: the fact applies regardless of which datasource is queried.
+        - set  -> specific to that database's schema/rules.
+    """
+
+    class Store(models.TextChoices):
+        USER = 'user', _('User (private to creator)')
+        ORG = 'org', _('Organisation (shared)')
+
+    class MemoryType(models.TextChoices):
+        USER = 'user', _('User')
+        FEEDBACK = 'feedback', _('Feedback')
+        PROJECT = 'project', _('Project')
+        REFERENCE = 'reference', _('Reference')
+
+    organisation = models.ForeignKey(
+        CoreOrganisation, on_delete=models.CASCADE,
+        related_name='memories')
+    store = models.CharField(
+        max_length=10, choices=Store.choices, default=Store.USER,
+        help_text="user = private to creator; org = shared across the organisation."
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='memories',
+        help_text="The author of this memory (always set at creation). "
+                  "Null only if that user was later deleted."
+    )
+    data_source = models.ForeignKey(
+        DataSource, on_delete=models.CASCADE, null=True, blank=True,
+        related_name='memories',
+        help_text="scope axis: NULL = global (applies to any datasource); "
+                  "set = specific to this datasource's schema/rules."
+    )
+    name = models.SlugField(
+        max_length=100,
+        help_text="kebab-case slug, unique within its scope; the lookup key, "
+                  "e.g. 'zydus-active-users-join'."
+    )
+    description = models.CharField(
+        max_length=255,
+        help_text="One-line hook shown in the memory index."
+    )
+    memory_type = models.CharField(
+        max_length=20, choices=MemoryType.choices,
+        default=MemoryType.PROJECT
+    )
+    content = models.TextField(
+        help_text="The full fact body (plus Why/How-to-apply for feedback/project)."
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "terno_memory"
+        verbose_name = "Memory"
+        verbose_name_plural = "Memories"
+        constraints = [
+            # org store: one name per (org, datasource) — a shared namespace.
+            models.UniqueConstraint(
+                fields=['organisation', 'data_source', 'name'],
+                condition=models.Q(store='org'),
+                name='uniq_org_memory_scope_name'
+            ),
+            # user store: one name per (org, owner, datasource).
+            models.UniqueConstraint(
+                fields=['organisation', 'created_by', 'data_source', 'name'],
+                condition=models.Q(store='user'),
+                name='uniq_user_memory_scope_name'
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['organisation', 'store', 'data_source']),
+        ]
+
+    @property
+    def scope(self):
+        """Scope string: 'global' or 'datasource:<id>'."""
+        return f"datasource:{self.data_source_id}" if self.data_source_id else "global"
+
+    @property
+    def content_hash(self):
+        """SHA-256 of the current content — the read-before-write token."""
+        return hashlib.sha256((self.content or "").encode("utf-8")).hexdigest()
+
+    def __str__(self):
+        return f"[{self.store}/{self.scope}] {self.name}"

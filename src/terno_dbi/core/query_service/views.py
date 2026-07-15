@@ -5,11 +5,10 @@ from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 
 from terno_dbi.core.models import PromptExample
-from terno_dbi.vector_store.utils import find_similar_examples, sync_prompt_example, extract_examples_from_conversation
+from terno_dbi.vector_store.utils import find_similar_examples, sync_prompt_example
 from terno_dbi.llm.base import LLMFactory
-
+from terno_dbi.services import memory as memory_service
 from terno_dbi.core import models
-from terno_dbi.core import conf
 from terno_dbi.services.query import (
     execute_native_sql,
     execute_paginated_query,
@@ -525,3 +524,315 @@ def add_prompt_example(request):
     except Exception as e:
         logger.exception("Error adding prompt example")
         return JsonResponse({"status": "error", "error": str(e)}, status=500)
+
+
+def _memory_org_id(request):
+    """Org for a memory op — strictly the token's own organisation."""
+    org = getattr(request, "token_organisation", None)
+    return org.id if org else None
+
+
+def _memory_user_id(request):
+    """Acting user for a memory op — strictly the token's own bound user."""
+    token = getattr(request, "service_token", None)
+    return token.created_by_id if token else None
+
+
+def _memory_store(body):
+    """Normalise the requested store; default to private 'user'."""
+    store = (body.get("store") or "user").strip().lower()
+    return store if store in ("user", "org") else "user"
+
+
+def _memory_error_response(exc):
+    """Map a memory service exception to a JSON error + status code."""
+    from terno_dbi.services.memory import (
+        MemoryNotFound, MemoryConflict, MemoryNotUnique, MemoryNoMatch,
+        MemoryPermission,
+    )
+    if isinstance(exc, MemoryNotFound):
+        return JsonResponse({"status": "error", "error": str(exc)}, status=404)
+    if isinstance(exc, MemoryConflict):
+        return JsonResponse({"status": "error", "error": str(exc)}, status=409)
+    if isinstance(exc, MemoryPermission):
+        return JsonResponse({"status": "error", "error": str(exc)}, status=403)
+    if isinstance(exc, (MemoryNotUnique, MemoryNoMatch)):
+        return JsonResponse({"status": "error", "error": str(exc)}, status=400)
+    logger.exception("Memory operation failed")
+    return JsonResponse({"status": "error", "error": str(exc)}, status=500)
+
+
+def _check_write_perms(request, store, user_id):
+    """Return an error JsonResponse if the caller may not write this store, else None.
+
+    org store is gated by the same 'admin:write' scope convention every other
+    admin-only view in this codebase uses (ServiceToken.has_scope) — not a
+    hand-rolled token_type check — so it honours both scope grants and the
+    token_type fallback consistently.
+    """
+    if store == "org":
+        token = getattr(request, "service_token", None)
+        if not (token and token.has_scope("admin:write")):
+            return JsonResponse(
+                {"status": "error",
+                 "error": "Writing org-shared memory requires a token with "
+                          "'admin:write' scope. Use store='user' for personal memory."},
+                status=403,
+            )
+    else:  # user store
+        if not user_id:
+            return JsonResponse(
+                {"status": "error",
+                 "error": "This token is not bound to a user, so it cannot write "
+                          "user-store (private) memory. Re-issue it with "
+                          "`--user <username>`, or use store='org' with an "
+                          "admin:write-scoped token."},
+                status=400,
+            )
+    return None
+
+
+@require_service_auth()
+@require_http_methods(["GET"])
+def list_memories(request):
+    """Return the memory index (name/description/type/scope, no bodies)."""
+    org_id = _memory_org_id(request)
+    if not org_id:
+        return JsonResponse({"status": "error", "error": "org_id is required"}, status=400)
+
+    ds_id = request.GET.get("datasource_id")
+    ds_id = int(ds_id) if ds_id else None
+    user_id = _memory_user_id(request)
+
+    memories = memory_service.list_memories(
+        organisation_id=org_id, user_id=user_id, data_source_id=ds_id,
+    )
+    resp = {"status": "success", "memories": memories, "count": len(memories)}
+    if request.GET.get("render") in ("1", "true", "yes"):
+        resp["index"] = memory_service.render_index(memories)
+    return JsonResponse(resp)
+
+
+@require_service_auth()
+@require_http_methods(["GET"])
+def get_memory(request, name):
+    """Return the full content (+ content_hash) of one memory by name."""
+    org_id = _memory_org_id(request)
+    if not org_id:
+        return JsonResponse({"status": "error", "error": "org_id is required"}, status=400)
+
+    ds_id = request.GET.get("datasource_id")
+    ds_id = int(ds_id) if ds_id else None
+    user_id = _memory_user_id(request)
+
+    try:
+        mem = memory_service.read_memory(
+            organisation_id=org_id, user_id=user_id, name=name, data_source_id=ds_id,
+        )
+    except Exception as e:
+        return _memory_error_response(e)
+
+    return JsonResponse({"status": "success", "memory": memory_service.serialize(mem)})
+
+
+@require_service_auth()
+@require_http_methods(["GET"])
+def grep_memory(request):
+    """Regex-search memory bodies; returns matching index rows (no bodies)."""
+    org_id = _memory_org_id(request)
+    if not org_id:
+        return JsonResponse({"status": "error", "error": "org_id is required"}, status=400)
+
+    pattern = request.GET.get("pattern")
+    if not pattern:
+        return JsonResponse({"status": "error", "error": "pattern is required"}, status=400)
+
+    ds_id = request.GET.get("datasource_id")
+    ds_id = int(ds_id) if ds_id else None
+    user_id = _memory_user_id(request)
+
+    try:
+        matches = memory_service.grep_memory(
+            organisation_id=org_id, user_id=user_id, pattern=pattern, data_source_id=ds_id,
+        )
+    except Exception as e:
+        return _memory_error_response(e)
+    return JsonResponse({"status": "success", "matches": matches, "count": len(matches)})
+
+
+#
+# @require_service_auth()
+# @require_http_methods(["GET"])
+# def get_datasource_context(request, datasource_identifier):
+#     """Bundle schema metadata AND the memory index for one datasource.
+#
+#     The "complete package" call: an agent gets the tables/columns it can see
+#     plus the memory index (global + this datasource) in one response. Full
+#     memory bodies are fetched lazily via get_memory.
+#     """
+#     ds = request.resolved_datasource
+#     org_id = _memory_org_id(request)
+#     user_id = _memory_user_id(request)
+#
+#     roles = _resolve_roles(request)
+#     tables, columns = get_admin_config_object(ds, roles)
+#
+#     table_data = []
+#     for table in tables:
+#         table_columns = columns.filter(table_id=table.id)
+#         table_data.append({
+#             "table_name": table.public_name,
+#             "table_description": table.description or "",
+#             "estimated_row_count": table.estimated_row_count,
+#             "columns": list(table_columns.values("public_name", "data_type", "description")),
+#         })
+#
+#     memories = []
+#     if org_id:
+#         memories = memory_service.list_memories(
+#             organisation_id=org_id, user_id=user_id, data_source_id=ds.id,
+#         )
+#
+#     return JsonResponse({
+#         "status": "success",
+#         "datasource": {"id": ds.id, "name": ds.display_name, "description": ds.description},
+#         "schema": table_data,
+#         "memory_index": memories,
+#         "memory_note": (
+#             "memory_index shows one line per fact. Call get_memory(name=...) for "
+#             "the full content of any entry that looks relevant before relying on it."
+#         ),
+#     })
+
+
+@csrf_exempt
+@require_service_auth()
+@require_http_methods(["POST"])
+def save_memory(request):
+    """Create or fully replace a memory (upsert by scope+name).
+
+    Replacing an existing memory requires expected_hash (read-before-write).
+    """
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "error": "Invalid JSON"}, status=400)
+
+    org_id = _memory_org_id(request)
+    if not org_id:
+        return JsonResponse({"status": "error", "error": "org_id is required"}, status=400)
+
+    name = (body.get("name") or "").strip()
+    if not name:
+        return JsonResponse({"status": "error", "error": "name is required"}, status=400)
+
+    store = _memory_store(body)
+    user_id = _memory_user_id(request)
+    perm_err = _check_write_perms(request, store, user_id)
+    if perm_err:
+        return perm_err
+
+    try:
+        mem, action = memory_service.write_memory(
+            organisation_id=org_id,
+            name=name,
+            description=body.get("description", ""),
+            memory_type=body.get("memory_type", "project"),
+            content=body.get("content", ""),
+            store=store,
+            created_by_id=user_id,
+            data_source_id=body.get("datasource_id"),
+            expected_hash=body.get("expected_hash"),
+        )
+    except Exception as e:
+        return _memory_error_response(e)
+
+    return JsonResponse({
+        "status": "success",
+        "action": action,
+        "memory": {"name": mem.name, "store": mem.store,
+                   "datasource_id": mem.data_source_id,
+                   "content_hash": mem.content_hash},
+    })
+
+
+@csrf_exempt
+@require_service_auth()
+@require_http_methods(["POST"])
+def edit_memory(request, name):
+    """Exact string replacement inside an existing memory (read-before-write)."""
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "error": "Invalid JSON"}, status=400)
+
+    org_id = _memory_org_id(request)
+    if not org_id:
+        return JsonResponse({"status": "error", "error": "org_id is required"}, status=400)
+
+    old_string = body.get("old_string")
+    new_string = body.get("new_string")
+    if not old_string:
+        return JsonResponse({"status": "error", "error": "old_string is required"}, status=400)
+    if new_string is None:
+        return JsonResponse({"status": "error", "error": "new_string is required"}, status=400)
+
+    store = _memory_store(body)
+    user_id = _memory_user_id(request)
+    perm_err = _check_write_perms(request, store, user_id)
+    if perm_err:
+        return perm_err
+
+    try:
+        mem = memory_service.edit_memory(
+            organisation_id=org_id,
+            name=name,
+            old_string=old_string,
+            new_string=new_string,
+            store=store,
+            created_by_id=user_id,
+            expected_hash=body.get("expected_hash"),
+            replace_all=bool(body.get("replace_all", False)),
+            data_source_id=body.get("datasource_id"),
+        )
+    except Exception as e:
+        return _memory_error_response(e)
+
+    return JsonResponse({
+        "status": "success",
+        "memory": {"name": mem.name, "content_hash": mem.content_hash},
+    })
+
+
+@csrf_exempt
+@require_service_auth()
+@require_http_methods(["DELETE", "POST"])
+def delete_memory(request, name):
+    """Delete a memory by name within the acting scope."""
+    body = {}
+    if request.body:
+        try:
+            body = json.loads(request.body)
+        except json.JSONDecodeError:
+            body = {}
+
+    org_id = _memory_org_id(request)
+    if not org_id:
+        return JsonResponse({"status": "error", "error": "org_id is required"}, status=400)
+
+    store = _memory_store(body)
+    user_id = _memory_user_id(request)
+    perm_err = _check_write_perms(request, store, user_id)
+    if perm_err:
+        return perm_err
+
+    removed = memory_service.delete_memory(
+        organisation_id=org_id,
+        name=name,
+        store=store,
+        created_by_id=user_id,
+        data_source_id=body.get("datasource_id"),
+    )
+    if not removed:
+        return JsonResponse({"status": "error", "error": f"No memory named '{name}'."}, status=404)
+    return JsonResponse({"status": "success", "removed": removed})

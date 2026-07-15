@@ -380,3 +380,21 @@ class PromptExampleAdmin(OrganisationFilterMixin, admin.ModelAdmin):
         if not change and not obj.created_by_id:
             obj.is_shared = True
         super().save_model(request, obj, form, change)
+
+
+@admin.register(models.Memory)
+class MemoryAdmin(OrganisationFilterMixin, reversion.admin.VersionAdmin):
+    list_display = ('name', 'description', 'memory_type', 'store',
+                    'data_source', 'created_by', 'updated_at')
+    list_filter = ('memory_type', 'store', 'data_source')
+    search_fields = ('name', 'description', 'content')
+    organisation_related_field_names = ['organisation']
+    exclude = ['organisation']
+
+    def save_model(self, request, obj, form, change):
+        org_id = request.org_id
+        org = models.CoreOrganisation.objects.get(pk=org_id)
+        obj.organisation = org
+        if not change and not obj.created_by_id:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)

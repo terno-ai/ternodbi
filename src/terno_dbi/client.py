@@ -254,3 +254,98 @@ class TernoDBIClient:
         )
         data = self._handle_response(response)
         return data
+
+    # --- Memory -------------------------------------------------------------
+
+    # def get_datasource_context(self, datasource: DatasourceIdentifier) -> Dict:
+    #     """Schema metadata + memory index for a datasource, in one call."""
+    #     url = f"{self.base_url}/api/query/datasources/{datasource}/context/"
+    #     response = requests.get(url, headers=self._get_headers())
+    #     return self._handle_response(response)
+
+    def list_memories(self, datasource_id: Optional[int] = None, render: bool = False) -> Dict:
+        url = f"{self.base_url}/api/query/memory/"
+        params = {}
+        if datasource_id is not None:
+            params["datasource_id"] = datasource_id
+        if render:
+            params["render"] = "1"
+        response = requests.get(url, params=params or None, headers=self._get_headers())
+        return self._handle_response(response)
+
+    def get_memory(self, name: str, datasource_id: Optional[int] = None) -> Dict:
+        url = f"{self.base_url}/api/query/memory/{name}/"
+        params = {"datasource_id": datasource_id} if datasource_id is not None else None
+        response = requests.get(url, params=params, headers=self._get_headers())
+        data = self._handle_response(response)
+        return data.get("memory", {})
+
+    def grep_memory(self, pattern: str, datasource_id: Optional[int] = None) -> List[Dict]:
+        url = f"{self.base_url}/api/query/memory/grep/"
+        params = {"pattern": pattern}
+        if datasource_id is not None:
+            params["datasource_id"] = datasource_id
+        response = requests.get(url, params=params, headers=self._get_headers())
+        data = self._handle_response(response)
+        return data.get("matches", [])
+
+    def save_memory(
+        self,
+        name: str,
+        description: str,
+        content: str,
+        memory_type: str = "project",
+        store: str = "user",
+        datasource_id: Optional[int] = None,
+        expected_hash: Optional[str] = None,
+    ) -> Dict:
+        url = f"{self.base_url}/api/query/memory/save/"
+        payload = {
+            "name": name,
+            "description": description,
+            "content": content,
+            "memory_type": memory_type,
+            "store": store,
+        }
+        if datasource_id is not None:
+            payload["datasource_id"] = datasource_id
+        if expected_hash is not None:
+            payload["expected_hash"] = expected_hash
+        response = requests.post(url, json=payload, headers=self._get_headers())
+        return self._handle_response(response)
+
+    def edit_memory(
+        self,
+        name: str,
+        old_string: str,
+        new_string: str,
+        expected_hash: str,
+        store: str = "user",
+        replace_all: bool = False,
+        datasource_id: Optional[int] = None,
+    ) -> Dict:
+        url = f"{self.base_url}/api/query/memory/{name}/edit/"
+        payload = {
+            "old_string": old_string,
+            "new_string": new_string,
+            "expected_hash": expected_hash,
+            "store": store,
+            "replace_all": replace_all,
+        }
+        if datasource_id is not None:
+            payload["datasource_id"] = datasource_id
+        response = requests.post(url, json=payload, headers=self._get_headers())
+        return self._handle_response(response)
+
+    def delete_memory(
+        self,
+        name: str,
+        store: str = "user",
+        datasource_id: Optional[int] = None,
+    ) -> Dict:
+        url = f"{self.base_url}/api/query/memory/{name}/delete/"
+        payload = {"store": store}
+        if datasource_id is not None:
+            payload["datasource_id"] = datasource_id
+        response = requests.post(url, json=payload, headers=self._get_headers())
+        return self._handle_response(response)

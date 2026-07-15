@@ -17,4 +17,12 @@ urlpatterns = [
     path("similar-examples/", views.get_similar_examples_for_agent, name="similar_examples"),
     path("add-examples/", views.add_prompt_example, name="add_examples"),
     path("export/", views.export_query, name="export_query_legacy"),
+    # path("datasources/<str:datasource_identifier>/context/",
+    #      views.get_datasource_context, name="get_datasource_context"),
+    path("memory/", views.list_memories, name="list_memories"),
+    path("memory/save/", views.save_memory, name="save_memory"),
+    path("memory/grep/", views.grep_memory, name="grep_memory"),
+    path("memory/<str:name>/", views.get_memory, name="get_memory"),
+    path("memory/<str:name>/edit/", views.edit_memory, name="edit_memory"),
+    path("memory/<str:name>/delete/", views.delete_memory, name="delete_memory"),
 ]
