@@ -46,9 +46,9 @@ class Command(BaseCommand):
             '--user',
             type=str,
             default=None,
-            help='Username to bind this token to as its acting identity '
-                 '(the memory author for user-store writes, and the audit-log '
-                 'user for admin actions). Without it the token has no user identity.'
+            help='Username this token acts as (created_for) — the memory author '
+                 'for user-store writes, and what visibility is scoped to. '
+                 'Without it the token has no user identity.'
         )
 
     def handle(self, *args, **options):
@@ -70,11 +70,11 @@ class Command(BaseCommand):
             except CoreOrganisation.DoesNotExist:
                 raise CommandError(f"No organisation with subdomain '{options['org']}'")
 
-        created_by = None
+        created_for = None
         if options['user']:
             User = get_user_model()
             try:
-                created_by = User.objects.get(username=options['user'])
+                created_for = User.objects.get(username=options['user'])
             except User.DoesNotExist:
                 raise CommandError(f"No user '{options['user']}'")
 
@@ -91,7 +91,7 @@ class Command(BaseCommand):
                 expires_at=expires_at,
                 datasource_ids=datasource_ids,
                 organisation=organisation,
-                created_by=created_by,
+                created_for=created_for,
             )
 
             logger.info(
@@ -104,7 +104,7 @@ class Command(BaseCommand):
             self.stdout.write(f"TOKEN TYPE: {token_type.upper()}")
             self.stdout.write(f"KEY       : {full_key}")
             self.stdout.write(f"ORG       : {organisation.subdomain if organisation else 'NONE (org-scoped features unusable)'}")
-            self.stdout.write(f"USER      : {created_by.username if created_by else 'NONE (user-store memory unusable)'}")
+            self.stdout.write(f"USER      : {created_for.username if created_for else 'NONE (user-store memory unusable)'}")
 
             if expires_at:
                 self.stdout.write(f"EXPIRES   : {expires_at.isoformat()}")

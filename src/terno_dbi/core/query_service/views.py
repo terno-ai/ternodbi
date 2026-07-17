@@ -25,14 +25,13 @@ from django.contrib.auth.models import User
 logger = logging.getLogger(__name__)
 
 
-def _resolve_roles(request, role_ids=None):
-    """Resolve Django Group roles from explicit IDs or fall back to token-inherited groups."""
-    if role_ids:
-        if isinstance(role_ids, str):
-            role_ids = [int(r) for r in role_ids.split(',') if r.strip()]
-        return Group.objects.filter(id__in=role_ids)
-    if hasattr(request, 'service_token') and request.service_token.groups.exists():
-        return request.service_token.groups.all()
+def _resolve_roles(request):
+    """The Django Groups that gate this request's table/column visibility AND
+    row-level-security filters.
+    """
+    token = getattr(request, 'service_token', None)
+    if token is not None:
+        return token.groups.all()
     return Group.objects.none()
 
 
@@ -68,8 +67,7 @@ def list_tables(request, datasource_identifier):
     ds = request.resolved_datasource
     logger.debug("List tables requested: datasource='%s'", ds.display_name)
 
-    role_ids_str = request.GET.get('roles', '')
-    roles = _resolve_roles(request, role_ids_str if role_ids_str else None)
+    roles = _resolve_roles(request)
 
     tables, columns = get_admin_config_object(ds, roles)
 
@@ -246,8 +244,7 @@ def execute_query(request, datasource_identifier=None):
 
         max_rows = body.get("max_rows")
 
-        role_ids = body.get("roles", [])
-        roles = _resolve_roles(request, role_ids if role_ids else None)
+        roles = _resolve_roles(request)
 
         mDb = prepare_mdb(ds, roles)
         logger.info("Execute query: datasource='%s'", ds.display_name)
@@ -322,8 +319,7 @@ def stream_query(request, datasource_identifier=None):
                 "error": "Missing 'sql' in request body"
             }, status=400)
 
-        role_ids = body.get("roles", [])
-        roles = _resolve_roles(request, role_ids if role_ids else None)
+        roles = _resolve_roles(request)
 
         max_rows = body.get("max_rows")
         if max_rows is not None and isinstance(max_rows, int):
@@ -398,8 +394,7 @@ def export_query(request, datasource_identifier=None):
                 "status": "error",
                 "error": "Missing 'sql' in request body"
             }, status=400)
-        role_ids = body.get("roles", [])
-        roles = _resolve_roles(request, role_ids if role_ids else None)
+        roles = _resolve_roles(request)
 
         mDb = prepare_mdb(ds, roles)
         transform_result = generate_native_sql(mDb, sql, ds.dialect_name)
@@ -533,9 +528,10 @@ def _memory_org_id(request):
 
 
 def _memory_user_id(request):
-    """Acting user for a memory op — strictly the token's own bound user."""
+    """Acting user for a memory op — strictly the token's own bound identity.
+    """
     token = getattr(request, "service_token", None)
-    return token.created_by_id if token else None
+    return token.created_for_id if token else None
 
 
 def _memory_store(body):

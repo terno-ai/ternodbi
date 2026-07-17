@@ -406,7 +406,19 @@ class ServiceToken(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='created_tokens'
+        related_name='created_tokens',
+        help_text="Audit only: who/what actually minted this token (an admin, "
+                  "the system, etc). Not used for authorization."
+    )
+    created_for = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tokens_created_for',
+        help_text="Whose identity this token acts as — the memory author for "
+                  "user-store writes, and what visibility is scoped to. This, "
+                  "not created_by, is what authorization reads."
     )
     expires_at = models.DateTimeField(
         null=True,

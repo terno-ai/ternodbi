@@ -25,14 +25,16 @@ def setup_test_data(db):
         name='Test Token',
         token_type=ServiceToken.TokenType.QUERY,
         created_by=user,
+        created_for=user,   # memory identity is read from created_for, not created_by
         organisation=org,
         key_hash='hash1'
     )
-    
+
     admin_token = ServiceToken.objects.create(
         name='Admin Token',
         token_type=ServiceToken.TokenType.ADMIN,
         created_by=user,
+        created_for=user,   # memory identity is read from created_for, not created_by
         organisation=org,
         key_hash='hash2'
     )

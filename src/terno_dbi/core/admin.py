@@ -216,28 +216,29 @@ if not PARENT_APP_INSTALLED:
         search_fields = ('group__name', 'organisation__name')
         raw_id_fields = ('group', 'organisation')
 
-
     @admin.register(ServiceToken)
     class ServiceTokenAdmin(admin.ModelAdmin):
-        list_display = ('name', 'key_prefix', 'token_type', 'organisation', 'is_active', 'last_used', 'created_at')
+        list_display = ('name', 'key_prefix', 'token_type', 'organisation', 'created_for', 'is_active', 'last_used', 'created_at')
         list_filter = ('token_type', 'is_active', 'organisation', 'created_at')
-        search_fields = ('name', 'key_prefix', 'organisation__name')
+        search_fields = ('name', 'key_prefix', 'organisation__name', 'created_for__username')
         readonly_fields = ('key_hash', 'key_prefix', 'last_used', 'created_at', 'created_by')
-        fields = ('name', 'token_type', 'organisation', 'datasources', 'groups', 'is_active', 'expires_at', 
-                  'key_hash', 'key_prefix', 'last_used', 'created_at', 'created_by')
+        fields = ('name', 'token_type', 'organisation', 'created_for', 'datasources', 'groups', 'is_active',
+                  'expires_at', 'key_hash', 'key_prefix', 'last_used', 'created_at', 'created_by')
 
         filter_horizontal = ('datasources', 'groups')
-        raw_id_fields = ('organisation',)
+        autocomplete_fields = ('organisation', 'created_for')
 
         def save_model(self, request, obj, form, change):
             if not change:
 
                 organisation = form.cleaned_data.get('organisation')
+                created_for = form.cleaned_data.get('created_for') or request.user
 
                 token, full_key = generate_service_token(
                     name=obj.name,
                     token_type=obj.token_type,
                     created_by=request.user,
+                    created_for=created_for,
                     organisation=organisation
                 )
 

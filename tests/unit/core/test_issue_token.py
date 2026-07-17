@@ -91,7 +91,8 @@ class TestIssueTokenCommand:
         
         token = ServiceToken.objects.get(name='bound_token')
         assert token.organisation == org
-        assert token.created_by == user
+        assert token.created_for == user
+        assert token.created_by is None
 
     def test_handle_invalid_org(self):
         """Should fail if organisation subdomain is invalid."""
