@@ -27,13 +27,15 @@ The easiest way to get started is to run TernoDBI locally and connect your favor
 3. **Configure your Database**
    Open the admin panel at [http://127.0.0.1:8376/admin](http://127.0.0.1:8376/admin) and add your datasource connections.
 4. **Generate an Access Token**
-   Generate a token from the Admin UI or via the CLI:
+   Generate a token from the Admin UI or via the CLI. Bind it to your organisation
+   and a user with `--org`/`--user` — an unbound token can't use org-scoped features
+   like memory:
    ```bash
    # Query Token (for AI Agents)
-   ternodbi manage issue_token --name "My Agent" --type query
+   ternodbi manage issue_token --name "My Agent" --type query --org <subdomain> --user <username>
 
    # Admin Token (for full system access)
-   ternodbi manage issue_token --name "System Admin" --type admin
+   ternodbi manage issue_token --name "System Admin" --type admin --org <subdomain> --user <username>
    ```
 5. **Configure MCP** (See [MCP Integration](#ternodbi-as-an-mcp-server) below)
 6. **Start chatting with your enterprise data!**
@@ -85,17 +87,19 @@ This forces the standalone server to read and write directly to `/Users/navin/te
 
 
 ### Management Commands (CLI)
-Automate your credential and access management simply via the built-in CLI:
+Automate your credential and access management simply via the built-in CLI. Always
+pass `--org`/`--user` to bind the token to an organisation and a user — without them
+the token has no identity and org-scoped features (e.g. memory) won't work:
 
 ```bash
 # General Query Token (For standard AI Assistants)
-ternodbi manage issue_token --name "Claude Agent" --type query --expires 30
+ternodbi manage issue_token --name "Claude Agent" --type query --expires 30 --org acme --user alice
 
 # Admin Token (Full System Access)
-ternodbi manage issue_token --name "System Admin" --type admin
+ternodbi manage issue_token --name "System Admin" --type admin --org acme --user alice
 
 # Scoped Token (Restricted to a Specific Datasource)
-ternodbi manage issue_token --name "Finance Data Only" --type query --datasource 1
+ternodbi manage issue_token --name "Finance Data Only" --type query --datasource 1 --org acme --user alice
 ```
 
 ### Query API & Pagination
@@ -139,7 +143,7 @@ TernoDBI exposes Model Context Protocol (MCP) servers to effortlessly plug into 
 1. Download and install [Claude Desktop](https://claude.ai/download).
 2. Open Claude Desktop, navigate to **Account → Settings → Developer**.
 3. Click **Edit Config** to open your `claude_desktop_config.json`.
-4. Paste the following configuration:
+4. Mint tokens bound to your org and user (see [Management Commands](#management-commands-cli) above), then paste the following configuration:
 
 ```json
 {

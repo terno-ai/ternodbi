@@ -110,9 +110,18 @@ def main():
         execute_from_command_line(sys.argv)
 
     elif command == "mcp-config":
+        django.setup()  
         port = "8376"
         server_url = f"http://127.0.0.1:{port}"
-        logger.info("\nMCP Configuration Snippet (for claude_desktop_config.json):")
+        logger.info(
+            "\nBefore pasting this in, mint each token bound to an organisation and "
+            "a user — an unbound token cannot use org-scoped features like memory:\n"
+            "  ternodbi manage issue_token --name \"claude-query\" --type query "
+            "--org <subdomain> --user <username>\n"
+            "  ternodbi manage issue_token --name \"claude-admin\" --type admin "
+            "--org <subdomain> --user <username>\n"
+        )
+        logger.info("MCP Configuration Snippet (for claude_desktop_config.json):")
         mcp_config = {
             "mcpServers": {
                 "ternodbi-query": {

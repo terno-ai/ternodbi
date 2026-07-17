@@ -14,7 +14,23 @@ logger = logging.getLogger(__name__)
 
 client = TernoDBIClient()
 
-server = Server("ternodbi-admin")
+server = Server(
+    "ternodbi-admin",
+    instructions=(
+        "Write access to manage datasource schema metadata (rename tables/columns, "
+        "edit descriptions, add/sync/delete datasources) and to write durable, shared "
+        "memory (save_memory/edit_memory/delete_memory).\n\n"
+        "Memory write rules: one fact per memory. Prefer edit_memory over a fresh "
+        "save_memory when an existing memory is still mostly right but needs a "
+        "correction — it preserves any [[name]] links other memories point at it "
+        "with. Both edit_memory and a save_memory that replaces existing content "
+        "require expected_hash from a get_memory call made just before — this is "
+        "enforced server-side, not optional. store='org' shares a memory with every "
+        "agent working on this organisation's data; store='user' (the default) is "
+        "private to you. Prefer 'org' for facts that would help any agent querying "
+        "this data, not just facts specific to your own preferences or this session."
+    ),
+)
 
 
 @server.list_tools()

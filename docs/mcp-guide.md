@@ -7,7 +7,7 @@ TernoDBI provides first-class support for the Model Context Protocol, enabling i
 We expose two separate MCP servers to separate concerns:
 
 ### 1. Query Server (`ternodbi-query`)
-*   **Purpose**: Safe analysis and data retrieval.
+*   **Purpose**: Safe, read-only analysis, data retrieval, and reading durable memory.
 *   **Tools Provided**:
     *   `list_datasources`: See available databases.
     *   `list_tables`: See tables in a database.
@@ -16,9 +16,12 @@ We expose two separate MCP servers to separate concerns:
     *   `execute_query`: Run `SELECT` queries with advanced pagination.
         *   Supports `offset` (page-based) and `cursor` (infinite scroll) modes.
         *   Security: All cursors are HMAC-signed to prevent tampering.
+    *   `list_memories`: The memory index (name/description/type/scope) — not full content.
+    *   `get_memory`: Full content of one memory by name, plus its `content_hash`.
+    *   `grep_memory`: Regex search over memory bodies.
 
 ### 2. Admin Server (`ternodbi-admin`)
-*   **Purpose**: Management and Curation.
+*   **Purpose**: Management, curation, and writing durable memory.
 *   **Tools Provided**:
     *   `add_datasource`: Safely connect a new database.
     *   `delete_datasource`: Remove a connection.
@@ -29,10 +32,27 @@ We expose two separate MCP servers to separate concerns:
     *   `update_table_description`: Add documentation to a table.
     *   `update_column_description`: Add documentation to a column.
     *   `get_table_info`: Fetch detailed context for AI curation.
+    *   `save_memory`: Create, or fully replace (with `expected_hash`), a memory.
+    *   `edit_memory`: Exact string replacement in an existing memory's body.
+    *   `delete_memory`: Remove a memory.
+
+Memory has two independent scopes: **store** (`user` = private to whoever wrote it,
+`org` = shared with every agent working on this organisation's data — writing to
+`org` requires an `admin:write`-scoped token) and **datasource** (omit for a global
+fact, set `datasource_id` for a fact specific to one database).
 
 ## Connecting to Claude Desktop
 
-Add the following to your `claude_desktop_config.json`.
+First, mint a token for each server, bound to your organisation and a user —
+an unbound token has no identity and can't use org-scoped features like memory:
+
+```bash
+ternodbi manage issue_token --name "claude-query" --type query --org <subdomain> --user <username>
+ternodbi manage issue_token --name "claude-admin" --type admin --org <subdomain> --user <username>
+```
+
+Then add the following to your `claude_desktop_config.json`, using the two keys
+each command prints.
 
 ### Production Config (Recommended)
 This uses `uvx` to download and run the latest version of TernoDBI automatically.
@@ -83,3 +103,4 @@ Use this if you are modifying TernoDBI code locally.
 *   **Connection Refused**: Ensure the Django server is running (`python manage.py runserver`).
 *   **Authentication Failed**: Check that your `TERNODBI_API_KEY` matches a valid active token in the database.
 *   **Module Not Found**: If using local dev, ensure you ran `pip install -e .` and are pointing to the `dbi-mcp` binary in your virtualenv.
+*   **Memory tools return "no organisation/user" errors**: Your token wasn't minted with `--org`/`--user`. Re-issue it — see `issue_token` above.

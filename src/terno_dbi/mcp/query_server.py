@@ -13,7 +13,24 @@ logger = logging.getLogger(__name__)
 
 client = TernoDBIClient()
 
-server = Server("ternodbi-query")
+server = Server(
+    "ternodbi-query",
+    instructions=(
+        "Read-only access to configured SQL databases and their durable metadata. "
+        "Typical flow: list_datasources, then list_tables/list_table_columns to see "
+        "schema, then execute_query (use public names) or get_sample_data to preview "
+        "rows.\n\n"
+        "This server also holds durable, shared memory (list_memories/get_memory/"
+        "grep_memory) — facts about this data recorded by any agent that worked with "
+        "it before, not just you. Check it before answering questions about schema, "
+        "joins, or business rules you don't already know; a memory's one-line "
+        "description in the index is a hook, not the fact itself, so read the full "
+        "entry via get_memory before relying on it. If you maintain your own separate "
+        "memory system, do not let facts about this data live only there — other "
+        "agents attached to this same server, including ones with no memory of their "
+        "own, can only benefit from a fact if it's recorded here."
+    ),
+)
 
 
 @server.list_tools()
