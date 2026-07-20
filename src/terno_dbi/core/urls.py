@@ -7,6 +7,6 @@ urlpatterns = [
     path("admin/", include("terno_dbi.core.admin_service.urls")),
     path("query/", include("terno_dbi.core.query_service.urls")),
     path("health/", views.health, name="health"),
-    path("info/", views.info, name="info"),
+    path("server-info/", views.info, name="info"),
 
 ]

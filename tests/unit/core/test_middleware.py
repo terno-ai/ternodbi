@@ -60,11 +60,24 @@ class TestMiddlewarePathFiltering:
 
     def test_skips_info_endpoint(self, middleware, mock_get_response, request_factory):
         """Info endpoint should not require auth."""
-        request = request_factory.get('/api/query/info/')
+        request = request_factory.get('/api/server-info/')
         
         response = middleware(request)
-        
+
         mock_get_response.assert_called_once_with(request)
+
+    def test_does_not_skip_paths_merely_containing_info(self, middleware, request_factory):
+        """
+        Regression test: a path that merely contains 'info' as a substring
+        (e.g. the get_table_info endpoint, which ends in '/tables/<name>/info/')
+        must NOT bypass auth. Only the exact server-info endpoint should.
+        """
+        request = request_factory.get('/api/admin/datasources/7/tables/weekly_sales/info/')
+
+        response = middleware(request)
+
+        assert response.status_code == 401
+        assert not hasattr(request, 'service_token')
 
 
 class TestMiddlewareAuthorizationHeader:

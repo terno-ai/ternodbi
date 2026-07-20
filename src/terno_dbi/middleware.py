@@ -17,7 +17,7 @@ class ServiceTokenMiddleware:
         if not is_protected:
             return self.get_response(request)
 
-        if "/health/" in request.path or "/info/" in request.path:
+        if request.path.endswith("/health/") or request.path.endswith("/server-info/"):
             return self.get_response(request)
 
         auth_header = request.headers.get("Authorization", "")
