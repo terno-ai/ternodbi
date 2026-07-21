@@ -12,6 +12,118 @@ from terno_dbi.services.query import execute_native_sql
 
 logger = logging.getLogger(__name__)
 
+AGENT_ORG_PROMPT_MAX_CHARS = 12000
+
+
+@csrf_exempt
+@require_service_auth()
+@require_scope('admin:write')
+@require_http_methods(["POST", "PATCH"])
+def update_org_prompt(request):
+    """Fully replace the org prompt (create if blank).
+
+    Capped at AGENT_ORG_PROMPT_MAX_CHARS per call — for content beyond that,
+    write an initial chunk here then grow it with the uncapped edit_org_prompt
+    """
+    org = getattr(request, "token_organisation", None)
+    if not org:
+        return JsonResponse({"status": "error", "error": "org is required"}, status=400)
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "error": "Invalid JSON"}, status=400)
+
+    new_prompt = body.get("org_prompt", "")
+    if len(new_prompt) > AGENT_ORG_PROMPT_MAX_CHARS:
+        return JsonResponse({
+            "status": "error",
+            "error": f"org_prompt is {len(new_prompt)} chars, over the "
+                     f"{AGENT_ORG_PROMPT_MAX_CHARS}-char limit for programmatic writes. "
+                     f"org_prompt is injected into every request for every user — keep it "
+                     f"to a few always-apply directives; put facts, schema, or domain "
+                     f"knowledge in memory (save_memory) instead."
+        }, status=400)
+
+    if org.org_prompt:
+        expected_hash = body.get("expected_hash")
+        if expected_hash is None:
+            return JsonResponse({
+                "status": "error",
+                "error": "org_prompt is already set — read it first (get_org_prompt), "
+                         "then pass its content_hash as expected_hash to confirm you "
+                         "are replacing the current content."
+            }, status=409)
+        if expected_hash != org.org_prompt_hash:
+            return JsonResponse({
+                "status": "error",
+                "error": "org_prompt changed since you last read it. Re-read it and "
+                         "re-apply your change (expected_hash did not match the "
+                         "current content)."
+            }, status=409)
+
+    org.org_prompt = new_prompt
+    org.save(update_fields=["org_prompt"])
+    return JsonResponse({
+        "status": "success",
+        "org_prompt": org.org_prompt,
+        "content_hash": org.org_prompt_hash,
+    })
+
+
+@csrf_exempt
+@require_service_auth()
+@require_scope('admin:write')
+@require_http_methods(["POST"])
+def edit_org_prompt(request):
+    """Exact string replacement inside the org prompt
+    """
+    org = getattr(request, "token_organisation", None)
+    if not org:
+        return JsonResponse({"status": "error", "error": "org is required"}, status=400)
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "error": "Invalid JSON"}, status=400)
+
+    old_string = body.get("old_string")
+    new_string = body.get("new_string")
+    if not old_string:
+        return JsonResponse({"status": "error", "error": "old_string is required"}, status=400)
+    if new_string is None:
+        return JsonResponse({"status": "error", "error": "new_string is required"}, status=400)
+
+    expected_hash = body.get("expected_hash")
+    if expected_hash is None or expected_hash != org.org_prompt_hash:
+        return JsonResponse({
+            "status": "error",
+            "error": "org_prompt must be read immediately before editing — "
+                     "expected_hash missing or stale. Re-read it (get_org_prompt) "
+                     "and re-apply your change."
+        }, status=409)
+
+    replace_all = bool(body.get("replace_all", False))
+    content = org.org_prompt or ""
+    count = content.count(old_string)
+    if count == 0:
+        return JsonResponse({"status": "error", "error": "old_string not found in org_prompt."}, status=400)
+    if count > 1 and not replace_all:
+        return JsonResponse({
+            "status": "error",
+            "error": f"old_string is not unique (found {count} times). Pass "
+                     f"replace_all=true or narrow old_string."
+        }, status=400)
+
+    new_content = content.replace(old_string, new_string, -1 if replace_all else 1)
+
+    org.org_prompt = new_content
+    org.save(update_fields=["org_prompt"])
+    return JsonResponse({
+        "status": "success",
+        "org_prompt": org.org_prompt,
+        "content_hash": org.org_prompt_hash,
+    })
+
+
 @csrf_exempt
 @require_service_auth()
 @require_scope('admin:write')

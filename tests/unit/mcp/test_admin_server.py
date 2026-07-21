@@ -16,6 +16,8 @@ class TestAdminServer(unittest.IsolatedAsyncioTestCase):
         tool_names = [t.name for t in tools]
         
         expected_tools = [
+            "update_org_prompt",
+            "edit_org_prompt",
             "rename_table",
             "update_table_description",
             "rename_column",
@@ -42,6 +44,28 @@ class TestAdminServer(unittest.IsolatedAsyncioTestCase):
     async def test_call_tool_dispatch(self):
         """Should dispatch tool calls to appropriate client methods."""
         with patch('terno_dbi.mcp.admin_server.client') as mock_client:
+            # 0. update_org_prompt
+            mock_client.update_org_prompt.return_value = {"org_prompt": "Be concise."}
+            result = await call_tool("update_org_prompt", {"org_prompt": "Be concise."})
+            mock_client.update_org_prompt.assert_called_once_with("Be concise.", expected_hash=None)
+            assert json.loads(result[0].text)["org_prompt"] == "Be concise."
+
+            # 0b. update_org_prompt with expected_hash
+            mock_client.update_org_prompt.reset_mock()
+            mock_client.update_org_prompt.return_value = {"org_prompt": "New."}
+            await call_tool("update_org_prompt", {"org_prompt": "New.", "expected_hash": "abc"})
+            mock_client.update_org_prompt.assert_called_once_with("New.", expected_hash="abc")
+
+            # 0c. edit_org_prompt
+            mock_client.edit_org_prompt.return_value = {"org_prompt": "Always answer in Spanish."}
+            result = await call_tool("edit_org_prompt", {
+                "old_string": "French", "new_string": "Spanish", "expected_hash": "abc",
+            })
+            mock_client.edit_org_prompt.assert_called_once_with(
+                old_string="French", new_string="Spanish", expected_hash="abc", replace_all=False,
+            )
+            assert json.loads(result[0].text)["org_prompt"] == "Always answer in Spanish."
+
             # 1. rename_table
             mock_client.update_table.return_value = {"success": True}
             result = await call_tool("rename_table", {"table_id": 1, "public_name": "NewName"})

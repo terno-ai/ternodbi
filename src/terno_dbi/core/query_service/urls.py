@@ -4,6 +4,8 @@ from . import views
 app_name = "query_service"
 
 urlpatterns = [
+    path("organisation/prompt/", views.get_org_prompt, name="get_org_prompt"),
+    path("organisation/prompt/grep/", views.grep_org_prompt, name="grep_org_prompt"),
     path("datasources/", views.list_datasources, name="list_datasources"),
     path("datasources/<str:datasource_identifier>/tables/", views.list_tables, name="list_tables"),
     path("datasources/<str:datasource_identifier>/tables/<str:table_identifier>/columns/",

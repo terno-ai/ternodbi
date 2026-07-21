@@ -16,6 +16,8 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
         tool_names = [t.name for t in tools]
         
         expected_tools = [
+            "get_org_prompt",
+            "grep_org_prompt",
             "list_datasources",
             "list_tables",
             "list_table_columns",
@@ -33,6 +35,26 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
     async def test_call_tool_dispatch(self):
         """Should dispatch query tools to client."""
         with patch('terno_dbi.mcp.query_server.client') as mock_client:
+            # 0. get_org_prompt
+            mock_client.get_org_prompt.return_value = {"org_prompt": "Always answer in French."}
+            result = await call_tool("get_org_prompt", {})
+            mock_client.get_org_prompt.assert_called_once_with(offset=None, limit=None)
+            data = json.loads(result[0].text)
+            assert data["org_prompt"] == "Always answer in French."
+
+            # 0a. get_org_prompt with pagination args
+            mock_client.get_org_prompt.reset_mock()
+            mock_client.get_org_prompt.return_value = {"org_prompt": "line 5", "has_more": True, "next_offset": 6}
+            result = await call_tool("get_org_prompt", {"offset": 5, "limit": 1})
+            mock_client.get_org_prompt.assert_called_once_with(offset=5, limit=1)
+            assert json.loads(result[0].text)["next_offset"] == 6
+
+            # 0b. grep_org_prompt
+            mock_client.grep_org_prompt.return_value = {"matches": [{"line": 1, "text": "match"}], "count": 1}
+            result = await call_tool("grep_org_prompt", {"pattern": "match"})
+            mock_client.grep_org_prompt.assert_called_once_with("match")
+            assert json.loads(result[0].text)["count"] == 1
+
             # 1. list_datasources
             mock_client.list_datasources.return_value = [{"id": 1}]
             result = await call_tool("list_datasources", {})

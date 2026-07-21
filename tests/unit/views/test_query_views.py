@@ -650,3 +650,286 @@ class TestExecuteQueryEdges:
         response = execute_query(request, setup_test_data['datasource'].id)
         assert response.status_code == 400
         assert 'Cannot transform' in response.content.decode()
+
+
+@pytest.mark.django_db
+class TestGetOrgPrompt:
+    """Tests for GET /api/query/organisation/prompt/"""
+
+    def test_returns_org_prompt(self, request_factory):
+        from django.contrib.auth.models import User
+        from terno_dbi.core.models import CoreOrganisation, ServiceToken
+        from terno_dbi.core.query_service.views import get_org_prompt
+
+        user = User.objects.create_user('orgpromptuser', 'orgprompt@example.com', 'password')
+        org = CoreOrganisation.objects.create(
+            name='Prompt Org', subdomain='promptorg', owner=user, org_prompt='Always answer in French.'
+        )
+        token = ServiceToken.objects.create(
+            name='Org Prompt Token',
+            token_type=ServiceToken.TokenType.QUERY,
+            created_by=user,
+            organisation=org,
+            key_hash='org-prompt-hash',
+        )
+
+        request = request_factory.get('/api/query/organisation/prompt/')
+        request.service_token = token
+
+        response = get_org_prompt(request)
+
+        assert response.status_code == 200
+        data = json.loads(response.content)
+        assert data['status'] == 'success'
+        assert data['org_prompt'] == 'Always answer in French.'
+        assert data['content_hash'] == org.org_prompt_hash
+
+    def test_returns_empty_string_by_default(self, request_factory):
+        from django.contrib.auth.models import User
+        from terno_dbi.core.models import CoreOrganisation, ServiceToken
+        from terno_dbi.core.query_service.views import get_org_prompt
+
+        user = User.objects.create_user('orgpromptuser2', 'orgprompt2@example.com', 'password')
+        org = CoreOrganisation.objects.create(name='Blank Org', subdomain='blankorg', owner=user)
+        token = ServiceToken.objects.create(
+            name='Blank Org Token',
+            token_type=ServiceToken.TokenType.QUERY,
+            created_by=user,
+            organisation=org,
+            key_hash='blank-org-hash',
+        )
+
+        request = request_factory.get('/api/query/organisation/prompt/')
+        request.service_token = token
+
+        response = get_org_prompt(request)
+
+        assert response.status_code == 200
+        data = json.loads(response.content)
+        assert data['org_prompt'] == ''
+
+    def test_no_organisation_returns_400(self, request_factory):
+        from django.contrib.auth.models import User
+        from terno_dbi.core.models import DataSource, ServiceToken
+        from terno_dbi.core.query_service.views import get_org_prompt
+
+        user = User.objects.create_user('noorguser', 'noorg@example.com', 'password')
+        ds = DataSource.objects.create(
+            display_name='no_org_ds', type='postgres',
+            connection_str='postgresql://localhost/noorg', enabled=True
+        )
+        token = ServiceToken.objects.create(
+            name='No Org Token',
+            token_type=ServiceToken.TokenType.QUERY,
+            created_by=user,
+            organisation=None,
+            key_hash='no-org-hash',
+        )
+        token.datasources.add(ds)
+
+        request = request_factory.get('/api/query/organisation/prompt/')
+        request.service_token = token
+
+        response = get_org_prompt(request)
+
+        assert response.status_code == 400
+
+    def test_requires_authentication(self, request_factory):
+        from terno_dbi.core.query_service.views import get_org_prompt
+
+        request = request_factory.get('/api/query/organisation/prompt/')
+
+        response = get_org_prompt(request)
+
+        assert response.status_code == 401
+
+    def _make_org_and_token(self, org_prompt):
+        from django.contrib.auth.models import User
+        from terno_dbi.core.models import CoreOrganisation, ServiceToken
+
+        user = User.objects.create_user('pagingorguser', 'pagingorg@example.com', 'password')
+        org = CoreOrganisation.objects.create(
+            name='Paging Org', subdomain='pagingorg', owner=user, org_prompt=org_prompt
+        )
+        token = ServiceToken.objects.create(
+            name='Paging Org Token',
+            token_type=ServiceToken.TokenType.QUERY,
+            created_by=user,
+            organisation=org,
+            key_hash='paging-org-hash',
+        )
+        return org, token
+
+    def test_pagination_returns_first_page_with_has_more(self, request_factory):
+        from terno_dbi.core.query_service.views import get_org_prompt
+
+        lines = [f'line {i}' for i in range(1, 11)]
+        org, token = self._make_org_and_token('\n'.join(lines))
+
+        request = request_factory.get('/api/query/organisation/prompt/?limit=4')
+        request.service_token = token
+
+        response = get_org_prompt(request)
+        data = json.loads(response.content)
+
+        assert response.status_code == 200
+        assert data['org_prompt'] == '\n'.join(lines[:4])
+        assert data['offset'] == 1
+        assert data['returned_lines'] == 4
+        assert data['has_more'] is True
+        assert data['next_offset'] == 5
+
+    def test_pagination_continues_from_next_offset(self, request_factory):
+        from terno_dbi.core.query_service.views import get_org_prompt
+
+        lines = [f'line {i}' for i in range(1, 11)]
+        org, token = self._make_org_and_token('\n'.join(lines))
+
+        request = request_factory.get('/api/query/organisation/prompt/?offset=5&limit=4')
+        request.service_token = token
+
+        response = get_org_prompt(request)
+        data = json.loads(response.content)
+
+        assert response.status_code == 200
+        assert data['org_prompt'] == '\n'.join(lines[4:8])
+        assert data['offset'] == 5
+        assert data['has_more'] is True
+        assert data['next_offset'] == 9
+
+    def test_pagination_last_page_has_no_more(self, request_factory):
+        from terno_dbi.core.query_service.views import get_org_prompt
+
+        lines = [f'line {i}' for i in range(1, 11)]
+        org, token = self._make_org_and_token('\n'.join(lines))
+
+        request = request_factory.get('/api/query/organisation/prompt/?offset=9&limit=4')
+        request.service_token = token
+
+        response = get_org_prompt(request)
+        data = json.loads(response.content)
+
+        assert response.status_code == 200
+        assert data['org_prompt'] == '\n'.join(lines[8:10])
+        assert data['has_more'] is False
+        assert 'next_offset' not in data
+
+    def test_content_hash_always_covers_full_prompt_regardless_of_page(self, request_factory):
+        from terno_dbi.core.query_service.views import get_org_prompt
+
+        lines = [f'line {i}' for i in range(1, 11)]
+        full_text = '\n'.join(lines)
+        org, token = self._make_org_and_token(full_text)
+        full_hash = org.org_prompt_hash
+
+        request = request_factory.get('/api/query/organisation/prompt/?offset=5&limit=2')
+        request.service_token = token
+
+        response = get_org_prompt(request)
+        data = json.loads(response.content)
+
+        assert data['content_hash'] == full_hash
+
+    def test_invalid_offset_returns_400(self, request_factory):
+        from terno_dbi.core.query_service.views import get_org_prompt
+
+        org, token = self._make_org_and_token('some text')
+        request = request_factory.get('/api/query/organisation/prompt/?offset=0')
+        request.service_token = token
+
+        response = get_org_prompt(request)
+
+        assert response.status_code == 400
+
+    def test_non_integer_limit_returns_400(self, request_factory):
+        from terno_dbi.core.query_service.views import get_org_prompt
+
+        org, token = self._make_org_and_token('some text')
+        request = request_factory.get('/api/query/organisation/prompt/?limit=abc')
+        request.service_token = token
+
+        response = get_org_prompt(request)
+
+        assert response.status_code == 400
+
+
+@pytest.mark.django_db
+class TestGrepOrgPrompt:
+    """Tests for GET /api/query/organisation/prompt/grep/"""
+
+    def _make_org_and_token(self, org_prompt="Line one.\nAlways answer in French.\nLine three."):
+        from django.contrib.auth.models import User
+        from terno_dbi.core.models import CoreOrganisation, ServiceToken
+
+        user = User.objects.create_user('greporgpromptuser', 'greporgprompt@example.com', 'password')
+        org = CoreOrganisation.objects.create(
+            name='Grep Prompt Org', subdomain='greppromptorg', owner=user, org_prompt=org_prompt
+        )
+        token = ServiceToken.objects.create(
+            name='Grep Prompt Token',
+            token_type=ServiceToken.TokenType.QUERY,
+            created_by=user,
+            organisation=org,
+            key_hash='grep-org-prompt-hash',
+        )
+        return org, token
+
+    def test_finds_matching_line(self, request_factory):
+        from terno_dbi.core.query_service.views import grep_org_prompt
+
+        org, token = self._make_org_and_token()
+        request = request_factory.get('/api/query/organisation/prompt/grep/?pattern=french')
+        request.service_token = token
+
+        response = grep_org_prompt(request)
+
+        assert response.status_code == 200
+        data = json.loads(response.content)
+        assert data['count'] == 1
+        assert data['matches'][0]['line'] == 2
+        assert 'French' in data['matches'][0]['text']
+
+    def test_no_match_returns_empty(self, request_factory):
+        from terno_dbi.core.query_service.views import grep_org_prompt
+
+        org, token = self._make_org_and_token()
+        request = request_factory.get('/api/query/organisation/prompt/grep/?pattern=klingon')
+        request.service_token = token
+
+        response = grep_org_prompt(request)
+
+        assert response.status_code == 200
+        data = json.loads(response.content)
+        assert data['count'] == 0
+        assert data['matches'] == []
+
+    def test_missing_pattern_returns_400(self, request_factory):
+        from terno_dbi.core.query_service.views import grep_org_prompt
+
+        org, token = self._make_org_and_token()
+        request = request_factory.get('/api/query/organisation/prompt/grep/')
+        request.service_token = token
+
+        response = grep_org_prompt(request)
+
+        assert response.status_code == 400
+
+    def test_invalid_regex_returns_400(self, request_factory):
+        from terno_dbi.core.query_service.views import grep_org_prompt
+
+        org, token = self._make_org_and_token()
+        request = request_factory.get('/api/query/organisation/prompt/grep/?pattern=%5B')
+        request.service_token = token
+
+        response = grep_org_prompt(request)
+
+        assert response.status_code == 400
+
+    def test_requires_authentication(self, request_factory):
+        from terno_dbi.core.query_service.views import grep_org_prompt
+
+        request = request_factory.get('/api/query/organisation/prompt/grep/?pattern=x')
+
+        response = grep_org_prompt(request)
+
+        assert response.status_code == 401

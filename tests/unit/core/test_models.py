@@ -363,3 +363,46 @@ class TestMemoryModel:
                 organisation=org, store=Memory.Store.ORG, created_by=user2, data_source=datasource,
                 name='same-name', description='d', content='c'
             )
+
+
+class TestCoreOrganisationModel:
+    """Tests for the CoreOrganisation.org_prompt field."""
+
+    def test_org_prompt_defaults_to_empty_string(self, user, db):
+        org = CoreOrganisation.objects.create(name='Prompt Org', subdomain='promptorg1', owner=user)
+        assert org.org_prompt == ''
+
+    def test_org_prompt_stores_text(self, user, db):
+        org = CoreOrganisation.objects.create(
+            name='Prompt Org 2', subdomain='promptorg2', owner=user,
+            org_prompt='Always answer in French.'
+        )
+        org.refresh_from_db()
+        assert org.org_prompt == 'Always answer in French.'
+
+    def test_org_prompt_updatable(self, user, db):
+        org = CoreOrganisation.objects.create(name='Prompt Org 3', subdomain='promptorg3', owner=user)
+        org.org_prompt = 'Be concise.'
+        org.save(update_fields=['org_prompt'])
+        org.refresh_from_db()
+        assert org.org_prompt == 'Be concise.'
+
+    def test_org_prompt_hash_matches_sha256(self, user, db):
+        import hashlib
+        org = CoreOrganisation.objects.create(
+            name='Prompt Org 4', subdomain='promptorg4', owner=user, org_prompt='hello'
+        )
+        assert org.org_prompt_hash == hashlib.sha256(b'hello').hexdigest()
+
+    def test_org_prompt_hash_for_blank_prompt(self, user, db):
+        import hashlib
+        org = CoreOrganisation.objects.create(name='Prompt Org 5', subdomain='promptorg5', owner=user)
+        assert org.org_prompt_hash == hashlib.sha256(b'').hexdigest()
+
+    def test_org_prompt_hash_changes_when_prompt_changes(self, user, db):
+        org = CoreOrganisation.objects.create(
+            name='Prompt Org 6', subdomain='promptorg6', owner=user, org_prompt='v1'
+        )
+        hash1 = org.org_prompt_hash
+        org.org_prompt = 'v2'
+        assert org.org_prompt_hash != hash1

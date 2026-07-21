@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
@@ -33,6 +34,79 @@ def _resolve_roles(request):
     if token is not None:
         return token.groups.all()
     return Group.objects.none()
+
+
+ORG_PROMPT_DEFAULT_LIMIT = 2000
+
+
+@require_service_auth()
+@require_http_methods(["GET"])
+def get_org_prompt(request):
+    """Return the org prompt (+ content_hash, the read-before-write token for
+    edit_org_prompt/update_org_prompt).
+
+    Paginated like a file read: `offset` (1-indexed line, default 1) and
+    `limit` (max lines, default 2000). `content_hash` is always computed over
+    the FULL org_prompt regardless of pagination, since it's the write token.
+    """
+    org = getattr(request, "token_organisation", None)
+    if not org:
+        return JsonResponse({"status": "error", "error": "org is required"}, status=400)
+
+    try:
+        offset = int(request.GET.get("offset", 1))
+    except ValueError:
+        return JsonResponse({"status": "error", "error": "offset must be an integer"}, status=400)
+    try:
+        limit = int(request.GET.get("limit", ORG_PROMPT_DEFAULT_LIMIT))
+    except ValueError:
+        return JsonResponse({"status": "error", "error": "limit must be an integer"}, status=400)
+    if offset < 1:
+        return JsonResponse({"status": "error", "error": "offset must be >= 1"}, status=400)
+    if limit < 1:
+        return JsonResponse({"status": "error", "error": "limit must be >= 1"}, status=400)
+
+    lines = (org.org_prompt or "").splitlines()
+    start = offset - 1
+    page = lines[start:start + limit]
+    has_more = start + limit < len(lines)
+
+    resp = {
+        "status": "success",
+        "org_prompt": "\n".join(page),
+        "content_hash": org.org_prompt_hash,
+        "offset": offset,
+        "returned_lines": len(page),
+        "has_more": has_more,
+    }
+    if has_more:
+        resp["next_offset"] = offset + len(page)
+    return JsonResponse(resp)
+
+
+@require_service_auth()
+@require_http_methods(["GET"])
+def grep_org_prompt(request):
+    """Regex-search the org prompt's own text; returns matching lines (1-indexed)."""
+    org = getattr(request, "token_organisation", None)
+    if not org:
+        return JsonResponse({"status": "error", "error": "org is required"}, status=400)
+
+    pattern = request.GET.get("pattern")
+    if not pattern:
+        return JsonResponse({"status": "error", "error": "pattern is required"}, status=400)
+
+    try:
+        regex = re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        return JsonResponse({"status": "error", "error": f"Invalid regex: {e}"}, status=400)
+
+    matches = [
+        {"line": i, "text": line}
+        for i, line in enumerate((org.org_prompt or "").splitlines(), start=1)
+        if regex.search(line)
+    ]
+    return JsonResponse({"status": "success", "matches": matches, "count": len(matches)})
 
 
 @require_service_auth()

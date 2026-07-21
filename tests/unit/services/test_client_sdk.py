@@ -91,6 +91,126 @@ class TestClientMethods:
     """Tests for client API methods."""
 
     @responses.activate
+    def test_get_org_prompt(self):
+        """Should fetch the organisation's prompt via the query API."""
+        from terno_dbi.client import TernoDBIClient
+
+        responses.add(
+            responses.GET,
+            'https://test.com/api/query/organisation/prompt/',
+            json={'status': 'success', 'org_prompt': 'Always answer in French.'},
+            status=200
+        )
+
+        client = TernoDBIClient(base_url='https://test.com', api_key='dbi_query_key')
+        result = client.get_org_prompt()
+
+        assert len(responses.calls) == 1
+        assert result['org_prompt'] == 'Always answer in French.'
+        assert responses.calls[0].request.params == {}
+
+    @responses.activate
+    def test_get_org_prompt_with_pagination(self):
+        """Should pass offset/limit as query params when provided."""
+        from terno_dbi.client import TernoDBIClient
+
+        responses.add(
+            responses.GET,
+            'https://test.com/api/query/organisation/prompt/',
+            json={'status': 'success', 'org_prompt': 'line 5', 'has_more': True, 'next_offset': 6},
+            status=200
+        )
+
+        client = TernoDBIClient(base_url='https://test.com', api_key='dbi_query_key')
+        result = client.get_org_prompt(offset=5, limit=1)
+
+        assert responses.calls[0].request.params == {'offset': '5', 'limit': '1'}
+        assert result['next_offset'] == 6
+
+    @responses.activate
+    def test_grep_org_prompt(self):
+        """Should regex-search the organisation's prompt via the query API."""
+        from terno_dbi.client import TernoDBIClient
+
+        responses.add(
+            responses.GET,
+            'https://test.com/api/query/organisation/prompt/grep/',
+            json={'status': 'success', 'matches': [{'line': 1, 'text': 'Always answer in French.'}], 'count': 1},
+            status=200
+        )
+
+        client = TernoDBIClient(base_url='https://test.com', api_key='dbi_query_key')
+        result = client.grep_org_prompt('french')
+
+        assert len(responses.calls) == 1
+        assert responses.calls[0].request.params['pattern'] == 'french'
+        assert result['count'] == 1
+
+    @responses.activate
+    def test_update_org_prompt(self):
+        """Should update the organisation's prompt via the admin API."""
+        from terno_dbi.client import TernoDBIClient
+
+        responses.add(
+            responses.POST,
+            'https://test.com/api/admin/organisation/prompt/',
+            json={'status': 'success', 'org_prompt': 'Be concise.'},
+            status=200
+        )
+
+        client = TernoDBIClient(base_url='https://test.com', api_key='dbi_admin_key')
+        result = client.update_org_prompt('Be concise.')
+
+        assert len(responses.calls) == 1
+        request_body = json.loads(responses.calls[0].request.body)
+        assert request_body['org_prompt'] == 'Be concise.'
+        assert 'expected_hash' not in request_body
+        assert result['org_prompt'] == 'Be concise.'
+
+    @responses.activate
+    def test_update_org_prompt_with_expected_hash(self):
+        """Should include expected_hash when replacing an existing prompt."""
+        from terno_dbi.client import TernoDBIClient
+
+        responses.add(
+            responses.POST,
+            'https://test.com/api/admin/organisation/prompt/',
+            json={'status': 'success', 'org_prompt': 'Be concise.'},
+            status=200
+        )
+
+        client = TernoDBIClient(base_url='https://test.com', api_key='dbi_admin_key')
+        client.update_org_prompt('Be concise.', expected_hash='abc123')
+
+        request_body = json.loads(responses.calls[0].request.body)
+        assert request_body['expected_hash'] == 'abc123'
+
+    @responses.activate
+    def test_edit_org_prompt(self):
+        """Should exact-string-replace within the organisation's prompt via the admin API."""
+        from terno_dbi.client import TernoDBIClient
+
+        responses.add(
+            responses.POST,
+            'https://test.com/api/admin/organisation/prompt/edit/',
+            json={'status': 'success', 'org_prompt': 'Always answer in Spanish.', 'content_hash': 'newhash'},
+            status=200
+        )
+
+        client = TernoDBIClient(base_url='https://test.com', api_key='dbi_admin_key')
+        result = client.edit_org_prompt(
+            old_string='French', new_string='Spanish', expected_hash='oldhash',
+        )
+
+        assert len(responses.calls) == 1
+        request_body = json.loads(responses.calls[0].request.body)
+        assert request_body == {
+            'old_string': 'French', 'new_string': 'Spanish',
+            'expected_hash': 'oldhash', 'replace_all': False,
+        }
+        assert result['org_prompt'] == 'Always answer in Spanish.'
+
+    @responses.activate
     def test_list_datasources(self):
         """Should call list datasources endpoint."""
         from terno_dbi.client import TernoDBIClient

@@ -43,6 +43,46 @@ class TernoDBIClient:
             logger.error("API request failed: %s %s -> %s", response.request.method, response.url, error_msg)
             raise Exception(f"API Error: {error_msg}")
 
+    def get_org_prompt(self, offset: Optional[int] = None, limit: Optional[int] = None) -> Dict:
+        url = f"{self.base_url}/api/query/organisation/prompt/"
+        params = {}
+        if offset is not None:
+            params["offset"] = offset
+        if limit is not None:
+            params["limit"] = limit
+        response = requests.get(url, params=params or None, headers=self._get_headers())
+        return self._handle_response(response)
+
+    def grep_org_prompt(self, pattern: str) -> Dict:
+        url = f"{self.base_url}/api/query/organisation/prompt/grep/"
+        response = requests.get(url, params={"pattern": pattern}, headers=self._get_headers())
+        return self._handle_response(response)
+
+    def update_org_prompt(self, org_prompt: str, expected_hash: Optional[str] = None) -> Dict:
+        url = f"{self.base_url}/api/admin/organisation/prompt/"
+        payload = {"org_prompt": org_prompt}
+        if expected_hash is not None:
+            payload["expected_hash"] = expected_hash
+        response = requests.post(url, json=payload, headers=self._get_headers())
+        return self._handle_response(response)
+
+    def edit_org_prompt(
+        self,
+        old_string: str,
+        new_string: str,
+        expected_hash: str,
+        replace_all: bool = False,
+    ) -> Dict:
+        url = f"{self.base_url}/api/admin/organisation/prompt/edit/"
+        payload = {
+            "old_string": old_string,
+            "new_string": new_string,
+            "expected_hash": expected_hash,
+            "replace_all": replace_all,
+        }
+        response = requests.post(url, json=payload, headers=self._get_headers())
+        return self._handle_response(response)
+
     def list_datasources(self) -> List[Dict]:
         url = f"{self.base_url}/api/query/datasources/"
         response = requests.get(url, headers=self._get_headers())

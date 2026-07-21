@@ -28,7 +28,15 @@ server = Server(
         "entry via get_memory before relying on it. If you maintain your own separate "
         "memory system, do not let facts about this data live only there — other "
         "agents attached to this same server, including ones with no memory of their "
-        "own, can only benefit from a fact if it's recorded here."
+        "own, can only benefit from a fact if it's recorded here.\n\n"
+        "get_org_prompt returns this organisation's custom system-prompt addendum "
+        "(plus its content_hash) and grep_org_prompt regex-searches it; both are "
+        "read-only here — writing to it is an admin-only operation on the paired "
+        "admin server (update_org_prompt/edit_org_prompt). org_prompt and memory are "
+        "not interchangeable: org_prompt is the small set of always-apply directives "
+        "already injected into every request, while memory is facts pulled on demand "
+        "— the same rule should live in only one of them. If you find it in both, or "
+        "sitting in the wrong one, consolidate via the admin server."
     ),
 )
 
@@ -36,6 +44,51 @@ server = Server(
 @server.list_tools()
 async def list_tools() -> List[Tool]:
     return [
+        Tool(
+            name="get_org_prompt",
+            description=(
+                "Get this organisation's custom system-prompt addendum — text "
+                "appended to the default LLM system prompt for all users in this "
+                "organisation. The response includes `content_hash` — pass it back "
+                "as `expected_hash` when you later edit or replace this prompt. "
+                "Paginated like a file read: returns up to `limit` lines (default 2000) "
+                "starting at 1-indexed `offset`; when `has_more` is true, page through "
+                "with `next_offset`. `content_hash` always covers the full prompt "
+                "regardless of which page you read."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "offset": {
+                        "type": "integer",
+                        "description": "1-indexed line number to start reading from (default 1)"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of lines to return (default 2000)"
+                    }
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="grep_org_prompt",
+            description=(
+                "Regex-search the organisation prompt's own text and return matching "
+                "lines (1-indexed). Use to find a specific passage before editing it "
+                "with edit_org_prompt."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Regular expression matched (case-insensitive) against the org prompt's lines"
+                    }
+                },
+                "required": ["pattern"]
+            }
+        ),
         Tool(
             name="list_datasources",
             description="List all configured database connections",
@@ -237,7 +290,16 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
     try:
         result = None
 
-        if name == "list_datasources":
+        if name == "get_org_prompt":
+            result = client.get_org_prompt(
+                offset=arguments.get("offset"),
+                limit=arguments.get("limit"),
+            )
+
+        elif name == "grep_org_prompt":
+            result = client.grep_org_prompt(arguments["pattern"])
+
+        elif name == "list_datasources":
             result = {"datasources": client.list_datasources()}
             if isinstance(result["datasources"], list):
                 result["count"] = len(result["datasources"])

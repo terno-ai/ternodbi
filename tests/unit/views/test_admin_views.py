@@ -379,3 +379,503 @@ class TestGetTableInfo:
         data = json.loads(response.content)
         assert 'columns' in data or 'table' in data
 
+
+
+@pytest.mark.django_db
+class TestUpdateOrgPrompt:
+    """Tests for POST /api/admin/organisation/prompt/"""
+
+    def _make_org_and_token(self, token_type=None, scopes=None):
+        from django.contrib.auth.models import User
+        from terno_dbi.core.models import CoreOrganisation, ServiceToken
+
+        token_type = token_type or ServiceToken.TokenType.ADMIN
+        user = User.objects.create_user('orgpromptadmin', 'orgpromptadmin@example.com', 'password')
+        org = CoreOrganisation.objects.create(name='Admin Prompt Org', subdomain='adminpromptorg', owner=user)
+        token = ServiceToken.objects.create(
+            name='Admin Prompt Token',
+            token_type=token_type,
+            created_by=user,
+            organisation=org,
+            scopes=scopes or [],
+            key_hash='admin-prompt-hash',
+        )
+        return org, token
+
+    def test_updates_org_prompt(self, request_factory):
+        from terno_dbi.core.admin_service.views import update_org_prompt
+
+        org, token = self._make_org_and_token()
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/',
+            data=json.dumps({'org_prompt': 'Be concise and use bullet points.'}),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = update_org_prompt(request)
+
+        assert response.status_code == 200
+        data = json.loads(response.content)
+        assert data['status'] == 'success'
+        assert data['org_prompt'] == 'Be concise and use bullet points.'
+        org.refresh_from_db()
+        assert org.org_prompt == 'Be concise and use bullet points.'
+
+    def test_replaces_existing_prompt_with_correct_hash(self, request_factory):
+        from terno_dbi.core.admin_service.views import update_org_prompt
+
+        org, token = self._make_org_and_token()
+        org.org_prompt = 'Old prompt'
+        org.save(update_fields=['org_prompt'])
+        expected_hash = org.org_prompt_hash
+
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/',
+            data=json.dumps({'org_prompt': 'New prompt', 'expected_hash': expected_hash}),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = update_org_prompt(request)
+
+        assert response.status_code == 200
+        data = json.loads(response.content)
+        assert data['content_hash'] == org.__class__.objects.get(pk=org.pk).org_prompt_hash
+        org.refresh_from_db()
+        assert org.org_prompt == 'New prompt'
+
+    def test_replacing_existing_prompt_without_hash_returns_409(self, request_factory):
+        from terno_dbi.core.admin_service.views import update_org_prompt
+
+        org, token = self._make_org_and_token()
+        org.org_prompt = 'Old prompt'
+        org.save(update_fields=['org_prompt'])
+
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/',
+            data=json.dumps({'org_prompt': 'New prompt'}),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = update_org_prompt(request)
+
+        assert response.status_code == 409
+        org.refresh_from_db()
+        assert org.org_prompt == 'Old prompt'
+
+    def test_replacing_existing_prompt_with_stale_hash_returns_409(self, request_factory):
+        from terno_dbi.core.admin_service.views import update_org_prompt
+
+        org, token = self._make_org_and_token()
+        org.org_prompt = 'Old prompt'
+        org.save(update_fields=['org_prompt'])
+
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/',
+            data=json.dumps({'org_prompt': 'New prompt', 'expected_hash': 'stale-hash'}),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = update_org_prompt(request)
+
+        assert response.status_code == 409
+        org.refresh_from_db()
+        assert org.org_prompt == 'Old prompt'
+
+    def test_first_write_to_blank_prompt_does_not_require_hash(self, request_factory):
+        from terno_dbi.core.admin_service.views import update_org_prompt
+
+        org, token = self._make_org_and_token()
+        assert org.org_prompt == ''
+
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/',
+            data=json.dumps({'org_prompt': 'First value'}),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = update_org_prompt(request)
+
+        assert response.status_code == 200
+        org.refresh_from_db()
+        assert org.org_prompt == 'First value'
+
+    def test_rejects_prompt_over_length_cap(self, request_factory):
+        from terno_dbi.core.admin_service.views import (
+            update_org_prompt, AGENT_ORG_PROMPT_MAX_CHARS,
+        )
+
+        org, token = self._make_org_and_token()
+        too_long = 'x' * (AGENT_ORG_PROMPT_MAX_CHARS + 1)
+
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/',
+            data=json.dumps({'org_prompt': too_long}),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = update_org_prompt(request)
+
+        assert response.status_code == 400
+        org.refresh_from_db()
+        assert org.org_prompt == ''
+
+    def test_accepts_prompt_at_length_cap(self, request_factory):
+        from terno_dbi.core.admin_service.views import (
+            update_org_prompt, AGENT_ORG_PROMPT_MAX_CHARS,
+        )
+
+        org, token = self._make_org_and_token()
+        at_cap = 'x' * AGENT_ORG_PROMPT_MAX_CHARS
+
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/',
+            data=json.dumps({'org_prompt': at_cap}),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = update_org_prompt(request)
+
+        assert response.status_code == 200
+        org.refresh_from_db()
+        assert org.org_prompt == at_cap
+
+    def test_defaults_to_empty_when_missing(self, request_factory):
+        from terno_dbi.core.admin_service.views import update_org_prompt
+
+        org, token = self._make_org_and_token()
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/',
+            data=json.dumps({}),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = update_org_prompt(request)
+
+        assert response.status_code == 200
+        org.refresh_from_db()
+        assert org.org_prompt == ''
+
+    def test_invalid_json_returns_400(self, request_factory):
+        from terno_dbi.core.admin_service.views import update_org_prompt
+
+        org, token = self._make_org_and_token()
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/',
+            data='{invalid',
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = update_org_prompt(request)
+
+        assert response.status_code == 400
+
+    def test_no_organisation_returns_400(self, request_factory):
+        from django.contrib.auth.models import User
+        from terno_dbi.core.models import DataSource, ServiceToken
+        from terno_dbi.core.admin_service.views import update_org_prompt
+
+        user = User.objects.create_user('noorgadmin', 'noorgadmin@example.com', 'password')
+        ds = DataSource.objects.create(
+            display_name='no_org_admin_ds', type='postgres',
+            connection_str='postgresql://localhost/noorgadmin', enabled=True
+        )
+        token = ServiceToken.objects.create(
+            name='No Org Admin Token',
+            token_type=ServiceToken.TokenType.ADMIN,
+            created_by=user,
+            organisation=None,
+            key_hash='no-org-admin-hash',
+        )
+        token.datasources.add(ds)
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/',
+            data=json.dumps({'org_prompt': 'x'}),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = update_org_prompt(request)
+
+        assert response.status_code == 400
+
+    def test_query_token_without_admin_write_scope_forbidden(self, request_factory):
+        from terno_dbi.core.models import ServiceToken
+        from terno_dbi.core.admin_service.views import update_org_prompt
+
+        _, token = self._make_org_and_token(token_type=ServiceToken.TokenType.QUERY)
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/',
+            data=json.dumps({'org_prompt': 'x'}),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = update_org_prompt(request)
+
+        assert response.status_code == 403
+
+    def test_requires_authentication(self, request_factory):
+        from terno_dbi.core.admin_service.views import update_org_prompt
+
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/',
+            data=json.dumps({'org_prompt': 'x'}),
+            content_type='application/json'
+        )
+
+        response = update_org_prompt(request)
+
+        assert response.status_code == 401
+
+
+@pytest.mark.django_db
+class TestEditOrgPrompt:
+    """Tests for POST /api/admin/organisation/prompt/edit/"""
+
+    def _make_org_and_token(self, token_type=None, scopes=None):
+        from django.contrib.auth.models import User
+        from terno_dbi.core.models import CoreOrganisation, ServiceToken
+
+        token_type = token_type or ServiceToken.TokenType.ADMIN
+        user = User.objects.create_user('editorgpromptadmin', 'editorgpromptadmin@example.com', 'password')
+        org = CoreOrganisation.objects.create(
+            name='Edit Prompt Org', subdomain='editpromptorg', owner=user,
+            org_prompt='Always answer in French. Be concise.'
+        )
+        token = ServiceToken.objects.create(
+            name='Edit Prompt Token',
+            token_type=token_type,
+            created_by=user,
+            organisation=org,
+            scopes=scopes or [],
+            key_hash='edit-prompt-hash',
+        )
+        return org, token
+
+    def test_edit_replaces_unique_substring(self, request_factory):
+        from terno_dbi.core.admin_service.views import edit_org_prompt
+
+        org, token = self._make_org_and_token()
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/edit/',
+            data=json.dumps({
+                'old_string': 'French',
+                'new_string': 'Spanish',
+                'expected_hash': org.org_prompt_hash,
+            }),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = edit_org_prompt(request)
+
+        assert response.status_code == 200
+        org.refresh_from_db()
+        assert org.org_prompt == 'Always answer in Spanish. Be concise.'
+
+    def test_edit_requires_expected_hash(self, request_factory):
+        from terno_dbi.core.admin_service.views import edit_org_prompt
+
+        org, token = self._make_org_and_token()
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/edit/',
+            data=json.dumps({'old_string': 'French', 'new_string': 'Spanish'}),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = edit_org_prompt(request)
+
+        assert response.status_code == 409
+        org.refresh_from_db()
+        assert org.org_prompt == 'Always answer in French. Be concise.'
+
+    def test_edit_with_stale_hash_returns_409(self, request_factory):
+        from terno_dbi.core.admin_service.views import edit_org_prompt
+
+        org, token = self._make_org_and_token()
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/edit/',
+            data=json.dumps({
+                'old_string': 'French', 'new_string': 'Spanish', 'expected_hash': 'stale',
+            }),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = edit_org_prompt(request)
+
+        assert response.status_code == 409
+
+    def test_edit_old_string_not_found_returns_400(self, request_factory):
+        from terno_dbi.core.admin_service.views import edit_org_prompt
+
+        org, token = self._make_org_and_token()
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/edit/',
+            data=json.dumps({
+                'old_string': 'Klingon', 'new_string': 'Spanish', 'expected_hash': org.org_prompt_hash,
+            }),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = edit_org_prompt(request)
+
+        assert response.status_code == 400
+
+    def test_edit_non_unique_old_string_without_replace_all_returns_400(self, request_factory):
+        from terno_dbi.core.admin_service.views import edit_org_prompt
+
+        org, token = self._make_org_and_token()
+        org.org_prompt = 'repeat repeat repeat'
+        org.save(update_fields=['org_prompt'])
+
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/edit/',
+            data=json.dumps({
+                'old_string': 'repeat', 'new_string': 'once', 'expected_hash': org.org_prompt_hash,
+            }),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = edit_org_prompt(request)
+
+        assert response.status_code == 400
+        org.refresh_from_db()
+        assert org.org_prompt == 'repeat repeat repeat'
+
+    def test_edit_replace_all_replaces_every_occurrence(self, request_factory):
+        from terno_dbi.core.admin_service.views import edit_org_prompt
+
+        org, token = self._make_org_and_token()
+        org.org_prompt = 'repeat repeat repeat'
+        org.save(update_fields=['org_prompt'])
+
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/edit/',
+            data=json.dumps({
+                'old_string': 'repeat', 'new_string': 'once',
+                'expected_hash': org.org_prompt_hash, 'replace_all': True,
+            }),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = edit_org_prompt(request)
+
+        assert response.status_code == 200
+        org.refresh_from_db()
+        assert org.org_prompt == 'once once once'
+
+    def test_edit_missing_old_string_returns_400(self, request_factory):
+        from terno_dbi.core.admin_service.views import edit_org_prompt
+
+        org, token = self._make_org_and_token()
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/edit/',
+            data=json.dumps({'new_string': 'x', 'expected_hash': org.org_prompt_hash}),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = edit_org_prompt(request)
+
+        assert response.status_code == 400
+
+    def test_edit_requires_authentication(self, request_factory):
+        from terno_dbi.core.admin_service.views import edit_org_prompt
+
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/edit/',
+            data=json.dumps({'old_string': 'a', 'new_string': 'b', 'expected_hash': 'x'}),
+            content_type='application/json'
+        )
+
+        response = edit_org_prompt(request)
+
+        assert response.status_code == 401
+
+    def test_edit_query_token_without_admin_write_scope_forbidden(self, request_factory):
+        from terno_dbi.core.models import ServiceToken
+        from terno_dbi.core.admin_service.views import edit_org_prompt
+
+        org, token = self._make_org_and_token(token_type=ServiceToken.TokenType.QUERY)
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/edit/',
+            data=json.dumps({
+                'old_string': 'French', 'new_string': 'Spanish', 'expected_hash': org.org_prompt_hash,
+            }),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = edit_org_prompt(request)
+
+        assert response.status_code == 403
+
+    def test_edit_allowed_to_grow_prompt_past_update_cap(self, request_factory):
+        """edit_org_prompt has no length cap (matching the workspace `edit` tool) —
+        only the full-replace path (update_org_prompt) is capped. An agent builds
+        a large org_prompt incrementally via edit, same as write-then-edit for
+        oversized files."""
+        from terno_dbi.core.admin_service.views import (
+            edit_org_prompt, AGENT_ORG_PROMPT_MAX_CHARS,
+        )
+
+        org, token = self._make_org_and_token()
+        org.org_prompt = 'A' + 'x' * (AGENT_ORG_PROMPT_MAX_CHARS - 1)
+        org.save(update_fields=['org_prompt'])
+
+        big_replacement = 'B' * (AGENT_ORG_PROMPT_MAX_CHARS + 10)
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/edit/',
+            data=json.dumps({
+                'old_string': 'A', 'new_string': big_replacement,
+                'expected_hash': org.org_prompt_hash,
+            }),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = edit_org_prompt(request)
+
+        assert response.status_code == 200
+        org.refresh_from_db()
+        assert org.org_prompt == big_replacement + 'x' * (AGENT_ORG_PROMPT_MAX_CHARS - 1)
+        assert len(org.org_prompt) > AGENT_ORG_PROMPT_MAX_CHARS
+
+    def test_edit_allowed_to_shrink_oversized_prompt(self, request_factory):
+        from terno_dbi.core.admin_service.views import (
+            edit_org_prompt, AGENT_ORG_PROMPT_MAX_CHARS,
+        )
+
+        org, token = self._make_org_and_token()
+        org.org_prompt = 'typo ' + 'x' * (AGENT_ORG_PROMPT_MAX_CHARS + 500)
+        org.save(update_fields=['org_prompt'])
+
+        request = request_factory.post(
+            '/api/admin/organisation/prompt/edit/',
+            data=json.dumps({
+                'old_string': 'typo ', 'new_string': '',  # shrinks it
+                'expected_hash': org.org_prompt_hash,
+            }),
+            content_type='application/json'
+        )
+        request.service_token = token
+
+        response = edit_org_prompt(request)
+
+        assert response.status_code == 200
+        org.refresh_from_db()
+        assert not org.org_prompt.startswith('typo ')

@@ -27,11 +27,20 @@ class CoreOrganisation(models.Model):
     )
     verified = models.BooleanField(default=True)
     is_active = models.BooleanField(default=False)
+    org_prompt = models.TextField(
+        blank=True, default="",
+        help_text="Custom text appended to the default LLM system prompt for all users in this organisation."
+    )
     created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
 
     class Meta:
         db_table = 'core_organisation'
+
+    @property
+    def org_prompt_hash(self):
+        """SHA-256 of the current org_prompt — the read-before-write token."""
+        return hashlib.sha256((self.org_prompt or "").encode("utf-8")).hexdigest()
 
     def __str__(self):
         return f"{self.name} - {self.subdomain}"

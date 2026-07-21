@@ -18,8 +18,10 @@ server = Server(
     "ternodbi-admin",
     instructions=(
         "Write access to manage datasource schema metadata (rename tables/columns, "
-        "edit descriptions, add/sync/delete datasources) and to write durable, shared "
-        "memory (save_memory/edit_memory/delete_memory).\n\n"
+        "edit descriptions, add/sync/delete datasources), to write durable, shared "
+        "memory (save_memory/edit_memory/delete_memory), and to set this "
+        "organisation's custom system-prompt addendum (update_org_prompt/"
+        "edit_org_prompt).\n\n"
         "Memory write rules: one fact per memory. Prefer edit_memory over a fresh "
         "save_memory when an existing memory is still mostly right but needs a "
         "correction — it preserves any [[name]] links other memories point at it "
@@ -28,7 +30,25 @@ server = Server(
         "enforced server-side, not optional. store='org' shares a memory with every "
         "agent working on this organisation's data; store='user' (the default) is "
         "private to you. Prefer 'org' for facts that would help any agent querying "
-        "this data, not just facts specific to your own preferences or this session."
+        "this data, not just facts specific to your own preferences or this session.\n\n"
+        "The same read-before-write rule applies to the org prompt: read it first "
+        "with get_org_prompt (on the paired query server) and pass its content_hash "
+        "as expected_hash — required for edit_org_prompt always, and for "
+        "update_org_prompt whenever the prompt isn't currently blank.\n\n"
+        "org_prompt vs memory — decide by REACH, not importance. org_prompt is "
+        "injected into every request for every user, always; a memory is fetched "
+        "only when an agent looks for it (this is delivery, not visibility — even an "
+        "org-shared memory is pulled on demand, never auto-injected the way "
+        "org_prompt is). So put in org_prompt ONLY the few directives that must shape "
+        "every query: terminology, default units/formatting, filters that always "
+        "apply. Everything else — schema quirks, join paths, domain facts, however "
+        "important it feels — goes in memory. When unsure, choose memory: it is "
+        "unbounded and costs nothing until read, whereas every line of org_prompt is "
+        "paid on every future request. Never keep the same rule in both places: "
+        "before writing to org_prompt, grep_memory for it and delete_memory whatever "
+        "you are promoting into it; before saving a memory that reads like an "
+        "always-apply rule, get_org_prompt to confirm it is not already there. "
+        "Duplicated rules drift apart silently — keep exactly one copy of each."
     ),
 )
 
@@ -36,6 +56,59 @@ server = Server(
 @server.list_tools()
 async def list_tools() -> List[Tool]:
     return [
+        Tool(
+            name="update_org_prompt",
+            description=(
+                "Create or fully replace this organisation's custom system-prompt "
+                "addendum — text appended to the default LLM system prompt for all "
+                "users in this organisation. To REPLACE an existing (non-blank) "
+                "prompt you must first read it (get_org_prompt) and pass its "
+                "`content_hash` as `expected_hash`. Capped at a max length per call — "
+                "if rejected as too long, write a shorter initial version here, then "
+                "use the uncapped edit_org_prompt to grow it further.\n\n"
+                "Write as short imperative bullets (terminology, default units, "
+                "must-apply filters) — one directive per line, no prose, no "
+                "meta-commentary about why a rule exists. Aim for a few hundred words; "
+                "the cap above is a hard backstop, not a target. For revisions, prefer "
+                "edit_org_prompt over a fresh update_org_prompt — a full replace risks "
+                "silently dropping an existing directive you didn't know mattered. "
+                "Because this changes behavior for every user in the organisation, "
+                "show the requesting user the exact wording before writing it."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "org_prompt": {
+                        "type": "string",
+                        "description": "New organisation prompt text (replaces the existing value)"
+                    },
+                    "expected_hash": {
+                        "type": "string",
+                        "description": "Required when replacing a non-blank org_prompt: its current content_hash from get_org_prompt"
+                    }
+                },
+                "required": ["org_prompt"]
+            }
+        ),
+        Tool(
+            name="edit_org_prompt",
+            description=(
+                "Edit the organisation prompt by exact string replacement, preserving "
+                "the rest of its content. `old_string` must be present and unique "
+                "unless replace_all=true. Read it first (get_org_prompt) and pass its "
+                "`content_hash` as `expected_hash`."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "old_string": {"type": "string", "description": "Exact text to replace"},
+                    "new_string": {"type": "string", "description": "Replacement text"},
+                    "expected_hash": {"type": "string", "description": "The org prompt's current content_hash from get_org_prompt (read-before-write)"},
+                    "replace_all": {"type": "boolean", "description": "Replace every occurrence (default false)"}
+                },
+                "required": ["old_string", "new_string", "expected_hash"]
+            }
+        ),
         Tool(
             name="rename_table",
             description="Update the public display name of a table",
@@ -280,7 +353,21 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
     try:
         result = None
 
-        if name == "rename_table":
+        if name == "update_org_prompt":
+            result = client.update_org_prompt(
+                arguments["org_prompt"],
+                expected_hash=arguments.get("expected_hash"),
+            )
+
+        elif name == "edit_org_prompt":
+            result = client.edit_org_prompt(
+                old_string=arguments["old_string"],
+                new_string=arguments["new_string"],
+                expected_hash=arguments["expected_hash"],
+                replace_all=arguments.get("replace_all", False),
+            )
+
+        elif name == "rename_table":
             table_id = arguments["table_id"]
             public_name = arguments["public_name"]
             result = client.update_table(table_id, public_name=public_name)
