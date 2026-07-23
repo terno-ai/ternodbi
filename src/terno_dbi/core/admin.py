@@ -468,16 +468,58 @@ class MemoryImportForm(forms.Form):
         })
 
 
+class ScopedDataSourceFilter(admin.SimpleListFilter):
+    """A ``data_source`` filter scoped to the rows this admin actually shows.
+
+    Django's default FK list filter populates its options from *every*
+    ``DataSource`` row system-wide (it ignores ``ModelAdmin.get_queryset``
+    entirely), which would leak every organisation's datasource names into
+    this sidebar. List only the datasources actually present among the
+    memories the current request is allowed to see instead.
+    """
+    title = 'data source'
+    parameter_name = 'data_source__id__exact'
+
+    def lookups(self, request, model_admin):
+        qs = model_admin.get_queryset(request)
+        datasources = models.DataSource.objects.filter(
+            id__in=qs.exclude(data_source__isnull=True).values_list('data_source_id', flat=True).distinct()
+        ).order_by('display_name')
+        return [(str(ds.pk), ds.display_name) for ds in datasources]
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(data_source_id=self.value())
+        return queryset
+
+
 @admin.register(models.Memory)
 class MemoryAdmin(OrganisationFilterMixin, reversion.admin.VersionAdmin):
     list_display = ('name', 'description', 'memory_type', 'store',
                     'data_source', 'created_by', 'updated_at')
-    list_filter = ('memory_type', 'store', 'data_source')
+    list_filter = ('memory_type', 'store', ScopedDataSourceFilter)
     search_fields = ('name', 'description', 'content')
     organisation_related_field_names = ['organisation']
     exclude = ['organisation']
+    readonly_fields = ('created_by',)
     actions = ['export_selected_memories']
     change_list_template = 'admin/core/memory/change_list.html'
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name != 'data_source' or request.user.is_superuser:
+            return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+        # The mixin only supports a plain `<field>_id=<org.pk>` filter, so it
+        # can't express "org's own + global" and falls back to `.none()`.
+        # Build the queryset ourselves, bypassing the mixin for this field only.
+        user_organisation = self.get_user_organisation(request)
+        if user_organisation is None:
+            kwargs['queryset'] = models.DataSource.objects.none()
+        else:
+            kwargs['queryset'] = models.DataSource.objects.filter(
+                Q(organisation_id=user_organisation.pk) | Q(is_global=True)
+            ).order_by('display_name')
+        return admin.ModelAdmin.formfield_for_foreignkey(self, db_field, request, **kwargs)
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
