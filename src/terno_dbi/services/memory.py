@@ -250,6 +250,89 @@ def edit_memory(organisation_id, name, old_string, new_string, store,
     return obj
 
 
+# --- cross-server transfer ---------------------------------------------------
+
+class _NotSet:
+    def __repr__(self):
+        return "NOT_SET"
+
+
+NOT_SET = _NotSet()
+
+
+def export_row(mem):
+    """One Memory as a natural-key-addressed dict, for a portable JSON export.
+    """
+    return {
+        "organisation_subdomain": mem.organisation.subdomain,
+        "store": mem.store,
+        "datasource_display_name": mem.data_source.display_name if mem.data_source_id else None,
+        "name": mem.name,
+        "description": mem.description,
+        "memory_type": mem.memory_type,
+        "content": mem.content,
+        "created_at": mem.created_at.isoformat(),
+        "updated_at": mem.updated_at.isoformat(),
+    }
+
+
+def import_row(row, target_organisation_id, importing_user_id, can_write_org_memory,
+               force_datasource_id=NOT_SET):
+    """``can_write_org_memory`` gates ``store='org'`` rows the same way the
+    caller's own permission check does elsewhere (Django admin, agent tools)
+    — rows requesting org store are skipped, not silently downgraded, when
+    the importing user isn't allowed to write org memory.
+    """
+    from terno_dbi.core.models import DataSource
+
+    name = row.get("name")
+    store = row.get("store") or Memory.Store.ORG
+    if not name:
+        return "skipped", "missing 'name'"
+    if store == Memory.Store.ORG and not can_write_org_memory:
+        return "skipped", "you don't have permission to write organisation-wide memories"
+
+    author = User.objects.filter(id=importing_user_id).first()
+    if author is None:
+        return "skipped", "importing user no longer exists"
+
+    data_source = None
+    detail_note = None
+    if force_datasource_id is not NOT_SET:
+        if force_datasource_id is not None:
+            data_source = DataSource.objects.filter(id=force_datasource_id).first()
+            if data_source is None:
+                return "skipped", f"selected datasource id {force_datasource_id} no longer exists"
+    elif row.get("datasource_display_name"):
+        data_source = DataSource.objects.filter(
+            display_name=row["datasource_display_name"]
+        ).first()
+        if data_source is None:
+            return "skipped", f"unknown datasource '{row['datasource_display_name']}'"
+    elif row.get("data_source_id"):
+        detail_note = "datasource id not portable across servers; imported as global"
+
+    ident = dict(
+        organisation_id=target_organisation_id, store=store, name=name,
+        data_source_id=data_source.id if data_source else None,
+    )
+    if store == Memory.Store.USER:
+        ident["created_by_id"] = author.id
+    if Memory.objects.filter(**ident).exists():
+        return "skipped", "already exists"
+
+    try:
+        _, action = write_memory(
+            organisation_id=target_organisation_id, name=name,
+            description=row.get("description", ""), memory_type=row.get("memory_type", "reference"),
+            content=row.get("content", ""), store=store,
+            created_by_id=author.id, data_source_id=data_source.id if data_source else None,
+        )
+        return action, detail_note
+    except MemoryError as e:
+        return "error", str(e)
+
+
 @transaction.atomic
 @reversion.create_revision()
 def delete_memory(organisation_id, name, store, created_by_id, data_source_id=None):

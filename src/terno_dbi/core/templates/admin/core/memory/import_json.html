@@ -1,0 +1,61 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url 'admin:core_memory_changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; {% trans 'Import from JSON' %}
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <p class="help" style="max-width: 640px;">
+    Upload a memory export — the JSON produced by the "Export selected
+    memories to JSON" action.
+  </p>
+
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    {% for field in form %}
+      <p>
+        {{ field.label_tag }} {{ field }}
+        {% if field.help_text %}<br><span class="help">{{ field.help_text }}</span>{% endif %}
+        {{ field.errors }}
+      </p>
+    {% endfor %}
+    <input type="submit" value="Import" class="default">
+  </form>
+</div>
+
+<script>
+(function() {
+  var dsMap = {{ datasource_organisation_map_json|safe }};
+  var orgSelect = document.getElementById('id_organisation');
+  var dsSelect = document.getElementById('id_datasource');
+  if (!orgSelect || !dsSelect) return;
+
+  function applyFilter() {
+    var orgId = orgSelect.value;
+    var firstVisibleValue = null;
+    var selectedStillVisible = false;
+    Array.prototype.forEach.call(dsSelect.options, function(opt) {
+      var owner = dsMap[opt.value];
+      var visible = !owner || owner === orgId;
+      opt.hidden = !visible;
+      opt.disabled = !visible;
+      if (visible && firstVisibleValue === null) firstVisibleValue = opt.value;
+      if (visible && opt.value === dsSelect.value) selectedStillVisible = true;
+    });
+    if (!selectedStillVisible && firstVisibleValue !== null) {
+      dsSelect.value = firstVisibleValue;
+    }
+  }
+
+  orgSelect.addEventListener('change', applyFilter);
+  applyFilter();
+})();
+</script>
+{% endblock %}

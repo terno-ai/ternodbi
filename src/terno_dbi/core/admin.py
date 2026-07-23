@@ -1,12 +1,18 @@
+import json
 import logging
+from django import forms
 from django.contrib import admin
 from django.apps import apps
 import reversion.admin
-from .models import LLMConfiguration, PromptExample
+from .models import LLMConfiguration
 from django.db.models import Q
 
 from terno_dbi.core import models
 from django.contrib import messages
+from django.http import HttpResponse
+from django.shortcuts import redirect, render
+from django.urls import path
+from terno_dbi.services import memory as memory_service
 from terno_dbi.services.schema_utils import sync_metadata
 from terno_dbi.core.models import ServiceToken
 from django.utils.html import format_html
@@ -286,10 +292,10 @@ class OrganisationFilterMixin:
             if user_organisation and self.organisation_related_field_names:
                 # Use dynamic filtering based on the organisation field specified in the admin class
                 combined_q = Q()
-                
+
                 for field_name in self.organisation_related_field_names:
                     combined_q = combined_q | Q(**{f"{field_name}_id": user_organisation.pk})
-                        
+
                 qs = qs.filter(combined_q)
             else:
                 qs = qs.none()
@@ -383,6 +389,85 @@ class PromptExampleAdmin(OrganisationFilterMixin, admin.ModelAdmin):
         super().save_model(request, obj, form, change)
 
 
+KEEP_ORIGINAL_DATASOURCE = "__keep__"
+GLOBAL_DATASOURCE = "__global__"
+
+
+def _can_write_org_memory(user):
+    """Whether ``user`` may create/edit/delete org-store (shared) memories.
+
+    Deliberately a generic Django permission (``core.write_org_memory``)
+    rather than a hardcoded group name — ternodbi ships standalone and must
+    not assume a host app's own group-naming convention (e.g. terno-ai's
+    global "Org Admin" group) exists. The host grants this permission to
+    whichever group/role it wants; ternodbi only ever checks ``has_perm``.
+    """
+    return user.is_superuser or user.has_perm('core.write_org_memory')
+
+
+def _importable_organisations(user):
+    """Organisations a user may import memories into: every org for a
+    superuser, otherwise only orgs they belong to (via ``OrganisationUser``).
+    """
+    if user.is_superuser:
+        return models.CoreOrganisation.objects.order_by('name')
+    return models.CoreOrganisation.objects.filter(
+        organisation_users__user=user
+    ).distinct().order_by('name')
+
+
+class MemoryImportForm(forms.Form):
+    file = forms.FileField(label="Memories JSON export")
+    organisation = forms.ModelChoiceField(
+        queryset=models.CoreOrganisation.objects.none(),
+        label="Import into organisation",
+        help_text="Every imported memory is attributed to you, inside this "
+                   "organisation — regardless of which org the file was "
+                   "originally exported from.",
+    )
+    datasource = forms.ChoiceField(
+        label="Attach imported memories to",
+        help_text="Choose a datasource to attach every imported memory to, or "
+                   "import them as global. \"Keep from file\" tries to match "
+                   "each row's own datasource by name and falls back to global "
+                   "if it can't be found locally.",
+    )
+
+    def __init__(self, *args, organisations_qs=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        from django.db.models import Q
+        from terno_dbi.core.models import DataSource
+
+        organisations_qs = (
+            organisations_qs if organisations_qs is not None
+            else models.CoreOrganisation.objects.none()
+        )
+        self.fields['organisation'].queryset = organisations_qs
+
+        choices = [
+            (KEEP_ORIGINAL_DATASOURCE, "Keep from file (match by name)"),
+            (GLOBAL_DATASOURCE, "Global (no datasource)"),
+        ]
+        datasources = DataSource.objects.filter(
+            Q(organisation__in=organisations_qs) | Q(is_global=True)
+        ).distinct().order_by('display_name')
+        choices += [
+            (str(ds.pk), f"{ds.display_name}"
+                          f"{'' if ds.is_global else f' ({ds.organisation.name})'}")
+            for ds in datasources
+        ]
+        self.fields['datasource'].choices = choices
+
+        self.datasource_organisation_map = {
+            KEEP_ORIGINAL_DATASOURCE: "",
+            GLOBAL_DATASOURCE: "",
+        }
+        self.datasource_organisation_map.update({
+            str(ds.pk): "" if ds.is_global else str(ds.organisation_id)
+            for ds in datasources
+        })
+
+
 @admin.register(models.Memory)
 class MemoryAdmin(OrganisationFilterMixin, reversion.admin.VersionAdmin):
     list_display = ('name', 'description', 'memory_type', 'store',
@@ -391,6 +476,49 @@ class MemoryAdmin(OrganisationFilterMixin, reversion.admin.VersionAdmin):
     search_fields = ('name', 'description', 'content')
     organisation_related_field_names = ['organisation']
     exclude = ['organisation']
+    actions = ['export_selected_memories']
+    change_list_template = 'admin/core/memory/change_list.html'
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        # Everyone (Org Admin or not) only ever sees org-wide memories plus
+        # their *own* personal ones — nobody browses other members' personal
+        # memory here, matching what the agent itself is allowed to touch.
+        return qs.filter(
+            Q(store=models.Memory.Store.ORG)
+            | Q(store=models.Memory.Store.USER, created_by_id=request.user.id)
+        )
+
+    def has_change_permission(self, request, obj=None):
+        if not super().has_change_permission(request, obj):
+            return False
+        if obj is None or request.user.is_superuser:
+            return True
+        if obj.store == models.Memory.Store.ORG:
+            return _can_write_org_memory(request.user)
+        return obj.created_by_id == request.user.id
+
+    def has_delete_permission(self, request, obj=None):
+        if not super().has_delete_permission(request, obj):
+            return False
+        if obj is None or request.user.is_superuser:
+            return True
+        if obj.store == models.Memory.Store.ORG:
+            return _can_write_org_memory(request.user)
+        return obj.created_by_id == request.user.id
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj=obj, **kwargs)
+        if not _can_write_org_memory(request.user) and 'store' in form.base_fields:
+            # Non-Org-Admins can only ever create/edit their own personal
+            # memories through this form — org-store is read-only for them.
+            form.base_fields['store'].choices = [
+                (models.Memory.Store.USER, models.Memory.Store.USER.label),
+            ]
+            form.base_fields['store'].initial = models.Memory.Store.USER
+        return form
 
     def save_model(self, request, obj, form, change):
         org_id = request.org_id
@@ -399,3 +527,114 @@ class MemoryAdmin(OrganisationFilterMixin, reversion.admin.VersionAdmin):
         if not change and not obj.created_by_id:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
+
+    @admin.action(description="Export selected memories to JSON")
+    def export_selected_memories(self, request, queryset):
+        rows = [
+            memory_service.export_row(mem)
+            for mem in queryset.select_related('organisation', 'created_by', 'data_source')
+        ]
+        payload = json.dumps(
+            {"version": 1, "count": len(rows), "memories": rows},
+            indent=2, ensure_ascii=False,
+        )
+        response = HttpResponse(payload, content_type='application/json')
+        response['Content-Disposition'] = 'attachment; filename="memories_export.json"'
+        return response
+
+    def get_urls(self):
+        custom = [
+            path('import-json/', self.admin_site.admin_view(self.import_json_view),
+                 name='terno_dbi_memory_import_json'),
+        ]
+        return custom + super().get_urls()
+
+    def import_json_view(self, request):
+        allowed_orgs = _importable_organisations(request.user)
+        if not allowed_orgs.exists():
+            messages.error(request, "You are not a member of any organisation.")
+            return redirect('..')
+
+        if request.method == 'POST':
+            form = MemoryImportForm(request.POST, request.FILES, organisations_qs=allowed_orgs)
+            if form.is_valid():
+                target_org = form.cleaned_data['organisation']
+
+                try:
+                    payload = json.load(form.cleaned_data['file'])
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    messages.error(request, "Uploaded file is not valid JSON.")
+                    return redirect('.')
+
+                if isinstance(payload, list):
+                    rows = payload
+                elif isinstance(payload, dict):
+                    rows = payload.get('memories', [])
+                else:
+                    messages.error(
+                        request,
+                        "Uploaded file must be a JSON object with a 'memories' list, "
+                        "or a plain JSON list of memory rows.",
+                    )
+                    return redirect('.')
+
+                if not rows:
+                    messages.warning(
+                        request,
+                        "No memory rows found in the uploaded file — it parsed as valid "
+                        "JSON but contained an empty list (or an empty 'memories' key). "
+                        "Nothing was imported.",
+                    )
+                    return redirect('..')
+
+                datasource_choice = form.cleaned_data['datasource']
+                if datasource_choice == KEEP_ORIGINAL_DATASOURCE:
+                    force_datasource = memory_service.NOT_SET
+                elif datasource_choice == GLOBAL_DATASOURCE:
+                    force_datasource = None
+                else:
+                    from terno_dbi.core.models import DataSource
+                    force_datasource = int(datasource_choice)
+                    ds = DataSource.objects.filter(id=force_datasource).first()
+                    if ds is None or not (ds.is_global or ds.organisation_id == target_org.id):
+                        messages.error(
+                            request,
+                            "Selected datasource does not belong to the selected "
+                            "organisation.",
+                        )
+                        return redirect('.')
+
+                counts = {"created": 0, "skipped": 0, "error": 0}
+                notes = []
+                for row in rows:
+                    action, detail = memory_service.import_row(
+                        row, target_organisation_id=target_org.id,
+                        importing_user_id=request.user.id,
+                        can_write_org_memory=_can_write_org_memory(request.user),
+                        force_datasource_id=force_datasource,
+                    )
+                    counts[action] = counts.get(action, 0) + 1
+                    if detail:
+                        notes.append(f"{row.get('name', '?')}: {detail}")
+
+                messages.success(
+                    request,
+                    f"Import done — {len(rows)} rows read into '{target_org.name}', "
+                    f"created={counts['created']} skipped={counts['skipped']} "
+                    f"errors={counts['error']}",
+                )
+                for note in notes[:20]:
+                    messages.warning(request, note)
+                if len(notes) > 20:
+                    messages.warning(request, f"...and {len(notes) - 20} more (see server logs).")
+                return redirect('..')
+        else:
+            form = MemoryImportForm(organisations_qs=allowed_orgs)
+
+        return render(
+            request, 'admin/core/memory/import_json.html',
+            {
+                'form': form, 'opts': self.model._meta,
+                'datasource_organisation_map_json': json.dumps(form.datasource_organisation_map),
+            },
+        )

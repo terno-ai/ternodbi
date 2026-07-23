@@ -705,6 +705,9 @@ class Memory(models.Model):
         db_table = "terno_memory"
         verbose_name = "Memory"
         verbose_name_plural = "Memories"
+        permissions = [
+            ("write_org_memory", "Can write organisation-wide memories"),
+        ]
         constraints = [
             # org store: one name per (org, datasource) — a shared namespace.
             models.UniqueConstraint(
