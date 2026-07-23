@@ -122,6 +122,7 @@ def _find_primary_key_order(sql: str, datasource_id: int, dialect: str = None) -
 
 
 def execute_native_sql(datasource, native_sql, page=1, per_page=50):
+    connector = None
     try:
         connector = ConnectorFactory.create_connector(
             datasource.type,
@@ -142,6 +143,9 @@ def execute_native_sql(datasource, native_sql, page=1, per_page=50):
             'status': 'error',
             'error': str(e)
         }
+    finally:
+        if connector is not None:
+            connector.close()
 
 
 def execute_paginated_query(
@@ -154,12 +158,14 @@ def execute_paginated_query(
     Returns a flat JSON dict: {"status": "success", "columns": [...], "data": [...]}.
     If max_rows is set, stops collecting after that many rows.
     """
+    generator = None
     try:
+        generator = execute_streaming_query(datasource, native_sql)
         columns = None
         rows = []
         row_count = 0
 
-        for chunk in execute_streaming_query(datasource, native_sql):
+        for chunk in generator:
             for line in chunk.split("\n"):
                 if not line or not line.strip():
                     continue
@@ -200,6 +206,9 @@ def execute_paginated_query(
             'status': 'error',
             'error': str(e)
         }
+    finally:
+        if generator is not None and hasattr(generator, "close"):
+            generator.close()
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +363,7 @@ def execute_paginated_query(
 
 
 def execute_native_sql_return_df(datasource, native_sql):
+    connector = None
     try:
         connector = ConnectorFactory.create_connector(
             datasource.type,
@@ -379,6 +389,9 @@ def execute_native_sql_return_df(datasource, native_sql):
             'status': 'error',
             'error': str(e)
         }
+    finally:
+        if connector is not None:
+            connector.close()
 
 
 def export_native_sql_result(datasource, native_sql):
@@ -391,14 +404,17 @@ def export_native_sql_result(datasource, native_sql):
     utc_time = timezone.now().strftime('%Y-%m-%d_%H-%M-%S')
     file_name = f'dbi_{datasource.display_name}_{utc_time}.csv'
 
-    with connector.get_connection() as con:
-        execute_result = con.execute(sqlalchemy.text(native_sql))
-        response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = f'attachment; filename={file_name}'
-        writer = csv.writer(response)
-        writer.writerow(execute_result.keys())
-        writer.writerows(execute_result)
-        return response
+    try:
+        with connector.get_connection() as con:
+            execute_result = con.execute(sqlalchemy.text(native_sql))
+            response = HttpResponse(content_type='text/csv')
+            response['Content-Disposition'] = f'attachment; filename={file_name}'
+            writer = csv.writer(response)
+            writer.writerow(execute_result.keys())
+            writer.writerows(execute_result)
+            return response
+    finally:
+        connector.close()
 
 
 def export_native_sql_streaming(datasource, native_sql):
@@ -417,19 +433,22 @@ def export_native_sql_streaming(datasource, native_sql):
     file_name = f'dbi_{datasource.display_name}_{utc_time}.csv'
 
     def generate_csv():
-        first_batch = True
-        for batch in service.stream_all(native_sql):
-            buffer = io.StringIO()
-            writer = csv.writer(buffer)
+        try:
+            first_batch = True
+            for batch in service.stream_all(native_sql):
+                buffer = io.StringIO()
+                writer = csv.writer(buffer)
 
-            if first_batch and batch:
-                writer.writerow([f"col_{i}" for i in range(len(batch[0]))])
-                first_batch = False
+                if first_batch and batch:
+                    writer.writerow([f"col_{i}" for i in range(len(batch[0]))])
+                    first_batch = False
 
-            for row in batch:
-                writer.writerow(row)
+                for row in batch:
+                    writer.writerow(row)
 
-            yield buffer.getvalue()
+                yield buffer.getvalue()
+        finally:
+            connector.close()
 
     from django.http import StreamingHttpResponse
     response = StreamingHttpResponse(generate_csv(), content_type='text/csv')
@@ -442,6 +461,7 @@ def execute_streaming_query(datasource, native_sql, yield_size=1000):
     Execute a query using SQLAlchemy server-side cursors and yield
     results as NDJSON (newline-delimited JSON) chunks.
     """
+    connector = None
     try:
         connector = ConnectorFactory.create_connector(
             datasource.type,
@@ -470,7 +490,7 @@ def execute_streaming_query(datasource, native_sql, yield_size=1000):
                 }
                 batch.append(_json.dumps(row_data))
                 row_count += 1
-                
+
                 # Yield in batches of 1000 to avoid massive HTTP chunking overhead
                 if len(batch) >= 1000:
                     yield "\n".join(batch) + "\n"
@@ -484,6 +504,9 @@ def execute_streaming_query(datasource, native_sql, yield_size=1000):
     except Exception as e:
         logger.exception(f"Streaming query error: {e}")
         yield _json.dumps({"__error__": str(e)}) + "\n"
+    finally:
+        if connector is not None:
+            connector.close()
 
 
 def _make_json_safe(value):

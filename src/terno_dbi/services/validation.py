@@ -85,6 +85,7 @@ def validate_datasource_input(type_, conn_str, connection_json=None):
         except Exception as e:
             return f"Error validating BigQuery connection: {str(e)}"
 
+    connector = None
     try:
         connector = ConnectorFactory.create_connector(
             type_,
@@ -93,7 +94,6 @@ def validate_datasource_input(type_, conn_str, connection_json=None):
         )
         with connector.get_connection():
             pass
-        connector.close()
     except Exception as e:
         logger.error(f"Connection validation failed for {type_}: {e}", exc_info=True)
         error_str = str(e).lower()
@@ -106,5 +106,8 @@ def validate_datasource_input(type_, conn_str, connection_json=None):
         elif "timeout" in error_str or "timed out" in error_str:
             return "Could not connect to database: Connection timed out. Please check the host and firewall settings."
         return "Could not connect to database. Please verify all connection details are correct."
+    finally:
+        if connector is not None:
+            connector.close()
 
     return None

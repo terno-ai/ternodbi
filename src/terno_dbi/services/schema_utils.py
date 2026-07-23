@@ -234,6 +234,8 @@ def get_table_info(datasource, table_name: str, sample_rows_count: int = 10) -> 
     except Exception as e:
         logger.exception(f"Error getting table info for {table_name}: {e}")
         result["error"] = str(e)
+    finally:
+        connector.close()
 
     return result
 
@@ -717,3 +719,5 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
     except Exception as e:
         logger.exception(f"Error syncing metadata for datasource {datasource_id}: {e}")
         return {"error": str(e)}
+    finally:
+        connector.close()
