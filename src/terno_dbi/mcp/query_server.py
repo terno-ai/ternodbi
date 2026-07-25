@@ -20,6 +20,36 @@ server = Server(
         "Typical flow: list_datasources, then list_tables/list_table_columns to see "
         "schema, then execute_query (use public names) or get_sample_data to preview "
         "rows.\n\n"
+        "BEFORE writing any SQL that JOINs two tables, call list_relationships for "
+        "this datasource (optionally scoped by `table`) — do not join on matching "
+        "column names alone. Column names that look alike are not proof a join is "
+        "valid, and a column pair that looks unrelated can still be the correct join; "
+        "only the measured verdict tells you which. Then: join only on `reliable` "
+        "edges; for a `low_cardinality_trap` edge, join on the full "
+        "`composite_key_members` set, never the column alone; treat a `suspicious` "
+        "edge as a red flag, not a join, and say so rather than using it; choose LEFT "
+        "vs INNER by `orphan_count` (a nonzero orphan_count means an INNER join "
+        "silently drops those rows — use LEFT if the question implies completeness, "
+        "e.g. \"total\", \"all\", \"every\"); and never SUM/AVG a measure across a "
+        "`one_to_many` or `many_to_many` edge without deduplicating first, or the "
+        "result double-counts. If list_relationships returns nothing for tables you "
+        "need to join, that means discovery hasn't run yet (or found nothing "
+        "reliable) — do not assume an unmeasured join is safe just because it's "
+        "absent from a warning list.\n\n"
+        "Before answering a \"who/what is the top/most/best/champion/leader\" or "
+        "period-total ranking question, check whether the schema has BOTH a raw "
+        "event/fact table (e.g. \"results\", \"transactions\", \"orders_detail\") AND "
+        "a separately-named summary table for the same entity (names like "
+        "\"*_standings\", \"*_summary\", \"*_totals\", \"*_ranking\", \"*_rollup\"). If "
+        "so, prefer the summary table — it typically encodes business rules (drop-"
+        "lowest-N scoring, disqualifications, weighting, exclusions) that leave no "
+        "visible trace in the raw table's columns, so a fresh GROUP BY/SUM over the "
+        "raw table will often execute cleanly and look plausible while still being "
+        "wrong. Only fall back to the raw table when the summary table has no rows "
+        "for the period in question (verify with a COUNT, don't assume). If both "
+        "paths are plausible and you can't tell which the schema intends, compute "
+        "both and treat any disagreement as a signal to investigate, not noise to "
+        "average away.\n\n"
         "This server also holds durable, shared memory (list_memories/get_memory/"
         "grep_memory) — facts about this data recorded by any agent that worked with "
         "it before, not just you. Check it before answering questions about schema, "
@@ -107,6 +137,44 @@ async def list_tools() -> List[Tool]:
                     "datasource": {
                         "type": "string",
                         "description": "Datasource name or ID"
+                    }
+                },
+                "required": ["datasource"]
+            }
+        ),
+        Tool(
+            name="list_relationships",
+            description=(
+                "List MEASURED join relationships for a datasource — the join map to consult "
+                "BEFORE writing any JOIN. Each edge gives a verdict (reliable / partial / "
+                "suspicious / low_cardinality_trap), cardinality, overlap_ratio, and "
+                "orphan_count. Use it to: join only on reliable edges; for a "
+                "low_cardinality_trap join on the full composite_key_members instead of the "
+                "column alone; and choose LEFT vs INNER by orphan_count (orphans on the many "
+                "side get dropped by an INNER join). Each edge also carries `rollup_signal` "
+                "('to_is_rollup' / 'from_is_rollup' / 'uncertain' / 'none') with "
+                "`rollup_evidence` — set when the two tables share a same-named numeric "
+                "measure that looks cumulative on one side (a summary/standings table) vs "
+                "episodic on the other (a raw event table); prefer the flagged rollup side "
+                "over aggregating the raw side for ranking/total questions. Treat 'uncertain' "
+                "as inconclusive, not a recommendation either way. These are measured facts, "
+                "distinct from declared foreign keys. Optionally filter by `table`, or "
+                "`min_verdict='reliable'`."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "datasource": {
+                        "type": "string",
+                        "description": "Datasource name or ID"
+                    },
+                    "table": {
+                        "type": "string",
+                        "description": "Optional: only edges touching this table (name or id)"
+                    },
+                    "min_verdict": {
+                        "type": "string",
+                        "description": "Optional: 'reliable' to return only reliable edges"
                     }
                 },
                 "required": ["datasource"]
@@ -310,6 +378,18 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             result = {
                 "tables": tables,
                 "count": len(tables) if isinstance(tables, list) else 0
+            }
+
+        elif name == "list_relationships":
+            datasource = arguments["datasource"]
+            rels = client.list_relationships(
+                datasource,
+                table=arguments.get("table"),
+                min_verdict=arguments.get("min_verdict"),
+            )
+            result = {
+                "relationships": rels,
+                "count": len(rels) if isinstance(rels, list) else 0
             }
 
         elif name == "list_table_columns":

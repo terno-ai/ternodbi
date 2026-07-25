@@ -240,6 +240,64 @@ def list_foreign_keys(request, datasource_identifier):
 
 @require_service_auth()
 @require_http_methods(["GET"])
+def list_relationships(request, datasource_identifier):
+    """Measured join relationships for a datasource — the query planner's join map.
+
+    Optional query params:
+      * ``table`` — only edges touching this table (public or actual name).
+      * ``min_verdict`` — 'reliable' to return only reliable edges (default: all).
+    """
+    ds = request.resolved_datasource
+    logger.debug("List relationships requested: datasource='%s'", ds.display_name)
+
+    qs = models.MeasuredRelationship.objects.filter(
+        data_source=ds
+    ).select_related(
+        'from_column', 'from_column__table', 'to_column', 'to_column__table'
+    )
+
+    table_filter = request.GET.get("table")
+    if table_filter:
+        qs = qs.filter(
+            models.Q(from_column__table__public_name=table_filter)
+            | models.Q(from_column__table__name=table_filter)
+            | models.Q(to_column__table__public_name=table_filter)
+            | models.Q(to_column__table__name=table_filter)
+        )
+    if request.GET.get("min_verdict") == "reliable":
+        qs = qs.filter(verdict=models.MeasuredRelationship.Verdict.RELIABLE)
+
+    def _col_ref(col):
+        table_name = col.table.public_name or col.table.name
+        return f"{table_name}.{col.public_name or col.name}"
+
+    edges = []
+    for r in qs:
+        edges.append({
+            "id": r.id,
+            "from": _col_ref(r.from_column),
+            "to": _col_ref(r.to_column),
+            "verdict": r.verdict,
+            "cardinality": r.cardinality,
+            "overlap_ratio": round(r.overlap_ratio, 4) if r.overlap_ratio is not None else None,
+            "orphan_count": r.orphan_count,
+            "composite_key_members": r.composite_key_members,
+            "provenance": r.provenance,
+            "confidence": r.confidence,
+            "is_protected": r.is_protected,
+            "rollup_signal": r.rollup_signal,
+            "rollup_evidence": r.rollup_evidence,
+        })
+
+    return JsonResponse({
+        "status": "success",
+        "datasource_id": datasource_identifier,
+        "relationships": edges,
+    })
+
+
+@require_service_auth()
+@require_http_methods(["GET"])
 def get_sample_data(request, table_id):
     table = request.resolved_table
     ds = table.data_source

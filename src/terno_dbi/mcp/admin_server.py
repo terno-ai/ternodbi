@@ -22,6 +22,12 @@ server = Server(
         "memory (save_memory/edit_memory/delete_memory), and to set this "
         "organisation's custom system-prompt addendum (update_org_prompt/"
         "edit_org_prompt).\n\n"
+        "Onboarding a new datasource is a pipeline, run in order: add_datasource, "
+        "then sync_metadata (pulls tables/columns), then discover_relationships "
+        "(measures which columns actually join, and how reliably — this is what the "
+        "query server's list_relationships tool reads from). Re-run sync_metadata "
+        "and discover_relationships after any schema or data change; both are "
+        "idempotent — an unchanged run rewrites nothing.\n\n"
         "Memory write rules: one fact per memory. Prefer edit_memory over a fresh "
         "save_memory when an existing memory is still mostly right but needs a "
         "correction — it preserves any [[name]] links other memories point at it "
@@ -286,6 +292,27 @@ async def list_tools() -> List[Tool]:
             }
         ),
         Tool(
+            name="discover_relationships",
+            description=(
+                "Measure join relationships between columns from the live data and store them "
+                "as MeasuredRelationship rows. For each candidate key pair it reports a verdict "
+                "(reliable / partial / suspicious / low_cardinality_trap), cardinality, and "
+                "orphan count — the facts the query planner uses to build safe joins. "
+                "Deterministic and idempotent: a re-run on unchanged data rewrites nothing. "
+                "Run after sync_metadata (it needs the synced tables/columns)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "datasource_id": {
+                        "type": "integer",
+                        "description": "ID of the datasource to discover relationships for"
+                    }
+                },
+                "required": ["datasource_id"]
+            }
+        ),
+        Tool(
             name="save_memory",
             description=(
                 "Create or fully replace a persistent memory (a single fact recalled "
@@ -416,6 +443,10 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             datasource_id = arguments["datasource_id"]
             overwrite = arguments.get("overwrite", False)
             result = client.sync_metadata(datasource_id, overwrite=overwrite)
+
+        elif name == "discover_relationships":
+            datasource_id = arguments["datasource_id"]
+            result = client.discover_relationships(datasource_id)
 
         elif name == "save_memory":
             result = client.save_memory(

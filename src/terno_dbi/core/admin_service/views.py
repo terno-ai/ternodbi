@@ -7,6 +7,7 @@ from terno_dbi.core import models
 from terno_dbi.services.validation import validate_datasource_input
 from terno_dbi.decorators import require_service_auth, require_scope
 from terno_dbi.services import schema_utils
+from terno_dbi.services.discover_relationships import discover_relationships as discover_relationships_service
 from terno_dbi.services.shield import delete_cache
 from terno_dbi.services.query import execute_native_sql
 
@@ -496,6 +497,30 @@ def sync_metadata(request, datasource_identifier):
             "status": "error",
             "error": str(e)
         }, status=500)
+
+
+@csrf_exempt
+@require_service_auth()
+@require_scope('admin:sync')
+@require_http_methods(["POST"])
+def discover_relationships(request, datasource_identifier):
+    """Measure join relationships (verdict/cardinality/orphans) from live data and upsert
+    them into MeasuredRelationship. Deterministic and idempotent; a re-run on unchanged data
+    rewrites nothing."""
+    ds = request.resolved_datasource
+    try:
+        logger.info("Starting relationship discovery: datasource_id=%d", ds.id)
+        result = discover_relationships_service(ds.id)
+        logger.info("Relationship discovery completed: datasource_id=%d, edges_written=%s",
+                    ds.id, result.get('edges_written'))
+        return JsonResponse({
+            "status": "success",
+            "datasource_id": ds.id,
+            "result": result,
+        })
+    except Exception as e:
+        logger.exception(f"Relationship discovery error: {e}")
+        return JsonResponse({"status": "error", "error": str(e)}, status=500)
 
 
 @require_service_auth()

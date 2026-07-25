@@ -273,6 +273,145 @@ class ForeignKey(models.Model):
         db_table = 'terno_foreignkey'
 
 
+class MeasuredRelationship(models.Model):
+    """
+    A join edge between two columns discovered by MEASURING data overlap, as opposed to
+    the declared :class:`ForeignKey` (which comes from the source schema's FK constraints).
+
+    This is the "measured-facts" layer for joins: every field is computed deterministically
+    from the data by the ``discover_relationships`` service, carries provenance + a timestamp,
+    and is refreshed on re-discovery. It answers "does this join physically work, and how?"
+    — verdict, cardinality, orphan rows — which the query planner reads to build safe joins.
+    Directed: ``from_column`` references ``to_column`` (child -> parent by convention).
+    """
+
+    class Verdict(models.TextChoices):
+        RELIABLE = 'reliable', _('Reliable')
+        PARTIAL = 'partial', _('Partial')
+        SUSPICIOUS = 'suspicious', _('Suspicious')
+        LOW_CARDINALITY_TRAP = 'low_cardinality_trap', _('Low-cardinality trap')
+
+    class Cardinality(models.TextChoices):
+        ONE_TO_ONE = 'one_to_one', _('One to one')
+        ONE_TO_MANY = 'one_to_many', _('One to many')
+        MANY_TO_ONE = 'many_to_one', _('Many to one')
+        MANY_TO_MANY = 'many_to_many', _('Many to many')
+
+    class Provenance(models.TextChoices):
+        DECLARED = 'declared', _('Declared (source FK)')
+        MEASURED = 'measured', _('Measured from data')
+        HUMAN_ASSERTED = 'human_asserted', _('Human asserted')
+
+    class Confidence(models.TextChoices):
+        HIGH = 'high', _('High')
+        MEDIUM = 'medium', _('Medium')
+        LOW = 'low', _('Low')
+
+    data_source = models.ForeignKey(
+        DataSource, on_delete=models.CASCADE, related_name='measured_relationships'
+    )
+    from_column = models.ForeignKey(
+        TableColumn, on_delete=models.CASCADE, related_name='measured_rel_from'
+    )
+    to_column = models.ForeignKey(
+        TableColumn, on_delete=models.CASCADE, related_name='measured_rel_to'
+    )
+    overlap_ratio = models.FloatField(
+        help_text="Fraction of the smaller side's distinct values also present in the other side."
+    )
+    smaller_domain_size = models.BigIntegerField(
+        help_text="Distinct value count of the smaller-cardinality side (the cardinality-gate input)."
+    )
+    smaller_distinct_ratio = models.FloatField(
+        help_text="The smaller side's distinct/row ratio WITHIN ITS OWN TABLE. Gate on this "
+                  "(repetition), not on raw domain size — a genuine key on a small table is not a trap."
+    )
+    verdict = models.CharField(max_length=24, choices=Verdict.choices)
+    cardinality = models.CharField(
+        max_length=16, choices=Cardinality.choices, null=True, blank=True
+    )
+    orphan_count = models.BigIntegerField(
+        null=True, blank=True,
+        help_text="Distinct many-side values with no match on the other side (inner-join drops them)."
+    )
+    composite_key_members = models.JSONField(
+        default=list, blank=True,
+        help_text="TableColumn ids needed to form a real join when this edge alone is a "
+                  "low_cardinality_trap (e.g. the high-cardinality partner in a composite key)."
+    )
+    provenance = models.CharField(
+        max_length=16, choices=Provenance.choices, default=Provenance.MEASURED
+    )
+    confidence = models.CharField(
+        max_length=8, choices=Confidence.choices, default=Confidence.MEDIUM
+    )
+    is_protected = models.BooleanField(
+        default=False,
+        help_text="Human-asserted edges are not silently overwritten by re-measurement; a "
+                  "contradicting measurement is surfaced for review instead."
+    )
+    content_hash = models.CharField(
+        max_length=64, blank=True,
+        help_text="Hash of the material fields; drives change-gating so an unchanged re-run "
+                  "only bumps last_confirmed_at instead of recording churn."
+    )
+
+    class RollupSignal(models.TextChoices):
+        """
+        D5: does one side of this entity-key edge look like an authoritative rollup/summary
+        of the other? (e.g. a `driver_standings` table vs a raw `results` table both keyed on
+        driver_id, sharing a `points` column). Distinct from `verdict` above, which is purely
+        about join validity — a rollup pair can be a perfectly `reliable` join and STILL be the
+        wrong table to aggregate from, which is exactly the failure this detector targets.
+        """
+        NONE = 'none', _('Not a rollup pair')
+        TO_IS_ROLLUP = 'to_is_rollup', _('`to` side is the authoritative summary')
+        FROM_IS_ROLLUP = 'from_is_rollup', _('`from` side is the authoritative summary')
+        UNCERTAIN = 'uncertain', _('Looks like a rollup pair but direction unclear')
+
+    rollup_signal = models.CharField(
+        max_length=16, choices=RollupSignal.choices, default=RollupSignal.NONE,
+        help_text="D5: set when the two tables share an entity key AND a same-named numeric "
+                  "measure, with a row-count/monotonicity pattern suggesting one side is a "
+                  "precomputed summary of the other."
+    )
+    rollup_evidence = models.TextField(
+        blank=True,
+        help_text="D5: which measure column, row-count comparison, and monotonicity sample "
+                  "result produced the rollup_signal — the evidence, not just the verdict."
+    )
+    first_discovered_at = models.DateTimeField(auto_now_add=True)
+    last_confirmed_at = models.DateTimeField(
+        auto_now=True, help_text="Bumped on every discovery run (cheap)."
+    )
+    last_changed_at = models.DateTimeField(
+        null=True, blank=True, help_text="Moves only when content_hash materially changes."
+    )
+
+    class Meta:
+        db_table = 'terno_measuredrelationship'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['from_column', 'to_column'],
+                name='uniq_measured_relationship_edge'
+            )
+        ]
+        indexes = [
+            models.Index(fields=['data_source', 'from_column']),
+            models.Index(fields=['data_source', 'to_column']),
+        ]
+
+    def compute_content_hash(self):
+        material = (
+            f"{self.verdict}|{self.cardinality}|{self.orphan_count}|"
+            f"{sorted(self.composite_key_members or [])}"
+        )
+        return hashlib.sha256(material.encode('utf-8')).hexdigest()
+
+    def __str__(self):
+        return f"{self.from_column} -> {self.to_column} [{self.verdict}]"
+
+
 class PrivateTableSelector(models.Model):
     data_source = models.ForeignKey(DataSource, on_delete=models.CASCADE)
     tables = models.ManyToManyField(

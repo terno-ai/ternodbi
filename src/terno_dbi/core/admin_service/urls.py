@@ -14,5 +14,6 @@ urlpatterns = [
     path("datasources/<str:datasource_identifier>/hidden/", views.list_hidden, name="list_hidden"),
     path("validate/", views.validate_connection, name="validate_connection"),
     path("datasources/<str:datasource_identifier>/sync/", views.sync_metadata, name="sync_metadata"),
+    path("datasources/<str:datasource_identifier>/discover-relationships/", views.discover_relationships, name="discover_relationships"),
     path("datasources/<str:datasource_identifier>/tables/<str:table_name>/info/", views.get_table_info, name="get_table_info"),
 ]

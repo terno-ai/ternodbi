@@ -118,6 +118,12 @@ class TernoDBIClient:
         response = requests.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
+    def discover_relationships(self, datasource: DatasourceIdentifier) -> Dict:
+        logger.info("Discovering relationships for datasource: %s", datasource)
+        url = f"{self.base_url}/api/admin/datasources/{datasource}/discover-relationships/"
+        response = requests.post(url, json={}, headers=self._get_headers())
+        return self._handle_response(response)
+
     def validate_connection(self, db_type: str, connection_str: str, connection_json: Optional[Dict] = None) -> Dict:
         url = f"{self.base_url}/api/admin/validate/"
         payload = {
@@ -133,6 +139,19 @@ class TernoDBIClient:
         response = requests.get(url, headers=self._get_headers())
         data = self._handle_response(response)
         return data.get("tables", [])
+
+    def list_relationships(self, datasource: DatasourceIdentifier,
+                           table: Optional[Union[int, str]] = None,
+                           min_verdict: Optional[str] = None) -> List[Dict]:
+        url = f"{self.base_url}/api/query/datasources/{datasource}/relationships/"
+        params = {}
+        if table is not None:
+            params["table"] = table
+        if min_verdict is not None:
+            params["min_verdict"] = min_verdict
+        response = requests.get(url, params=params, headers=self._get_headers())
+        data = self._handle_response(response)
+        return data.get("relationships", [])
 
     def list_table_columns(self, datasource: DatasourceIdentifier, table: Union[int, str]) -> List[Dict]:
         url = f"{self.base_url}/api/query/datasources/{datasource}/tables/{table}/columns/"

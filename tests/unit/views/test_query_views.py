@@ -473,6 +473,60 @@ class TestListForeignKeys:
         assert data['foreign_keys'][0]['constrained_table'] == 'Users'
 
 
+@pytest.mark.django_db
+class TestListRelationships:
+    """Tests for /api/query/datasources/<id>/relationships/"""
+
+    def _make_edge(self, setup_test_data, verdict):
+        from terno_dbi.core.models import MeasuredRelationship
+        return MeasuredRelationship.objects.create(
+            data_source=setup_test_data['datasource'],
+            from_column=setup_test_data['col1'],
+            to_column=setup_test_data['col2'],
+            overlap_ratio=1.0, smaller_domain_size=40, smaller_distinct_ratio=0.2,
+            verdict=verdict,
+            cardinality=MeasuredRelationship.Cardinality.MANY_TO_ONE,
+            orphan_count=0, provenance=MeasuredRelationship.Provenance.MEASURED,
+            confidence=MeasuredRelationship.Confidence.HIGH,
+        )
+
+    def test_returns_measured_relationships(self, request_factory, setup_test_data):
+        from terno_dbi.core.models import MeasuredRelationship
+        from terno_dbi.core.query_service.views import list_relationships
+
+        self._make_edge(setup_test_data, MeasuredRelationship.Verdict.RELIABLE)
+        request = request_factory.get(
+            f'/api/query/datasources/{setup_test_data["datasource"].id}/relationships/'
+        )
+        setup_request_for_view(request, setup_test_data['token'], datasource=setup_test_data['datasource'])
+
+        response = list_relationships(request, setup_test_data['datasource'].id)
+        assert response.status_code == 200
+        data = json.loads(response.content)
+        assert len(data['relationships']) == 1
+        edge = data['relationships'][0]
+        assert edge['verdict'] == 'reliable'
+        assert edge['cardinality'] == 'many_to_one'
+        assert 'from' in edge and 'to' in edge
+
+    def test_min_verdict_filter(self, request_factory, setup_test_data):
+        from terno_dbi.core.models import MeasuredRelationship, TableColumn
+        from terno_dbi.core.query_service.views import list_relationships
+
+        self._make_edge(setup_test_data, MeasuredRelationship.Verdict.SUSPICIOUS)
+        request = request_factory.get(
+            f'/api/query/datasources/{setup_test_data["datasource"].id}/relationships/',
+            {'min_verdict': 'reliable'}
+        )
+        setup_request_for_view(request, setup_test_data['token'], datasource=setup_test_data['datasource'])
+
+        response = list_relationships(request, setup_test_data['datasource'].id)
+        assert response.status_code == 200
+        data = json.loads(response.content)
+        # the only edge is suspicious, so min_verdict=reliable filters it out
+        assert data['relationships'] == []
+
+
 
 @pytest.mark.django_db
 class TestExportQuery:

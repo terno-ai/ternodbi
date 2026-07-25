@@ -153,6 +153,17 @@ if not PARENT_APP_INSTALLED:
         raw_id_fields = ('constrained_table', 'constrained_columns', 'referred_table', 'referred_columns')
 
 
+    @admin.register(models.MeasuredRelationship)
+    class MeasuredRelationshipAdmin(reversion.admin.VersionAdmin):
+        list_display = ('from_column', 'to_column', 'verdict', 'cardinality',
+                        'overlap_ratio', 'orphan_count', 'confidence', 'is_protected',
+                        'last_confirmed_at')
+        list_filter = ('data_source', 'verdict', 'cardinality', 'provenance', 'is_protected')
+        raw_id_fields = ('data_source', 'from_column', 'to_column')
+        readonly_fields = ('content_hash', 'first_discovered_at', 'last_confirmed_at',
+                           'last_changed_at')
+
+
     @admin.register(PrivateTableSelector)
     class PrivateTableSelectorAdmin(admin.ModelAdmin):
         list_display = ('data_source', 'table_count')
