@@ -118,10 +118,13 @@ class TernoDBIClient:
         response = requests.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
-    def discover_relationships(self, datasource: DatasourceIdentifier) -> Dict:
+    def discover_relationships(self, datasource: DatasourceIdentifier, table_names: Optional[List[str]] = None) -> Dict:
         logger.info("Discovering relationships for datasource: %s", datasource)
         url = f"{self.base_url}/api/admin/datasources/{datasource}/discover-relationships/"
-        response = requests.post(url, json={}, headers=self._get_headers())
+        payload = {}
+        if table_names:
+            payload["table_names"] = table_names
+        response = requests.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
     def validate_connection(self, db_type: str, connection_str: str, connection_json: Optional[Dict] = None) -> Dict:

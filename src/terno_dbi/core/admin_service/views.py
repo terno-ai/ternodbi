@@ -508,9 +508,16 @@ def discover_relationships(request, datasource_identifier):
     them into MeasuredRelationship. Deterministic and idempotent; a re-run on unchanged data
     rewrites nothing."""
     ds = request.resolved_datasource
+    table_names = None
+    if request.body:
+        try:
+            body = json.loads(request.body)
+            table_names = body.get("table_names") or body.get("tables")
+        except Exception:
+            pass
     try:
-        logger.info("Starting relationship discovery: datasource_id=%d", ds.id)
-        result = discover_relationships_service(ds.id)
+        logger.info("Starting relationship discovery: datasource_id=%d, table_names=%s", ds.id, table_names)
+        result = discover_relationships_service(ds.id, table_names=table_names)
         logger.info("Relationship discovery completed: datasource_id=%d, edges_written=%s",
                     ds.id, result.get('edges_written'))
         return JsonResponse({

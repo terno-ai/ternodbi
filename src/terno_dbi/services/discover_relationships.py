@@ -170,7 +170,7 @@ def _monotonic_score(m: '_Measurer', table_name: str, entity_col: str, order_col
     ratios = []
     for ev in entities:
         series = m.ordered_series(table_name, entity_col, ev, order_col, measure_col)
-        vals = [row[1] for row in series if row[1] is not None]
+        vals = [float(row[1]) for row in series if row[1] is not None]
         if len(vals) < 4:
             continue
         counted = 0
@@ -256,7 +256,11 @@ class _Measurer:
 
     def _table(self, name: str) -> SATable:
         if name not in self._cache:
-            self._cache[name] = SATable(name, self.meta, autoload_with=self.conn)
+            if '.' in name:
+                schema, table_name = name.split('.', 1)
+                self._cache[name] = SATable(table_name, self.meta, schema=schema, autoload_with=self.conn)
+            else:
+                self._cache[name] = SATable(name, self.meta, autoload_with=self.conn)
         return self._cache[name]
 
     def col(self, table_name: str, col_name: str):
@@ -472,15 +476,20 @@ def _run_d5_pass(m: _Measurer, tables, columns_by_table, pairs, result: Dict[str
                     break
 
 
-def discover_relationships(datasource_id: int) -> Dict[str, Any]:
+def discover_relationships(datasource_id: int, table_names: Optional[List[str]] = None) -> Dict[str, Any]:
     try:
         datasource = models.DataSource.objects.get(id=datasource_id, enabled=True)
     except models.DataSource.DoesNotExist:
         return {"error": f"Datasource {datasource_id} not found or not enabled"}
 
-    tables = {t.id: t for t in models.Table.objects.filter(data_source=datasource)}
+    table_qs = models.Table.objects.filter(data_source=datasource)
+    if table_names:
+        table_qs = table_qs.filter(
+            models.Q(name__in=table_names) | models.Q(public_name__in=table_names)
+        )
+    tables = {t.id: t for t in table_qs}
     columns_by_table: Dict[int, List[models.TableColumn]] = {}
-    for col in models.TableColumn.objects.filter(table__data_source=datasource):
+    for col in models.TableColumn.objects.filter(table_id__in=tables.keys()):
         columns_by_table.setdefault(col.table_id, []).append(col)
 
     pairs = _candidate_pairs(columns_by_table, tables)
@@ -519,17 +528,18 @@ def discover_relationships(datasource_id: int) -> Dict[str, Any]:
     # `pairs` prunes a row — a transient measurement error above does NOT, since the pair is
     # still a valid candidate and its previously-measured state should be left alone. Protected
     # (human-asserted) edges are never pruned automatically.
-    candidate_id_pairs = {frozenset((a.id, b.id)) for a, b in pairs}
-    stale_qs = models.MeasuredRelationship.objects.filter(
-        data_source=datasource, is_protected=False
-    )
-    stale_ids = [
-        r.id for r in stale_qs.only('id', 'from_column_id', 'to_column_id')
-        if frozenset((r.from_column_id, r.to_column_id)) not in candidate_id_pairs
-    ]
-    if stale_ids:
-        models.MeasuredRelationship.objects.filter(id__in=stale_ids).delete()
-        result["edges_pruned"] = len(stale_ids)
+    if not table_names:
+        candidate_id_pairs = {frozenset((a.id, b.id)) for a, b in pairs}
+        stale_qs = models.MeasuredRelationship.objects.filter(
+            data_source=datasource, is_protected=False
+        )
+        stale_ids = [
+            r.id for r in stale_qs.only('id', 'from_column_id', 'to_column_id')
+            if frozenset((r.from_column_id, r.to_column_id)) not in candidate_id_pairs
+        ]
+        if stale_ids:
+            models.MeasuredRelationship.objects.filter(id__in=stale_ids).delete()
+            result["edges_pruned"] = len(stale_ids)
 
     return result
 
