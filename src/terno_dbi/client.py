@@ -30,18 +30,23 @@ class TernoDBIClient:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
-    def _handle_response(self, response: requests.Response) -> Any:
+    def _raise_for_status(self, response: requests.Response) -> None:
         try:
             response.raise_for_status()
-            return response.json()
         except requests.exceptions.HTTPError as e:
             try:
-                error_data = response.json()
-                error_msg = error_data.get("error", str(e))
+                error_msg = response.json().get("error", str(e))
             except (ValueError, requests.exceptions.JSONDecodeError):
                 error_msg = str(e)
-            logger.error("API request failed: %s %s -> %s", response.request.method, response.url, error_msg)
-            raise Exception(f"API Error: {error_msg}")
+            logger.error(
+                "API request failed: %s %s -> %s",
+                response.request.method, response.url, error_msg,
+            )
+            raise Exception(f"API Error: {error_msg}") from e
+
+    def _handle_response(self, response: requests.Response) -> Any:
+        self._raise_for_status(response)
+        return response.json()
 
     def get_org_prompt(self, offset: Optional[int] = None, limit: Optional[int] = None) -> Dict:
         url = f"{self.base_url}/api/query/organisation/prompt/"
@@ -218,7 +223,7 @@ class TernoDBIClient:
             url, json=payload, headers=self._get_headers(),
             timeout=600, stream=True
         )
-        resp.raise_for_status()
+        self._raise_for_status(resp)
 
         columns = None
         rows = []
