@@ -71,8 +71,9 @@ def in_process_org(db):
     other = CoreOrganisation.objects.create(name="Globex", subdomain="tp-globex", owner=owner)
 
     user = User.objects.create(username="tp-ada")
-    membership = OrganisationUser.objects.create(user=user, organisation=org)
-    membership.groups.set([Group.objects.create(name="Org Admin")])
+    # "Org Admin" on User.groups, matching terno-ai's create_org_admin_group.
+    user.groups.set([Group.objects.create(name="Org Admin")])
+    OrganisationUser.objects.create(user=user, organisation=org)
 
     ds = DataSource.objects.create(
         display_name="acme-db", type="sqlite",

@@ -293,9 +293,15 @@ def org_fixture(db):
     admin_group = Group.objects.create(name="Org Admin")
     analysts = Group.objects.create(name="Analysts")
 
+    # Mirrors production wiring, which this fixture originally got wrong: terno-ai
+    # puts "Org Admin" on `User.groups` (`create_org_admin_group` does
+    # `owner.groups.add(...)`), while `OrganisationUser.groups` carries the
+    # per-org table-scoping groups. Putting the admin group on the membership
+    # here made every write test pass against a shape production never produces.
     admin_user = User.objects.create(username="ada")
+    admin_user.groups.set([admin_group])
     membership = OrganisationUser.objects.create(user=admin_user, organisation=org)
-    membership.groups.set([admin_group, analysts])
+    membership.groups.set([analysts])
 
     plain_user = User.objects.create(username="bob")
     plain_membership = OrganisationUser.objects.create(user=plain_user, organisation=org)
@@ -331,7 +337,9 @@ def test_groups_are_copied_for_read_parity(org_fixture):
     token = mint_service_token_for_key(
         key, org_fixture["admin"], org_fixture["org"], ["query:read"]
     )
-    assert sorted(g.name for g in token.groups.all()) == ["Analysts", "Org Admin"]
+    # The per-org scoping groups, which is what `OrganisationUser.groups` holds.
+    # "Org Admin" is not among them by design — it lives on `User.groups`.
+    assert sorted(g.name for g in token.groups.all()) == ["Analysts"]
 
 
 @pytest.mark.django_db
@@ -879,3 +887,179 @@ def test_connector_env_vars_are_plain_overrides_not_derived():
         web_src = web_settings.read_text()
         assert "_provisioner_host" not in web_src
         assert "TRUSTED_REDIRECT_DOMAINS = [" in web_src
+
+
+def test_connector_login_hands_off_via_sso_not_straight_to_authorize():
+    """terno-web must not redirect a pending authorize URL directly.
+
+    `/oauth/authorize` is terno-ai, which keeps a separate session cookie
+    (`ternoapp_sessionid` vs terno-web's `sessionid`). A direct redirect leaves
+    terno-ai anonymous, so it bounces back to terno-web's login, which — already
+    authenticated — bounces straight back. Observed live against staging as
+    dozens of `GET /oauth/authorize/ -> 302` with the OAuth client restarting the
+    handshake three times before giving up.
+
+    `/sso-login` is the only hop that establishes the terno-ai session, and it
+    already forwards a connector authorize path.
+    """
+    from pathlib import Path
+
+    views = Path("/Users/navin/terno/terno-web/terno/provisioner/views.py")
+    if not views.is_file():
+        pytest.skip("terno-web checkout not present")
+
+    src = views.read_text()
+    assert "def _connector_sso_url" in src, (
+        "the SSO hand-off for a pending connector authorize URL is gone"
+    )
+    assert "if is_connector_next(next_param):" in src, (
+        "login_page no longer special-cases the connector redirect"
+    )
+    # The hand-off must go through get_subdomain_login_url, which mints the SSO
+    # token; anything else cannot give terno-ai a session.
+    handoff = src.split("def _connector_sso_url", 1)[1].split("\ndef ", 1)[0]
+    assert "get_subdomain_login_url" in handoff
+
+    # A user arriving from a connector directory has no organisation yet -- orgs
+    # are created in `onboarding`, which runs *after* this hop. Returning None
+    # here would fall back to the direct redirect and loop, so the no-org case
+    # must provision rather than give up.
+    assert "_provision_org_for_connector" in handoff, (
+        "no-org users fall back to the direct redirect, which loops"
+    )
+    provision = src.split("def _provision_org_for_connector", 1)[1].split("\ndef ", 1)[0]
+    assert "ensure_org_created_and_email_sent" in provision, (
+        "connector-created orgs must use the same helper as web signup, or they "
+        "differ from web-created ones in naming, demo data, or approval email"
+    )
+
+
+def test_terno_ai_sso_login_forwards_a_connector_authorize_path():
+    """The receiving half of the hand-off above.
+
+    `sso_login` must check `is_connector_next` *before* its org-subdomain
+    branch, which would otherwise rewrite the target to the app home and drop
+    the authorize URL.
+    """
+    from pathlib import Path
+
+    views = Path("/Users/navin/terno/terno-ai/terno/terno/views.py")
+    if not views.is_file():
+        pytest.skip("terno-ai checkout not present")
+
+    body = views.read_text().split("def sso_login", 1)[1].split("\ndef ", 1)[0]
+    assert "is_connector_next(redirect_to)" in body
+
+    login_at = body.index("perform_login")
+    connector_at = body.index("is_connector_next(redirect_to)")
+    subdomain_at = body.index("org_user.organisation.subdomain")
+    assert login_at < connector_at, "session must be established before redirecting"
+    assert connector_at < subdomain_at, (
+        "the connector check must precede the subdomain rewrite, or the "
+        "authorize URL is replaced by the app home"
+    )
+
+
+@pytest.mark.django_db
+def test_write_gate_reads_the_group_terno_ai_actually_assigns(org_fixture):
+    """The write gate must read `User.groups`, not `OrganisationUser.groups`.
+
+    terno-ai's `create_org_admin_group` receiver does
+    `instance.owner.groups.add(group)` on org creation, and both `terno/views.py`
+    and `terno/permissions.py` check `user.groups.filter(name="Org Admin")`. That
+    is the app's single global admin flag.
+
+    Reading the gate off `OrganisationUser.groups` instead made `can_write`
+    permanently False in production — nothing ever puts "Org Admin" there — so
+    `admin:write`/`admin:sync` were stripped from *every* token and the write half
+    of the connector was unreachable. It passed locally only because both the
+    fixture and `bootstrap_local` set the group in the same wrong place.
+    Observed on staging as `groups=[] can_write=False` for a fresh org owner.
+    """
+    from django.contrib.auth.models import Group, User
+
+    from terno_dbi.core.models import OrganisationUser
+    from terno_dbi.oauth.minting import (
+        generate_oauth_access_token,
+        mint_service_token_for_key,
+        token_grant_summary,
+        user_can_write,
+    )
+
+    org = org_fixture["org"]
+    admin_group = Group.objects.get(name="Org Admin")
+    requested = ["query:read", "admin:write", "admin:sync"]
+
+    # Global group -> write granted, at mint time and at request time.
+    admin_membership = OrganisationUser.objects.get(user=org_fixture["admin"], organisation=org)
+    assert user_can_write(admin_membership) is True
+    token = mint_service_token_for_key(
+        generate_oauth_access_token(), org_fixture["admin"], org, requested
+    )
+    assert {"admin:write", "admin:sync"} <= set(token.scopes)
+    summary = token_grant_summary(token)
+    assert summary["is_org_admin"] is True
+    assert summary["can_write"] is True
+
+    # The membership m2m must NOT be a backdoor: it is for table scoping, and a
+    # user who only has "Org Admin" there is not an admin as far as the app is
+    # concerned, so the connector must not treat them as one.
+    impostor = User.objects.create(username="membership-only-admin")
+    impostor_membership = OrganisationUser.objects.create(user=impostor, organisation=org)
+    impostor_membership.groups.set([admin_group])
+    assert user_can_write(impostor_membership) is False
+
+    impostor_token = mint_service_token_for_key(
+        generate_oauth_access_token(), impostor, org, requested
+    )
+    assert not ({"admin:write", "admin:sync"} & set(impostor_token.scopes))
+    assert token_grant_summary(impostor_token)["can_write"] is False
+
+
+def test_bootstrap_local_grants_the_group_the_same_way_production_does():
+    """The local harness must not diverge from production wiring.
+
+    It previously did `membership.groups.add(admin_group)`, which granted write
+    locally while production granted none — the divergence that hid the write-gate
+    bug through every local test run.
+    """
+    from pathlib import Path
+
+    cmd = Path(__file__).resolve().parents[2] / (
+        "src/terno_dbi/core/management/commands/bootstrap_local.py"
+    )
+    src = cmd.read_text()
+    assert "user.groups.add(admin_group)" in src
+    assert "membership.groups.add(admin_group)" not in src
+
+
+def test_completed_connect_does_not_leave_a_replayable_redirect():
+    """A finished connector flow must not be resumable a second time.
+
+    `login_page` resumes from its own `session["next"]`, while
+    `ConnectorNextMiddleware` keeps a separate copy under
+    `session["terno_connector_next"]` and re-stores it on every authorize->login
+    bounce. Nothing consumed that copy, so it outlived the completed connect and
+    the next `pop_next` caller replayed it.
+
+    Observed on staging: token minted 12:54:39, user landed in the app, then at
+    12:55:42 `onboarding` popped the stale URL and the consent screen reappeared
+    -- a second token for a single connect.
+    """
+    from pathlib import Path
+
+    views = Path("/Users/navin/terno/terno-web/terno/provisioner/views.py")
+    redirect_mod = Path(
+        "/Users/navin/terno/terno-web/terno/provisioner/connector_redirect.py"
+    )
+    if not views.is_file() or not redirect_mod.is_file():
+        pytest.skip("terno-web checkout not present")
+
+    assert "def clear_next" in redirect_mod.read_text()
+
+    src = views.read_text()
+    branch = src.split("if is_connector_next(next_param):", 1)[1].split("return redirect", 1)[0]
+    assert "clear_next(request)" in branch, (
+        "login_page consumes session['next'] but leaves the middleware's copy "
+        "behind, so the connector flow can be replayed after it completes"
+    )
