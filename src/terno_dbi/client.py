@@ -1,6 +1,8 @@
 
 import os
 import requests
+
+from terno_dbi.transport import build_transport
 import logging
 from typing import Dict, List, Optional, Any, Union
 import json
@@ -15,6 +17,8 @@ class TernoDBIClient:
     def __init__(self, base_url: Optional[str] = None, api_key: Optional[str] = None):
         self.base_url = base_url or os.environ.get("TERNODBI_API_URL") or "http://127.0.0.1:8376"
         self.api_key = api_key or os.environ.get("TERNODBI_API_KEY")
+
+        self._http = build_transport(self.api_key)
 
         if self.base_url and self.base_url.endswith("/"):
             self.base_url = self.base_url[:-1]
@@ -55,12 +59,12 @@ class TernoDBIClient:
             params["offset"] = offset
         if limit is not None:
             params["limit"] = limit
-        response = requests.get(url, params=params or None, headers=self._get_headers())
+        response = self._http.get(url, params=params or None, headers=self._get_headers())
         return self._handle_response(response)
 
     def grep_org_prompt(self, pattern: str) -> Dict:
         url = f"{self.base_url}/api/query/organisation/prompt/grep/"
-        response = requests.get(url, params={"pattern": pattern}, headers=self._get_headers())
+        response = self._http.get(url, params={"pattern": pattern}, headers=self._get_headers())
         return self._handle_response(response)
 
     def update_org_prompt(self, org_prompt: str, expected_hash: Optional[str] = None) -> Dict:
@@ -68,7 +72,7 @@ class TernoDBIClient:
         payload = {"org_prompt": org_prompt}
         if expected_hash is not None:
             payload["expected_hash"] = expected_hash
-        response = requests.post(url, json=payload, headers=self._get_headers())
+        response = self._http.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
     def edit_org_prompt(
@@ -85,12 +89,12 @@ class TernoDBIClient:
             "expected_hash": expected_hash,
             "replace_all": replace_all,
         }
-        response = requests.post(url, json=payload, headers=self._get_headers())
+        response = self._http.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
     def list_datasources(self) -> List[Dict]:
         url = f"{self.base_url}/api/query/datasources/"
-        response = requests.get(url, headers=self._get_headers())
+        response = self._http.get(url, headers=self._get_headers())
         data = self._handle_response(response)
         return data.get("datasources", [])
 
@@ -107,20 +111,20 @@ class TernoDBIClient:
             "connection_json": connection_json,
             "description": description
         }
-        response = requests.post(url, json=payload, headers=self._get_headers())
+        response = self._http.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
     def delete_datasource(self, datasource: DatasourceIdentifier) -> Dict:
         logger.info("Deleting datasource: %s", datasource)
         url = f"{self.base_url}/api/admin/datasources/{datasource}/delete/"
-        response = requests.delete(url, headers=self._get_headers())
+        response = self._http.delete(url, headers=self._get_headers())
         return self._handle_response(response)
 
     def sync_metadata(self, datasource: DatasourceIdentifier, overwrite: bool = False) -> Dict:
         logger.info("Syncing metadata for datasource: %s (overwrite=%s)", datasource, overwrite)
         url = f"{self.base_url}/api/admin/datasources/{datasource}/sync/"
         payload = {"overwrite": overwrite}
-        response = requests.post(url, json=payload, headers=self._get_headers())
+        response = self._http.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
     def validate_connection(self, db_type: str, connection_str: str, connection_json: Optional[Dict] = None) -> Dict:
@@ -130,18 +134,18 @@ class TernoDBIClient:
             "connection_str": connection_str,
             "connection_json": connection_json
         }
-        response = requests.post(url, json=payload, headers=self._get_headers())
+        response = self._http.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
     def list_tables(self, datasource: DatasourceIdentifier) -> List[Dict]:
         url = f"{self.base_url}/api/query/datasources/{datasource}/tables/"
-        response = requests.get(url, headers=self._get_headers())
+        response = self._http.get(url, headers=self._get_headers())
         data = self._handle_response(response)
         return data.get("tables", [])
 
     def list_table_columns(self, datasource: DatasourceIdentifier, table: Union[int, str]) -> List[Dict]:
         url = f"{self.base_url}/api/query/datasources/{datasource}/tables/{table}/columns/"
-        response = requests.get(url, headers=self._get_headers())
+        response = self._http.get(url, headers=self._get_headers())
         data = self._handle_response(response)
         return data.get("columns", [])
 
@@ -161,7 +165,7 @@ class TernoDBIClient:
         if is_hidden is not None:
             payload["is_hidden"] = is_hidden
 
-        response = requests.patch(url, json=payload, headers=self._get_headers())
+        response = self._http.patch(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
     def update_column(
@@ -179,14 +183,14 @@ class TernoDBIClient:
             payload["description"] = description
         if is_hidden is not None:
             payload["is_hidden"] = is_hidden
-        response = requests.patch(
+        response = self._http.patch(
             url, json=payload, headers=self._get_headers()
         )
         return self._handle_response(response)
 
     def get_table_info(self, datasource: DatasourceIdentifier, table_name: str) -> Dict:
         url = f"{self.base_url}/api/admin/datasources/{datasource}/tables/{table_name}/info/"
-        response = requests.get(url, headers=self._get_headers())
+        response = self._http.get(url, headers=self._get_headers())
         return self._handle_response(response)
 
     def execute_query(
@@ -204,7 +208,7 @@ class TernoDBIClient:
         if max_rows is not None:
             payload["max_rows"] = max_rows
 
-        response = requests.post(url, json=payload, headers=self._get_headers())
+        response = self._http.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
     def stream_query(
@@ -219,7 +223,7 @@ class TernoDBIClient:
         if max_rows is not None:
             payload["max_rows"] = max_rows
 
-        resp = requests.post(
+        resp = self._http.post(
             url, json=payload, headers=self._get_headers(),
             timeout=600, stream=True
         )
@@ -273,7 +277,7 @@ class TernoDBIClient:
         if user_id is not None:
             payload["user_id"] = user_id
 
-        response = requests.post(url, json=payload, headers=self._get_headers())
+        response = self._http.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
     def add_examples(self, key: str, value: str, org_id: int, user_id: Optional[int] = None, is_shared: bool = False) -> Dict:
@@ -287,12 +291,12 @@ class TernoDBIClient:
         if user_id is not None:
             payload["user_id"] = user_id
 
-        response = requests.post(url, json=payload, headers=self._get_headers())
+        response = self._http.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
     def get_sample_data(self, table_id: int, rows: int = 10) -> Dict:
         url = f"{self.base_url}/api/query/tables/{table_id}/sample/"
-        response = requests.get(
+        response = self._http.get(
             url,
             params={"rows": rows},
             headers=self._get_headers()
@@ -305,7 +309,7 @@ class TernoDBIClient:
     # def get_datasource_context(self, datasource: DatasourceIdentifier) -> Dict:
     #     """Schema metadata + memory index for a datasource, in one call."""
     #     url = f"{self.base_url}/api/query/datasources/{datasource}/context/"
-    #     response = requests.get(url, headers=self._get_headers())
+    #     response = self._http.get(url, headers=self._get_headers())
     #     return self._handle_response(response)
 
     def list_memories(self, datasource_id: Optional[int] = None, render: bool = False) -> Dict:
@@ -315,13 +319,13 @@ class TernoDBIClient:
             params["datasource_id"] = datasource_id
         if render:
             params["render"] = "1"
-        response = requests.get(url, params=params or None, headers=self._get_headers())
+        response = self._http.get(url, params=params or None, headers=self._get_headers())
         return self._handle_response(response)
 
     def get_memory(self, name: str, datasource_id: Optional[int] = None) -> Dict:
         url = f"{self.base_url}/api/query/memory/{name}/"
         params = {"datasource_id": datasource_id} if datasource_id is not None else None
-        response = requests.get(url, params=params, headers=self._get_headers())
+        response = self._http.get(url, params=params, headers=self._get_headers())
         data = self._handle_response(response)
         return data.get("memory", {})
 
@@ -330,7 +334,7 @@ class TernoDBIClient:
         params = {"pattern": pattern}
         if datasource_id is not None:
             params["datasource_id"] = datasource_id
-        response = requests.get(url, params=params, headers=self._get_headers())
+        response = self._http.get(url, params=params, headers=self._get_headers())
         data = self._handle_response(response)
         return data.get("matches", [])
 
@@ -356,7 +360,7 @@ class TernoDBIClient:
             payload["datasource_id"] = datasource_id
         if expected_hash is not None:
             payload["expected_hash"] = expected_hash
-        response = requests.post(url, json=payload, headers=self._get_headers())
+        response = self._http.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
     def edit_memory(
@@ -379,7 +383,7 @@ class TernoDBIClient:
         }
         if datasource_id is not None:
             payload["datasource_id"] = datasource_id
-        response = requests.post(url, json=payload, headers=self._get_headers())
+        response = self._http.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 
     def delete_memory(
@@ -392,5 +396,5 @@ class TernoDBIClient:
         payload = {"store": store}
         if datasource_id is not None:
             payload["datasource_id"] = datasource_id
-        response = requests.post(url, json=payload, headers=self._get_headers())
+        response = self._http.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)

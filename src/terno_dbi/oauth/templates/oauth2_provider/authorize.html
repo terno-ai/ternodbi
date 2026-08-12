@@ -1,0 +1,171 @@
+{% comment %}
+Overrides django-oauth-toolkit's default consent screen.
+
+Template resolution is by INSTALLED_APPS order, so `terno_dbi.oauth` must appear
+*before* `oauth2_provider` or DOT's own template wins and this file is silently
+ignored.
+
+Three things this says that the default does not:
+
+1. **Which organisation** the grant is for. A user in more than one has no way
+   to choose (BACKLOG D17), so at minimum they should see which one they are
+   about to connect.
+2. **Read versus write**, separated. "Change table descriptions" and "run
+   queries" should not read as one undifferentiated list.
+3. **When write will be withheld.** A non-admin's write scopes are stripped at
+   mint time regardless of what they click. Saying so here is more honest than
+   letting them approve something that will not happen.
+{% endcomment %}
+{% load i18n %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% trans "Authorize" %} {{ application.name }} — Terno</title>
+  <style>
+    :root {
+      --bg: #f6f7f9; --card: #fff; --ink: #16181d; --muted: #5c626d;
+      --line: #e3e6ea; --accent: #2f6feb; --warn-bg: #fff8e6; --warn-line: #f0d69a;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14161a; --card: #1c1f25; --ink: #e9ebef; --muted: #a0a6b0;
+        --line: #2c3038; --accent: #6a9bff; --warn-bg: #2b2413; --warn-line: #5c4a1e;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center;
+      justify-content: center; padding: 24px; background: var(--bg); color: var(--ink);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .card {
+      background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+      max-width: 460px; width: 100%; padding: 28px;
+    }
+    h1 { font-size: 19px; margin: 0 0 4px; font-weight: 600; }
+    .sub { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
+    .org {
+      display: flex; justify-content: space-between; gap: 12px; align-items: baseline;
+      border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 20px;
+    }
+    .org dt { color: var(--muted); font-size: 13px; margin: 0; }
+    .org dd { margin: 0; font-weight: 600; }
+    .orgpick { display: block; margin-bottom: 6px; }
+    .orgpick span {
+      display: block; font-size: 12px; text-transform: uppercase;
+      letter-spacing: .04em; color: var(--muted); font-weight: 600; margin-bottom: 6px;
+    }
+    .orgpick select {
+      width: 100%; padding: 9px 10px; border-radius: 8px; font-size: 15px;
+      border: 1px solid var(--line); background: var(--card); color: var(--ink);
+      font-family: inherit;
+    }
+    .hint { color: var(--muted); font-size: 12.5px; margin: 0 0 18px; }
+    h2 {
+      font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+      color: var(--muted); margin: 18px 0 8px; font-weight: 600;
+    }
+    ul { list-style: none; margin: 0; padding: 0; }
+    li { padding: 7px 0 7px 22px; position: relative; border-top: 1px solid var(--line); }
+    li:first-child { border-top: 0; }
+    li::before {
+      content: "✓"; position: absolute; left: 0; top: 7px; color: var(--accent); font-weight: 700;
+    }
+    li.write::before { content: "✎"; }
+    .note {
+      background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 8px;
+      padding: 10px 12px; font-size: 13.5px; margin-top: 16px;
+    }
+    .actions { display: flex; gap: 10px; margin-top: 24px; }
+    button {
+      flex: 1; padding: 10px 14px; border-radius: 8px; font-size: 15px;
+      font-weight: 600; cursor: pointer; border: 1px solid var(--line);
+      background: transparent; color: var(--ink); font-family: inherit;
+    }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .errors { color: #c0392b; font-size: 14px; }
+    .foot { color: var(--muted); font-size: 12.5px; margin-top: 18px; text-align: center; }
+    code { font-size: 12.5px; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    {% if not error %}
+      <h1>Connect {{ application.name|default:"this application" }} to Terno?</h1>
+      <p class="sub">It will be able to act on your behalf using the access below.</p>
+
+      <form method="post">
+        {% csrf_token %}
+        {% for field in form %}{% if field.is_hidden %}{{ field }}{% endif %}{% endfor %}
+
+        {% if organisation_choices %}
+          {# More than one membership: let the user choose. Each organisation has
+             its own databases and its own permissions, so this is a real
+             decision and not a formality. #}
+          <label class="orgpick">
+            <span>Connect as</span>
+            <select name="organisation">
+              {% for value, label in organisation_choices %}
+                <option value="{{ value }}"
+                  {% if value == selected_organisation_id %}selected{% endif %}>
+                  {{ label }}
+                </option>
+              {% endfor %}
+            </select>
+          </label>
+          <p class="hint">
+            Each organisation has its own databases. To use another one later,
+            add Terno a second time and pick it there.
+          </p>
+        {% elif organisation %}
+          <dl class="org">
+            <dt>Organisation</dt>
+            <dd>{{ organisation }}</dd>
+          </dl>
+        {% endif %}
+
+        {% if read_scopes %}
+          <h2>{% trans "Read access" %}</h2>
+          <ul>
+            {% for scope in read_scopes %}<li>{{ scope.description }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+
+        {% if write_scopes %}
+          <h2>{% trans "Write access" %}</h2>
+          <ul>
+            {% for scope in write_scopes %}<li class="write">{{ scope.description }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+
+        {% if write_scopes and not user_can_write %}
+          <p class="note">
+            Write access was requested, but you are not an administrator of
+            {{ organisation|default:"this organisation" }}. If you continue, the
+            connection will be <strong>read-only</strong>. An administrator can
+            grant write access in Terno.
+          </p>
+        {% endif %}
+
+        {% if form.errors or form.non_field_errors %}
+          <div class="errors">{{ form.errors }}{{ form.non_field_errors }}</div>
+        {% endif %}
+
+        <div class="actions">
+          <button type="submit">{% trans "Cancel" %}</button>
+          <button type="submit" name="allow" value="Authorize" class="primary">
+            {% trans "Connect" %}
+          </button>
+        </div>
+      </form>
+
+      <p class="foot">You can disconnect at any time from your Terno account settings.</p>
+    {% else %}
+      <h1>{% trans "Something went wrong" %}</h1>
+      <p class="sub">{{ error.error }}</p>
+      <p><code>{{ error.description }}</code></p>
+    {% endif %}
+  </main>
+</body>
+</html>

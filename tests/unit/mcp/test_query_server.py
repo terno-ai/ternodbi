@@ -39,7 +39,7 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             mock_client.get_org_prompt.return_value = {"org_prompt": "Always answer in French."}
             result = await call_tool("get_org_prompt", {})
             mock_client.get_org_prompt.assert_called_once_with(offset=None, limit=None)
-            data = json.loads(result[0].text)
+            data = result[1]
             assert data["org_prompt"] == "Always answer in French."
 
             # 0a. get_org_prompt with pagination args
@@ -47,19 +47,19 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             mock_client.get_org_prompt.return_value = {"org_prompt": "line 5", "has_more": True, "next_offset": 6}
             result = await call_tool("get_org_prompt", {"offset": 5, "limit": 1})
             mock_client.get_org_prompt.assert_called_once_with(offset=5, limit=1)
-            assert json.loads(result[0].text)["next_offset"] == 6
+            assert result[1]["next_offset"] == 6
 
             # 0b. grep_org_prompt
             mock_client.grep_org_prompt.return_value = {"matches": [{"line": 1, "text": "match"}], "count": 1}
             result = await call_tool("grep_org_prompt", {"pattern": "match"})
             mock_client.grep_org_prompt.assert_called_once_with("match")
-            assert json.loads(result[0].text)["count"] == 1
+            assert result[1]["count"] == 1
 
             # 1. list_datasources
             mock_client.list_datasources.return_value = [{"id": 1}]
             result = await call_tool("list_datasources", {})
             mock_client.list_datasources.assert_called()
-            data = json.loads(result[0].text)
+            data = result[1]
             assert data["datasources"][0]["id"] == 1
             assert data["count"] == 1
 
@@ -126,8 +126,8 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             mock_client.list_tables.side_effect = Exception("DB Down")
             
             result = await call_tool("list_tables", {"datasource": "ds1"})
-            data = json.loads(result[0].text)
-            assert data["error"] == "DB Down"
+            assert result.isError is True, "a failed call must set isError"
+            assert result.structuredContent["error"] == "DB Down"
 
 
     async def test_run_server(self):

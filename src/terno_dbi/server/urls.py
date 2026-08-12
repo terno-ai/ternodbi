@@ -12,5 +12,15 @@ urlpatterns = [
     path('api/', include('terno_dbi.core.urls')),
 ]
 
+# Discovery documents and DCR. Always mounted: the 401 from /mcp points at the
+# protected-resource document regardless of whether OAuth is fully configured.
+urlpatterns += [path('', include('terno_dbi.oauth.urls'))]
+
+# The authorize/token/revoke endpoints themselves need django-oauth-toolkit.
+if settings.OAUTH_ENABLED:
+    urlpatterns += [
+        path('oauth/', include('oauth2_provider.urls', namespace='oauth2_provider')),
+    ]
+
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

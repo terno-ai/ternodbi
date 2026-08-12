@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "terno-dbi"
-version = "0.1.34"
+version = "0.1.35"
 description = "Database Intelligence Layer - Multi-database connectivity with SQLShield integration"
 readme = "README.md"
 license = "Apache-2.0"
@@ -32,7 +32,7 @@ dependencies = [
     "pandas>=2.0",
     "pyarrow>=14.0",
     "sqlglot>=28.5.0",
-    "mcp>=1.25.0",
+    "mcp>=1.25.0,<2.0",
     "requests>=2.32.5",
     "python-dotenv>=1.0.0",
     # Database Drivers
@@ -55,6 +55,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Streamable HTTP transport — only needed to run `dbi-mcp ... --transport http`
+# standalone. Not required when mounted inside terno-ai, which is served by
+# daphne, nor for stdio.
+http = [
+    "uvicorn>=0.30",
+]
+
 # Development
 dev = [
     "pytest>=7.0",
@@ -94,6 +101,9 @@ packages = ["src/terno_dbi"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/terno_dbi/py.typed" = "terno_dbi/py.typed"
+# Served as the `ternodbi://changelog` MCP resource and by `terno_guide`. Without
+# this it is absent from the wheel and only resolves in a source checkout.
+"CHANGELOG.md" = "terno_dbi/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel.sources]
 "src" = ""

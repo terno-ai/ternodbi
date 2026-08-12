@@ -7,54 +7,33 @@ from typing import Any, Dict, List
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
-from terno_dbi.client import TernoDBIClient
+from terno_dbi.mcp.context import client, describe_backend
+from terno_dbi.mcp.instructions import ADMIN_INSTRUCTIONS
+from terno_dbi.mcp.surface import GUIDE_TOOL, handle_guide, register_surface
+from terno_dbi.mcp.tool_meta import (
+    apply_tool_meta,
+    as_error_result,
+    as_tool_result,
+    dispatch_in_worker,
+)
 
 
 logger = logging.getLogger(__name__)
 
-client = TernoDBIClient()
-
 server = Server(
     "ternodbi-admin",
-    instructions=(
-        "Write access to manage datasource schema metadata (rename tables/columns, "
-        "edit descriptions, add/sync/delete datasources), to write durable, shared "
-        "memory (save_memory/edit_memory/delete_memory), and to set this "
-        "organisation's custom system-prompt addendum (update_org_prompt/"
-        "edit_org_prompt).\n\n"
-        "Memory write rules: one fact per memory. Prefer edit_memory over a fresh "
-        "save_memory when an existing memory is still mostly right but needs a "
-        "correction — it preserves any [[name]] links other memories point at it "
-        "with. Both edit_memory and a save_memory that replaces existing content "
-        "require expected_hash from a get_memory call made just before — this is "
-        "enforced server-side, not optional. store='org' shares a memory with every "
-        "agent working on this organisation's data; store='user' (the default) is "
-        "private to you. Prefer 'org' for facts that would help any agent querying "
-        "this data, not just facts specific to your own preferences or this session.\n\n"
-        "The same read-before-write rule applies to the org prompt: read it first "
-        "with get_org_prompt (on the paired query server) and pass its content_hash "
-        "as expected_hash — required for edit_org_prompt always, and for "
-        "update_org_prompt whenever the prompt isn't currently blank.\n\n"
-        "org_prompt vs memory — decide by REACH, not importance. org_prompt is "
-        "injected into every request for every user, always; a memory is fetched "
-        "only when an agent looks for it (this is delivery, not visibility — even an "
-        "org-shared memory is pulled on demand, never auto-injected the way "
-        "org_prompt is). So put in org_prompt ONLY the few directives that must shape "
-        "every query: terminology, default units/formatting, filters that always "
-        "apply. Everything else — schema quirks, join paths, domain facts, however "
-        "important it feels — goes in memory. When unsure, choose memory: it is "
-        "unbounded and costs nothing until read, whereas every line of org_prompt is "
-        "paid on every future request. Never keep the same rule in both places: "
-        "before writing to org_prompt, grep_memory for it and delete_memory whatever "
-        "you are promoting into it; before saving a memory that reads like an "
-        "always-apply rule, get_org_prompt to confirm it is not already there. "
-        "Duplicated rules drift apart silently — keep exactly one copy of each."
-    ),
+    instructions=ADMIN_INSTRUCTIONS,
 )
 
+register_surface(server)
 
-@server.list_tools()
-async def list_tools() -> List[Tool]:
+
+def own_tools() -> List[Tool]:
+    """This server's own tools, without the shared surface.
+
+    Separate from `list_tools` so the merged hosted server can compose both
+    registries rather than carrying a third copy of these definitions.
+    """
     return [
         Tool(
             name="update_org_prompt",
@@ -346,14 +325,32 @@ async def list_tools() -> List[Tool]:
     ]
 
 
+@server.list_tools()
+async def list_tools() -> List[Tool]:
+    return apply_tool_meta([GUIDE_TOOL, *own_tools()])
+
+
 @server.call_tool()
-async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
+async def call_tool(name: str, arguments: Dict[str, Any]):
+    """Async entrypoint; the work itself runs in a worker thread.
+
+    Everything below `_dispatch` is synchronous — the client, and under the
+    in-process transport the Django ORM, which refuses to be touched from an
+    async context. See `dispatch_in_worker`.
+    """
+    return await dispatch_in_worker(_dispatch, name, arguments)
+
+
+def _dispatch(name: str, arguments: Dict[str, Any]):
     logger.info("Admin tool called: %s", name)
     logger.debug("Tool arguments: %s", arguments)
     try:
         result = None
 
-        if name == "update_org_prompt":
+        if name == "terno_guide":
+            result = handle_guide(arguments)
+
+        elif name == "update_org_prompt":
             result = client.update_org_prompt(
                 arguments["org_prompt"],
                 expected_hash=arguments.get("expected_hash"),
@@ -447,20 +444,20 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             )
 
         else:
-            result = {"error": f"Unknown tool: {name}"}
+            return as_error_result(f"Unknown tool: {name}")
 
         logger.debug("Tool %s completed successfully", name)
-        return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+        return as_tool_result(result)
 
     except Exception as e:
         logger.exception("Error in Admin MCP tool %s", name)
-        return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
+        return as_error_result(str(e))
 
 
 async def run_server():
     logger.info("Starting TernoDBI Admin MCP Server")
-    logger.debug("API Base URL: %s", client.base_url)
-    print(f"Starting TernoDBI Admin MCP Server (API: {client.base_url})", file=sys.stderr)
+    logger.debug("API Base URL: %s", describe_backend())
+    print(f"Starting Terno Admin MCP Server (API: {describe_backend()})", file=sys.stderr)
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
     logger.info("Admin MCP Server stopped")

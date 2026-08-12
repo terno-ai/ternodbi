@@ -8,41 +8,38 @@ from typing import Any, Dict, List
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
-from terno_dbi.client import TernoDBIClient
+from terno_dbi.mcp.context import client, describe_backend
+from terno_dbi.mcp.instructions import QUERY_INSTRUCTIONS
+from terno_dbi.mcp.surface import GUIDE_TOOL, handle_guide, register_surface
+from terno_dbi.mcp.tool_meta import (
+    apply_tool_meta,
+    as_error_result,
+    as_tool_result,
+    dispatch_in_worker,
+)
+
 logger = logging.getLogger(__name__)
 
-client = TernoDBIClient()
+# `client` is a request-scoped proxy (terno_dbi/mcp/context.py), not an
+# instance. Under stdio it resolves to environment credentials exactly as
+# before; under HTTP it resolves per request, so one process can serve many
+# organisations without them sharing a credential.
 
 server = Server(
     "ternodbi-query",
-    instructions=(
-        "Read-only access to configured SQL databases and their durable metadata. "
-        "Typical flow: list_datasources, then list_tables/list_table_columns to see "
-        "schema, then execute_query (use public names) or get_sample_data to preview "
-        "rows.\n\n"
-        "This server also holds durable, shared memory (list_memories/get_memory/"
-        "grep_memory) — facts about this data recorded by any agent that worked with "
-        "it before, not just you. Check it before answering questions about schema, "
-        "joins, or business rules you don't already know; a memory's one-line "
-        "description in the index is a hook, not the fact itself, so read the full "
-        "entry via get_memory before relying on it. If you maintain your own separate "
-        "memory system, do not let facts about this data live only there — other "
-        "agents attached to this same server, including ones with no memory of their "
-        "own, can only benefit from a fact if it's recorded here.\n\n"
-        "get_org_prompt returns this organisation's custom system-prompt addendum "
-        "(plus its content_hash) and grep_org_prompt regex-searches it; both are "
-        "read-only here — writing to it is an admin-only operation on the paired "
-        "admin server (update_org_prompt/edit_org_prompt). org_prompt and memory are "
-        "not interchangeable: org_prompt is the small set of always-apply directives "
-        "already injected into every request, while memory is facts pulled on demand "
-        "— the same rule should live in only one of them. If you find it in both, or "
-        "sitting in the wrong one, consolidate via the admin server."
-    ),
+    instructions=QUERY_INSTRUCTIONS,
 )
 
+# Advertises resources/ and prompts/ in `initialize`; must run at import.
+register_surface(server)
 
-@server.list_tools()
-async def list_tools() -> List[Tool]:
+
+def own_tools() -> List[Tool]:
+    """This server's own tools, without the shared surface.
+
+    Separate from `list_tools` so the merged hosted server can compose both
+    registries rather than carrying a third copy of these definitions.
+    """
     return [
         Tool(
             name="get_org_prompt",
@@ -172,29 +169,9 @@ Returns columns and data rows. Use max_rows to limit the number of rows returned
                 "required": ["table_id"]
             }
         ),
-        Tool(
-            name="find_similar_examples",
-            description="Find similar prompt examples (domain knowledge, business rules) based on semantic similarity.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The natural language query or context to find similar examples for"
-                    },
-                    "datasource_id": {
-                        "type": "integer",
-                        "description": "Optional: Restrict search to a specific datasource ID"
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of examples to return (default: 10)",
-                        "default": 10
-                    }
-                },
-                "required": ["query"]
-            }
-        ),
+        # `find_similar_examples` was dropped here (team decision, 2026-08-08):
+        # stale, and its PromptExample + Milvus backing is scheduled for removal.
+        # See docs/BACKLOG.md D4.
 
         # Tool(
         #     name="get_datasource_context",
@@ -283,14 +260,32 @@ Returns columns and data rows. Use max_rows to limit the number of rows returned
     ]
 
 
+@server.list_tools()
+async def list_tools() -> List[Tool]:
+    return apply_tool_meta([GUIDE_TOOL, *own_tools()])
+
+
 @server.call_tool()
-async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
+async def call_tool(name: str, arguments: Dict[str, Any]):
+    """Async entrypoint; the work itself runs in a worker thread.
+
+    Everything below `_dispatch` is synchronous — the client, and under the
+    in-process transport the Django ORM, which refuses to be touched from an
+    async context. See `dispatch_in_worker`.
+    """
+    return await dispatch_in_worker(_dispatch, name, arguments)
+
+
+def _dispatch(name: str, arguments: Dict[str, Any]):
     logger.info("Query tool called: %s", name)
     logger.debug("Tool arguments: %s", arguments)
     try:
         result = None
 
-        if name == "get_org_prompt":
+        if name == "terno_guide":
+            result = handle_guide(arguments)
+
+        elif name == "get_org_prompt":
             result = client.get_org_prompt(
                 offset=arguments.get("offset"),
                 limit=arguments.get("limit"),
@@ -337,14 +332,6 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             rows = arguments.get("rows", 10)
             result = client.get_sample_data(table_id, rows)
 
-        elif name == "find_similar_examples":
-            query_str = arguments["query"]
-            limit = arguments.get("limit", 10)
-            result = client.find_similar_examples(
-                query=query_str,
-                limit=limit
-            )
-
         # elif name == "get_datasource_context":
         #     datasource = arguments["datasource"]
         #     result = client.get_datasource_context(datasource)
@@ -363,20 +350,23 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             result = {"matches": matches, "count": len(matches)}
 
         else:
-            result = {"error": f"Unknown tool: {name}"}
+            return as_error_result(f"Unknown tool: {name}")
 
         logger.debug("Tool %s completed successfully", name)
-        return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+        return as_tool_result(result)
 
     except Exception as e:
         logger.exception("Error in Query MCP tool %s", name)
-        return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
+        # isError=True so the client can tell this call failed. Without it a
+        # connection refusal reads as a successful call whose payload mentions
+        # an error, and the model reasons about the "result".
+        return as_error_result(str(e))
 
 
 async def run_server():
-    logger.info("Starting TernoDBI Query MCP Server")
-    logger.debug("API Base URL: %s", client.base_url)
-    print(f"Starting TernoDBI Query MCP Server (API: {client.base_url})", file=sys.stderr)
+    logger.info("Starting Terno Query MCP Server")
+    logger.debug("API Base URL: %s", describe_backend())
+    print(f"Starting Terno Query MCP Server (API: {describe_backend()})", file=sys.stderr)
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
     logger.info("Query MCP Server stopped")

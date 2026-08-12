@@ -29,7 +29,11 @@ class TestMCPMain:
                 mock_admin_main.assert_called_once()
 
     def test_no_args_exit(self):
-        """Should exit if no args provided."""
+        """Should exit if no args provided.
+
+        Exit code 2, not 1: the CLI moved to argparse in Phase 3 (to add
+        --transport), and 2 is argparse's conventional usage-error code.
+        """
         from terno_dbi.mcp.__main__ import main
         
         with patch.object(sys, 'argv', ['mcp']):
@@ -37,14 +41,14 @@ class TestMCPMain:
             with patch.object(sys, 'exit', side_effect=SystemExit) as mock_exit:
                 with pytest.raises(SystemExit):
                     main()
-                mock_exit.assert_called_with(1)
+                mock_exit.assert_called_with(2)
 
     def test_invalid_args_exit(self):
-        """Should exit if invalid server type provided."""
+        """Should exit if invalid server type provided. See note above on 2."""
         from terno_dbi.mcp.__main__ import main
         
         with patch.object(sys, 'argv', ['mcp', 'unknown']):
             with patch.object(sys, 'exit', side_effect=SystemExit) as mock_exit:
                 with pytest.raises(SystemExit):
                     main()
-                mock_exit.assert_called_with(1)
+                mock_exit.assert_called_with(2)

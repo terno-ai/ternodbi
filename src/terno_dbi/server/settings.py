@@ -22,6 +22,20 @@ INSTALLED_APPS = [
     'reversion',
 ]
 
+# OAuth is optional for the standalone server: it is only needed to exercise the
+# connector flow locally. Without django-oauth-toolkit the server still runs and
+# serves /mcp with a hand-issued service token.
+#
+# ORDER MATTERS: terno_dbi.oauth must precede oauth2_provider, or DOT's default
+# consent template wins over ours, silently.
+try:
+    import oauth2_provider  # noqa: F401
+
+    INSTALLED_APPS += ['terno_dbi.oauth', 'oauth2_provider']
+    OAUTH_ENABLED = True
+except ImportError:
+    OAUTH_ENABLED = False
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -156,3 +170,33 @@ LOGGING = {
         },
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# Local connector settings
+# ---------------------------------------------------------------------------
+_LOCAL_PORT = os.environ.get('TERNO_LOCAL_PORT', '8376')
+TERNO_MCP_BASE_URL = os.environ.get('TERNO_MCP_BASE_URL', f'http://127.0.0.1:{_LOCAL_PORT}')
+PROVISIONER_URL = os.environ.get('PROVISIONER_URL', f'http://127.0.0.1:{_LOCAL_PORT}')
+
+# Self-serve org creation on first connect. The standalone server has no
+# terno-ai models, so it uses the simpler local provisioner.
+TERNO_ORG_PROVISIONER = os.environ.get(
+    'TERNO_ORG_PROVISIONER', 'terno_dbi.server.provisioning.provision_local_org'
+)
+
+if OAUTH_ENABLED:
+    from terno_dbi.oauth.scopes import DEFAULT_SCOPES as _DEFAULT_SCOPES
+    from terno_dbi.oauth.scopes import SCOPE_DESCRIPTIONS as _SCOPES
+
+    OAUTH2_PROVIDER = {
+        'SCOPES': dict(_SCOPES),
+        'DEFAULT_SCOPES': sorted(_DEFAULT_SCOPES),
+        'PKCE_REQUIRED': True,
+        'ACCESS_TOKEN_GENERATOR': 'terno_dbi.oauth.minting.generate_oauth_access_token',
+        'OAUTH2_VALIDATOR_CLASS': 'terno_dbi.oauth.validator.TernoOAuth2Validator',
+        'ACCESS_TOKEN_EXPIRE_SECONDS': 60 * 60 * 8,
+        'ROTATE_REFRESH_TOKEN': True,
+        # Loopback http is how a local client receives its callback.
+        'ALLOWED_REDIRECT_URI_SCHEMES': ['http', 'https'],
+    }

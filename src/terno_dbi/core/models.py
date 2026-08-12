@@ -360,6 +360,7 @@ class ServiceToken(models.Model):
     class TokenType(models.TextChoices):
         ADMIN = 'admin', _('Admin Service')
         QUERY = 'query', _('Query Service')
+        OAUTH = 'oauth', _('OAuth Connector')
 
     key_hash = models.CharField(
         max_length=128, 

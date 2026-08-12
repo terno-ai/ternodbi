@@ -48,7 +48,7 @@ class TestAdminServer(unittest.IsolatedAsyncioTestCase):
             mock_client.update_org_prompt.return_value = {"org_prompt": "Be concise."}
             result = await call_tool("update_org_prompt", {"org_prompt": "Be concise."})
             mock_client.update_org_prompt.assert_called_once_with("Be concise.", expected_hash=None)
-            assert json.loads(result[0].text)["org_prompt"] == "Be concise."
+            assert result[1]["org_prompt"] == "Be concise."
 
             # 0b. update_org_prompt with expected_hash
             mock_client.update_org_prompt.reset_mock()
@@ -64,13 +64,13 @@ class TestAdminServer(unittest.IsolatedAsyncioTestCase):
             mock_client.edit_org_prompt.assert_called_once_with(
                 old_string="French", new_string="Spanish", expected_hash="abc", replace_all=False,
             )
-            assert json.loads(result[0].text)["org_prompt"] == "Always answer in Spanish."
+            assert result[1]["org_prompt"] == "Always answer in Spanish."
 
             # 1. rename_table
             mock_client.update_table.return_value = {"success": True}
             result = await call_tool("rename_table", {"table_id": 1, "public_name": "NewName"})
             mock_client.update_table.assert_called_with(1, public_name="NewName")
-            assert "success" in json.loads(result[0].text)
+            assert "success" in result[1]
 
             # 2. add_datasource
             mock_client.create_datasource.return_value = {"id": 10}
@@ -145,16 +145,15 @@ class TestAdminServer(unittest.IsolatedAsyncioTestCase):
             mock_client.update_table.side_effect = Exception("API Error")
             
             result = await call_tool("rename_table", {"table_id": 1, "public_name": "X"})
-            data = json.loads(result[0].text)
-            
-            assert "error" in data
-            assert data["error"] == "API Error"
+            assert result.isError is True, "a failed call must set isError"
+            assert result.structuredContent["error"] == "API Error"
 
 
     async def test_call_tool_unknown(self):
         """Should return error for unknown tool."""
         result = await call_tool("unknown_tool", {})
-        data = json.loads(result[0].text)
+        assert result.isError is True, "a failed call must set isError"
+        data = result.structuredContent
         assert "error" in data
         assert "Unknown tool" in data["error"]
 

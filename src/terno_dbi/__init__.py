@@ -1,4 +1,11 @@
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+try:
+    # Read from installed package metadata so this cannot drift from
+    # pyproject.toml, as it had (it read 0.1.0 through the 0.1.34 release).
+    __version__ = _pkg_version("terno-dbi")
+except PackageNotFoundError:  # running from a source tree with no install
+    __version__ = "0.0.0.dev0"
 
 from terno_dbi.connectors import (
     BaseConnector,
