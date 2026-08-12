@@ -53,7 +53,10 @@ def key_hash(plaintext_key: str) -> str:
 def user_can_write(organisation_user) -> bool:
     if organisation_user is None:
         return False
-    return organisation_user.groups.filter(name=ORG_ADMIN_GROUP).exists()
+    user = getattr(organisation_user, "user", None)
+    if user is None:
+        return False
+    return user.groups.filter(name=ORG_ADMIN_GROUP).exists()
 
 
 def resolve_membership(user, organisation):
@@ -124,7 +127,10 @@ def token_grant_summary(token) -> dict:
     combine — it asks once and gets an answer.
     """
     scopes = frozenset(token.scopes or [])
-    is_org_admin = token.groups.filter(name=ORG_ADMIN_GROUP).exists()
+    is_org_admin = bool(
+        token.created_for_id
+        and token.created_for.groups.filter(name=ORG_ADMIN_GROUP).exists()
+    )
     return {
         "scopes": scopes,
         "can_write": bool(scopes & {"admin:write", "admin:sync"}) and is_org_admin,

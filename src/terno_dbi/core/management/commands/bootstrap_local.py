@@ -58,7 +58,7 @@ class Command(BaseCommand):
         # demonstrated by --read-only.
         if not options["read_only"]:
             admin_group, _ = Group.objects.get_or_create(name="Org Admin")
-            membership.groups.add(admin_group)
+            user.groups.add(admin_group)
 
         scopes = ["query:read", "query:execute"]
         if not options["read_only"]:
