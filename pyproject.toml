@@ -94,7 +94,7 @@ dbi-mcp = "terno_dbi.mcp.__main__:main"
 ternodbi = "terno_dbi.cli:main"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/terno_dbi"]
+include = ["src/terno_dbi", "CHANGELOG.md"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/terno_dbi"]
