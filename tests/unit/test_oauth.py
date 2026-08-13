@@ -6,6 +6,7 @@ a client record with an attacker-controlled redirect URI.
 """
 
 import json
+import pathlib
 
 import pytest
 
@@ -700,13 +701,22 @@ def two_orgs(db):
 
 
 @pytest.mark.django_db
-def test_choices_cover_every_membership_and_flag_admin(two_orgs):
+def test_choices_cover_every_membership_and_label_them_by_name(two_orgs):
+    """Every membership is offered, labelled by organisation name.
+
+    The label used to carry an "— you are an admin here" suffix. It was dead code
+    — it read "Org Admin" off `membership.groups`, where nothing puts it — and
+    once the lookup was corrected it applied to *every* option for an admin,
+    overflowing the select. Write access is stated in its own section of the
+    consent screen, which is where it belongs.
+    """
     from terno_dbi.oauth.org_choice import organisation_choices
 
     choices = dict(organisation_choices(two_orgs["user"]))
     assert set(choices) == {str(two_orgs["acme"].pk), str(two_orgs["globex"].pk)}
-    assert "admin" in choices[str(two_orgs["acme"].pk)].lower()
-    assert "admin" not in choices[str(two_orgs["globex"].pk)].lower()
+    assert choices[str(two_orgs["acme"].pk)] == two_orgs["acme"].name
+    assert choices[str(two_orgs["globex"].pk)] == two_orgs["globex"].name
+    assert not any("admin" in label.lower() for label in choices.values())
 
 
 @pytest.mark.django_db
@@ -1063,3 +1073,98 @@ def test_completed_connect_does_not_leave_a_replayable_redirect():
         "login_page consumes session['next'] but leaves the middleware's copy "
         "behind, so the connector flow can be replayed after it completes"
     )
+
+
+CONSENT_TEMPLATE = "oauth2_provider/authorize.html"
+
+
+def _render_consent(**overrides):
+    """Render the consent screen with a realistic context."""
+    from django.template.loader import get_template
+
+    class _Org:
+        name = "Acme Analytics"
+        subdomain = "acme"
+        def __str__(self):
+            return f"{self.name} - {self.subdomain}"
+
+    context = {
+        "application": type("A", (), {"name": "Claude"})(),
+        "form": [],
+        "organisation": _Org(),
+        "read_scopes": [{"description": "Run read-only SQL queries"}],
+        "write_scopes": [{"description": "Refresh schema metadata"}],
+        "user_can_write": True,
+        "csrf_token": "t",
+    }
+    context.update(overrides)
+    return get_template(CONSENT_TEMPLATE).render(context)
+
+
+@pytest.mark.parametrize("state", ["single_org", "multi_org", "no_write_permission", "error"])
+def test_consent_screen_never_leaks_template_source(state):
+    """`{# ... #}` is single-line only. A multi-line one is not a comment — Django
+    renders it verbatim, which is exactly how
+
+        {# More than one membership: let the user choose. Each organisation has
+           its own databases ... #}
+
+    ended up displayed to users on the live consent screen. Anything spanning
+    lines must use {% comment %}.
+    """
+    from django.template import TemplateSyntaxError
+
+    overrides = {
+        "single_org": {},
+        "multi_org": {
+            "organisation_choices": [("1", "Acme Analytics"), ("2", "Side Project")],
+            "selected_organisation_id": "1",
+        },
+        "no_write_permission": {"user_can_write": False},
+        "error": {"error": type("E", (), {"error": "invalid_request",
+                                          "description": "Missing redirect_uri"})()},
+    }[state]
+
+    try:
+        html = _render_consent(**overrides)
+    except TemplateSyntaxError as exc:
+        pytest.fail(f"consent template does not compile: {exc}")
+
+    assert "{#" not in html and "#}" not in html, "a template comment reached the user"
+    assert "{%" not in html and "%}" not in html, "an unrendered template tag reached the user"
+    assert "{{" not in html, "an unrendered variable reached the user"
+
+
+def test_consent_screen_names_the_organisation_readably():
+    """`CoreOrganisation.__str__` is "name - subdomain", and auto-provisioned orgs
+    have name == subdomain — so `{{ organisation }}` rendered "fugj - fugj" on the
+    live screen, in the heading and again in the write-access warning."""
+    html = _render_consent(user_can_write=False)
+
+    assert "Acme Analytics" in html
+    assert "Acme Analytics - acme" not in html, "organisation rendered via __str__"
+
+
+def test_consent_screen_states_when_write_will_be_withheld():
+    """A non-admin's write scopes are stripped at mint time whatever they click,
+    so the screen has to say so rather than implying the request was granted."""
+    withheld = _render_consent(user_can_write=False)
+    granted = _render_consent(user_can_write=True)
+
+    # Match the notice, not the substring: "read-only" also appears in the scope
+    # description "Run read-only SQL queries", so a bare containment check passes
+    # whether or not the warning is rendered at all.
+    notice = "you are not an administrator"
+    assert notice in withheld
+    assert notice not in granted
+
+
+def test_consent_screen_makes_no_external_requests():
+    """Served by Django from inside the pip package, on a host whose SPA assets
+    are content-hashed and rebuilt independently. Any external reference would be
+    a broken image or a blocked font on the one screen a user must trust."""
+    import re
+
+    html = _render_consent()
+    external = re.findall(r'(?:src|href)="(?!#)(https?:|//)[^"]*"', html)
+    assert not external, f"consent screen loads external resources: {external}"

@@ -7,9 +7,9 @@ ignored.
 
 Three things this says that the default does not:
 
-1. **Which organisation** the grant is for. A user in more than one has no way
-   to choose (BACKLOG D17), so at minimum they should see which one they are
-   about to connect.
+1. **Which organisation** the grant is for, and a picker when there is more than
+   one. Each organisation has its own databases and permissions, so this is a
+   real decision, not a formality.
 2. **Read versus write**, separated. "Change table descriptions" and "run
    queries" should not read as one undifferentiated list.
 3. **When write will be withheld.** A non-admin's write scopes are stripped at
@@ -21,130 +21,332 @@ Three things this says that the default does not:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% trans "Authorize" %} {{ application.name }} — Terno</title>
+  <title>{% blocktrans with app=application.name %}Connect {{ app }}{% endblocktrans %} — Terno</title>
   <style>
+    /* shadcn neutral tokens, matching terno-ai/frontend/src/index.css */
     :root {
-      --bg: #f6f7f9; --card: #fff; --ink: #16181d; --muted: #5c626d;
-      --line: #e3e6ea; --accent: #2f6feb; --warn-bg: #fff8e6; --warn-line: #f0d69a;
+      --bg: #f5f5f4;
+      --card: #ffffff;
+      --fg: #0a0a0a;
+      --muted-fg: #737373;
+      --border: #e5e5e5;
+      --subtle: #fafafa;
+      --primary: #0a0a0a;
+      --primary-fg: #fafafa;
+      --ring: rgba(10, 10, 10, .12);
+      --warn-bg: #fffbeb;
+      --warn-border: #fde68a;
+      --warn-fg: #854d0e;
+      --danger: #b91c1c;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 8px 24px rgba(0, 0, 0, .06);
+      --radius: 8px;
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #14161a; --card: #1c1f25; --ink: #e9ebef; --muted: #a0a6b0;
-        --line: #2c3038; --accent: #6a9bff; --warn-bg: #2b2413; --warn-line: #5c4a1e;
+        --bg: #0a0a0a;
+        --card: #161616;
+        --fg: #fafafa;
+        --muted-fg: #a3a3a3;
+        --border: #292929;
+        --subtle: #1f1f1f;
+        --primary: #fafafa;
+        --primary-fg: #0a0a0a;
+        --ring: rgba(250, 250, 250, .16);
+        --warn-bg: #241c07;
+        --warn-border: #4a3a0d;
+        --warn-fg: #fbbf24;
+        --danger: #f87171;
+        --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 28px rgba(0, 0, 0, .35);
       }
     }
+
     * { box-sizing: border-box; }
+
     body {
-      margin: 0; min-height: 100vh; display: flex; align-items: center;
-      justify-content: center; padding: 24px; background: var(--bg); color: var(--ink);
-      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
     }
+
     .card {
-      background: var(--card); border: 1px solid var(--line); border-radius: 12px;
-      max-width: 460px; width: 100%; padding: 28px;
+      width: 100%;
+      max-width: 440px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      padding: 28px;
     }
-    h1 { font-size: 19px; margin: 0 0 4px; font-weight: 600; }
-    .sub { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
-    .org {
-      display: flex; justify-content: space-between; gap: 12px; align-items: baseline;
-      border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 20px;
+
+    /* ---- brand lockup: the two things being connected ---- */
+    .lockup {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 22px;
     }
-    .org dt { color: var(--muted); font-size: 13px; margin: 0; }
-    .org dd { margin: 0; font-weight: 600; }
-    .orgpick { display: block; margin-bottom: 6px; }
-    .orgpick span {
-      display: block; font-size: 12px; text-transform: uppercase;
-      letter-spacing: .04em; color: var(--muted); font-weight: 600; margin-bottom: 6px;
+    .tile {
+      width: 44px;
+      height: 44px;
+      border-radius: 11px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border);
+      background: var(--subtle);
+      font-weight: 600;
+      font-size: 16px;
+      letter-spacing: -.01em;
+      overflow: hidden;
+      flex: none;
     }
-    .orgpick select {
-      width: 100%; padding: 9px 10px; border-radius: 8px; font-size: 15px;
-      border: 1px solid var(--line); background: var(--card); color: var(--ink);
-      font-family: inherit;
+    .tile img { width: 100%; height: 100%; object-fit: contain; padding: 6px; }
+    .tile.terno {
+      background: var(--card);
+      background-image: url("data:image/png;base64,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");
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 24px auto;
     }
-    .hint { color: var(--muted); font-size: 12.5px; margin: 0 0 18px; }
+    .link { display: flex; align-items: center; gap: 4px; color: var(--muted-fg); }
+    .link i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; display: block; }
+
+    h1 {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -.01em;
+      margin: 0 0 6px;
+      text-align: center;
+    }
+    .sub {
+      color: var(--muted-fg);
+      margin: 0 0 22px;
+      text-align: center;
+    }
+    /* ---- organisation ---- */
+    .field { display: block; margin-bottom: 8px; }
+    .label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: var(--muted-fg);
+      margin-bottom: 7px;
+    }
+    select {
+      width: 100%;
+      padding: 9px 34px 9px 11px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background-color: var(--card);
+      color: var(--fg);
+      font: inherit;
+      appearance: none;
+      background-repeat: no-repeat;
+      background-position: right 11px center;
+      background-size: 14px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23737373' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    }
+    select:focus-visible, button:focus-visible {
+      outline: none;
+      border-color: var(--fg);
+      box-shadow: 0 0 0 3px var(--ring);
+    }
+    .org-static {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--subtle);
+      padding: 10px 12px;
+      margin-bottom: 8px;
+    }
+    .org-static .label { margin: 0; }
+    .org-static b { font-weight: 600; }
+    .hint { color: var(--muted-fg); font-size: 12.5px; margin: 0 0 20px; }
+
+    /* ---- scopes ---- */
     h2 {
-      font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
-      color: var(--muted); margin: 18px 0 8px; font-weight: 600;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: var(--muted-fg);
+      margin: 20px 0 4px;
     }
     ul { list-style: none; margin: 0; padding: 0; }
-    li { padding: 7px 0 7px 22px; position: relative; border-top: 1px solid var(--line); }
+    li {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      padding: 9px 0;
+      border-top: 1px solid var(--border);
+    }
     li:first-child { border-top: 0; }
-    li::before {
-      content: "✓"; position: absolute; left: 0; top: 7px; color: var(--accent); font-weight: 700;
-    }
-    li.write::before { content: "✎"; }
+    li svg { flex: none; margin-top: 2px; }
+    li .ico-read { color: var(--fg); }
+    li .ico-write { color: var(--muted-fg); }
+
+    /* ---- notices ---- */
     .note {
-      background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 8px;
-      padding: 10px 12px; font-size: 13.5px; margin-top: 16px;
+      display: flex;
+      gap: 9px;
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-border);
+      color: var(--warn-fg);
+      border-radius: var(--radius);
+      padding: 11px 12px;
+      font-size: 13px;
+      margin-top: 18px;
     }
-    .actions { display: flex; gap: 10px; margin-top: 24px; }
+    .note svg { flex: none; margin-top: 1px; }
+    .errors {
+      color: var(--danger);
+      font-size: 13px;
+      margin-top: 16px;
+    }
+
+    /* ---- actions ---- */
+    .actions { display: flex; gap: 10px; margin-top: 26px; }
     button {
-      flex: 1; padding: 10px 14px; border-radius: 8px; font-size: 15px;
-      font-weight: 600; cursor: pointer; border: 1px solid var(--line);
-      background: transparent; color: var(--ink); font-family: inherit;
+      flex: 1;
+      padding: 10px 16px;
+      border-radius: var(--radius);
+      font: inherit;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--fg);
+      transition: opacity .12s ease, background-color .12s ease;
     }
-    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .errors { color: #c0392b; font-size: 14px; }
-    .foot { color: var(--muted); font-size: 12.5px; margin-top: 18px; text-align: center; }
-    code { font-size: 12.5px; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+    button:hover { background: var(--subtle); }
+    button.primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: var(--primary-fg);
+      font-weight: 600;
+    }
+    button.primary:hover { opacity: .9; background: var(--primary); }
+
+    .foot {
+      color: var(--muted-fg);
+      font-size: 12px;
+      margin: 18px 0 0;
+      text-align: center;
+    }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      background: var(--subtle);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 2px 6px;
+      word-break: break-word;
+    }
+
+    @media (max-width: 420px) {
+      body { padding: 0; align-items: stretch; }
+      .card { border: 0; border-radius: 0; box-shadow: none; padding: 24px 20px; min-height: 100vh; }
+    }
   </style>
 </head>
 <body>
   <main class="card">
     {% if not error %}
-      <h1>Connect {{ application.name|default:"this application" }} to Terno?</h1>
-      <p class="sub">It will be able to act on your behalf using the access below.</p>
+      {% comment %}
+        Name and subdomain are identical on auto-provisioned orgs, and the
+        model's __str__ renders "name - subdomain" — so {{ organisation }} shows
+        "fugj - fugj". Use the name alone.
+
+        NB: {# ... #} is single-line only. A multi-line one is not a comment at
+        all — Django renders it verbatim, which is how a developer note ended up
+        on the live consent screen. Use {% comment %} for anything that wraps.
+      {% endcomment %}
+      {% with org_name=organisation.name|default:organisation.subdomain app_name=application.name|default:_("this application") %}
+
+      <div class="lockup">
+        <div class="tile" aria-hidden="true">{{ app_name|first|upper }}</div>
+        <span class="link" aria-hidden="true"><i></i><i></i><i></i></span>
+        <div class="tile terno" role="img" aria-label="Terno"></div>
+      </div>
+
+      <h1>{% blocktrans %}Connect {{ app_name }} to Terno?{% endblocktrans %}</h1>
+      <p class="sub">{% trans "It will be able to act on your behalf using the access below." %}</p>
 
       <form method="post">
         {% csrf_token %}
         {% for field in form %}{% if field.is_hidden %}{{ field }}{% endif %}{% endfor %}
 
         {% if organisation_choices %}
-          {# More than one membership: let the user choose. Each organisation has
-             its own databases and its own permissions, so this is a real
-             decision and not a formality. #}
-          <label class="orgpick">
-            <span>Connect as</span>
+          <label class="field">
+            <span class="label">{% trans "Connect as" %}</span>
             <select name="organisation">
               {% for value, label in organisation_choices %}
-                <option value="{{ value }}"
-                  {% if value == selected_organisation_id %}selected{% endif %}>
-                  {{ label }}
-                </option>
+                <option value="{{ value }}" {% if value == selected_organisation_id %}selected{% endif %}>{{ label }}</option>
               {% endfor %}
             </select>
           </label>
           <p class="hint">
-            Each organisation has its own databases. To use another one later,
-            add Terno a second time and pick it there.
+            {% trans "Each organisation has its own databases. To use another one later, add Terno a second time and pick it there." %}
           </p>
         {% elif organisation %}
-          <dl class="org">
-            <dt>Organisation</dt>
-            <dd>{{ organisation }}</dd>
-          </dl>
+          <div class="org-static">
+            <span class="label">{% trans "Organisation" %}</span>
+            <b>{{ org_name }}</b>
+          </div>
         {% endif %}
 
         {% if read_scopes %}
           <h2>{% trans "Read access" %}</h2>
           <ul>
-            {% for scope in read_scopes %}<li>{{ scope.description }}</li>{% endfor %}
+            {% for scope in read_scopes %}
+              <li>
+                <svg class="ico-read" width="15" height="15" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
+                     stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+                <span>{{ scope.description }}</span>
+              </li>
+            {% endfor %}
           </ul>
         {% endif %}
 
         {% if write_scopes %}
           <h2>{% trans "Write access" %}</h2>
           <ul>
-            {% for scope in write_scopes %}<li class="write">{{ scope.description }}</li>{% endfor %}
+            {% for scope in write_scopes %}
+              <li>
+                <svg class="ico-write" width="15" height="15" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                     stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                <span>{{ scope.description }}</span>
+              </li>
+            {% endfor %}
           </ul>
         {% endif %}
 
         {% if write_scopes and not user_can_write %}
           <p class="note">
-            Write access was requested, but you are not an administrator of
-            {{ organisation|default:"this organisation" }}. If you continue, the
-            connection will be <strong>read-only</strong>. An administrator can
-            grant write access in Terno.
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/>
+            </svg>
+            <span>
+              {% blocktrans %}Write access was requested, but you are not an administrator of {{ org_name }}. If you continue, the connection will be <strong>read-only</strong>.{% endblocktrans %}
+              {% trans "An administrator can grant write access in Terno." %}
+            </span>
           </p>
         {% endif %}
 
@@ -160,11 +362,16 @@ Three things this says that the default does not:
         </div>
       </form>
 
-      <p class="foot">You can disconnect at any time from your Terno account settings.</p>
+      <p class="foot">{% trans "You can disconnect at any time from your Terno account settings." %}</p>
+      {% endwith %}
     {% else %}
+      <div class="lockup">
+        <div class="tile terno" role="img" aria-label="Terno"></div>
+      </div>
       <h1>{% trans "Something went wrong" %}</h1>
       <p class="sub">{{ error.error }}</p>
-      <p><code>{{ error.description }}</code></p>
+      <p style="text-align:center"><code>{{ error.description }}</code></p>
+      <p class="foot">{% trans "Close this window and try connecting again from the app." %}</p>
     {% endif %}
   </main>
 </body>

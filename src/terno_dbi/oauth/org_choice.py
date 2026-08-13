@@ -48,16 +48,11 @@ def memberships_for(user) -> List:
 
 def organisation_choices(user) -> List[Tuple[str, str]]:
     """`(id, label)` pairs for the consent screen selector."""
-    from terno_dbi.oauth.minting import ORG_ADMIN_GROUP
 
     choices = []
     for membership in memberships_for(user):
         org = membership.organisation
-        is_admin = any(g.name == ORG_ADMIN_GROUP for g in membership.groups.all())
-        label = org.name or org.subdomain or f"Organisation {org.pk}"
-        if is_admin:
-            label = f"{label} — you are an admin here"
-        choices.append((str(org.pk), label))
+        choices.append((str(org.pk), org.name or org.subdomain or f"Organisation {org.pk}"))
     return choices
 
 

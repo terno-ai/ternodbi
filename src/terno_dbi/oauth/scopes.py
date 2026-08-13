@@ -44,13 +44,11 @@ ADMIN_READ = "admin:read"
 ADMIN_WRITE = "admin:write"
 ADMIN_SYNC = "admin:sync"
 
-# Shown on the consent screen, so write for a person deciding whether to allow
-# it — not for a developer who already knows the tool names.
 SCOPE_DESCRIPTIONS: Dict[str, str] = {
-    QUERY_READ: "See your databases, their tables and columns, and the notes recorded about them",
+    QUERY_READ: "View your datasource connections, tables and columns, saved memories, and organisation context",
     QUERY_EXECUTE: "Run read-only SQL queries against your databases",
-    ADMIN_READ: "Inspect table statistics and sample data used to write descriptions",
-    ADMIN_WRITE: "Change table and column descriptions, saved notes, and the organisation prompt",
+    ADMIN_READ: "Inspect table statistics and sample rows, used to write descriptions",
+    ADMIN_WRITE: "Add, edit, and delete datasource connections, table and column metadata, saved memories, and the organisation prompt",
     ADMIN_SYNC: "Refresh schema metadata from your databases",
 }
 
