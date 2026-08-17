@@ -74,7 +74,7 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
     },
     "connect_datasource": {
         "title": "Connect a database",
-        "hints": dict(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False),
+        "hints": dict(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False),
         "output": _out(
             "Where the user connects a database. Never contains credentials.",
             credential_required={"type": "boolean"},

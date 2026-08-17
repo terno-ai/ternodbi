@@ -29,6 +29,7 @@ WRITE_TOOLS = {
     "rename_column", "update_table_description", "update_column_description",
     "save_memory", "edit_memory", "delete_memory", "update_org_prompt",
     "edit_org_prompt",
+    "connect_datasource",
 }
 
 
