@@ -108,6 +108,27 @@ def test_a_credential_tool_called_anyway_is_refused_with_a_usable_message():
     assert "terno" in text
 
 
+def test_a_read_only_grant_gets_no_setup_link_from_add_datasource_either():
+    """`connect_datasource` requires admin:write: a read-only grant cannot add a
+    datasource once connected either, so handing it the setup link would only
+    reveal the org's subdomain to someone who could never act on it.
+
+    `add_datasource`'s refusal must honour the same gate, not hand out the link
+    unconditionally — otherwise calling the wrong tool name becomes a backdoor
+    around the restriction just added to `connect_datasource` itself.
+    """
+    import asyncio
+
+    with request_credentials(api_key="k", can_write=False,
+                             scopes=frozenset({"query:read"})):
+        result = asyncio.run(merged_server.call_tool("add_datasource", {}))
+
+    text = " ".join(c.text for c in result.content).lower()
+    assert result.isError
+    assert "setup_url" not in text and "setup_location" not in text
+    assert "write access" in text
+
+
 def test_validate_connection_is_hidden_despite_being_read_only():
     """The case that proves listing must follow scopes, not annotations.
 
@@ -138,13 +159,13 @@ def test_unscoped_stdio_sees_everything():
 def test_an_empty_grant_permits_only_the_unscoped_tools():
     """frozenset() is a real grant that allows nothing — the opposite of None.
 
-    Two tools survive it, both by design: `terno_guide` explains the connector,
-    and `connect_datasource` returns a link into the user's own workspace. Neither
-    reads or writes data, and `connect_datasource` in particular has to be
-    reachable by a grant with nothing yet — that user is the one who needs it.
+    Only `terno_guide` survives it. `connect_datasource` requires admin:write:
+    a read-only grant cannot add a datasource once connected either, so showing
+    it the setup link would only reveal the org's subdomain to someone who could
+    never act on it.
     """
     names = {t.name for t in merged_server.visible_tools(frozenset())}
-    assert names == {"terno_guide", "connect_datasource"}
+    assert names == {"terno_guide"}
 
 
 def test_every_tool_has_a_scope_mapping():
@@ -410,8 +431,8 @@ def test_connect_datasource_returns_a_link_and_never_asks_for_a_credential():
     from django.test import override_settings
 
     with override_settings(MAIN_DOMAIN="app.terno.ai"):
-        with request_credentials(api_key="k", can_write=False,
-                                 scopes=frozenset({"query:read"}),
+        with request_credentials(api_key="k", can_write=True,
+                                 scopes=frozenset({"admin:write"}),
                                  org_subdomain="acme"):
             content, structured = asyncio.run(
                 merged_server.call_tool("connect_datasource", {"type": "postgres"})
@@ -425,6 +446,42 @@ def test_connect_datasource_returns_a_link_and_never_asks_for_a_credential():
     tool = next(t for t in merged_server.all_tools() if t.name == "connect_datasource")
     assert not ({"connection_str", "connection_json", "password"}
                 & set(tool.inputSchema["properties"]))
+
+
+def test_connect_datasource_requires_write_access():
+    """A read-only grant cannot add a datasource once connected either, so the
+    tool must not be listed or callable for one — showing it the link would only
+    reveal the org's subdomain to someone who could never act on it."""
+    import asyncio
+
+    from terno_dbi.oauth.scopes import ADMIN_WRITE, DEFAULT_SCOPES, tool_is_allowed
+
+    assert tool_is_allowed("connect_datasource", DEFAULT_SCOPES) is False
+    assert tool_is_allowed("connect_datasource", DEFAULT_SCOPES | {ADMIN_WRITE}) is True
+
+    readonly = {t.name for t in merged_server.visible_tools(DEFAULT_SCOPES)}
+    assert "connect_datasource" not in readonly
+
+    with request_credentials(api_key="k", can_write=False, scopes=DEFAULT_SCOPES):
+        result = asyncio.run(merged_server.call_tool("connect_datasource", {}))
+    assert result.isError
+
+
+def test_the_setup_instruction_does_not_send_the_model_back_for_a_sync():
+    """Both `create_datasource` (core/admin_service/views.py) and the admin form
+    (`DataSourceAdmin.save_model`) already call `sync_metadata` at creation time
+    — the schema is loaded before the user ever returns to the conversation.
+
+    `sync_metadata` exists to refresh a datasource whose *own* schema changed
+    later, not to finish one that was just added. Telling the model to run it
+    right after connecting is one redundant write call away from wrong: it
+    reads as "the schema isn't ready yet," which isn't true.
+    """
+    from terno_dbi.mcp.setup_link import SETUP_INSTRUCTION
+
+    lowered = SETUP_INSTRUCTION.lower()
+    assert "do not suggest sync_metadata" in lowered
+    assert "already syncs the schema" in lowered
 
 
 def test_the_setup_link_carries_no_token():
@@ -464,13 +521,78 @@ def test_no_setup_link_is_invented_when_the_workspace_is_unknown():
 
 
 def test_connect_datasource_succeeds_rather_than_erroring():
-    """It is the supported path, not a refusal. An `isError` result invites the
-    model to look for a workaround, and the workaround is asking the user to paste
-    a DSN — which is the thing this exists to prevent."""
+    """For a grant that may actually use it, it is the supported path, not a
+    refusal. An `isError` result invites the model to look for a workaround, and
+    the workaround is asking the user to paste a DSN — the thing this exists to
+    prevent. (A grant without admin:write is refused instead — see
+    test_connect_datasource_requires_write_access.)"""
     import asyncio
 
-    with request_credentials(api_key="k", scopes=frozenset()):
+    with request_credentials(api_key="k", can_write=True, scopes=frozenset({"admin:write"})):
         result = asyncio.run(merged_server.call_tool("connect_datasource", {}))
 
     # Success is the (content, structuredContent) pair; a refusal is CallToolResult.
     assert isinstance(result, tuple), "connect_datasource returned an error result"
+
+
+def test_org_subdomain_from_the_resolver_actually_reaches_the_request():
+    """`default_token_resolver` puts `org_subdomain` in the dict it returns, but
+    `build_asgi_app` never read that key back out of `resolved` when constructing
+    `request_credentials` — the keyword was simply absent from the call. So
+    `current_org_subdomain()` was always None over the real HTTP path, and
+    `connect_datasource` always fell back to prose ("the Datasources section of
+    Terno") instead of a real link, for every deployment and every request.
+
+    Every other test in this file calls `request_credentials(org_subdomain=...)`
+    directly, which is exactly why none of them caught it — that bypasses
+    `build_asgi_app` entirely. This one goes through the real ASGI app, the way
+    an actual MCP request does.
+    """
+    import terno_dbi.mcp.http_app as http_app_module
+
+    seen = {}
+
+    async def resolver(token: str):
+        if token != "good":
+            raise TokenRejected("Invalid or expired token")
+        return {
+            "api_key": "good",
+            "can_write": False,
+            "scopes": frozenset({"query:read"}),
+            "org_subdomain": "acme",
+        }
+
+    # Captures exactly the kwargs `build_asgi_app` passes to `request_credentials`
+    # -- this is the seam that dropped `org_subdomain` -- without needing a real
+    # Streamable HTTP session handshake to reach a tool call.
+    from contextlib import contextmanager
+
+    real_request_credentials = http_app_module.request_credentials
+
+    @contextmanager
+    def spying_request_credentials(**kwargs):
+        seen.update(kwargs)
+        with real_request_credentials(**kwargs) as creds:
+            yield creds
+
+    http_app_module.request_credentials = spying_request_credentials
+    try:
+        probe_app = build_asgi_app(
+            merged_server.server, token_resolver=resolver,
+            base_url="https://mcp.terno.ai", strict_credentials=False,
+        )
+        scope = _scope([(b"authorization", b"Bearer good")])
+        try:
+            asyncio.run(_capture(probe_app, scope))
+        except Exception:
+            # Only `request_credentials`'s kwargs matter here; the credentials
+            # capture above already ran by the time the real session manager
+            # gets involved with the request body/headers.
+            pass
+    finally:
+        http_app_module.request_credentials = real_request_credentials
+
+    assert seen.get("org_subdomain") == "acme", (
+        "org_subdomain resolved by the token backend never reached the "
+        "request_credentials() call inside build_asgi_app"
+    )

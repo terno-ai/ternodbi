@@ -23,7 +23,11 @@ SETUP_INSTRUCTION = (
     "Show this link to the user as a clickable link and ask them to add the "
     "connection there, then continue once they confirm. Do not ask them for a "
     "connection string or password — this link exists so the credential never "
-    "passes through this conversation."
+    "passes through this conversation. Saving the form there already syncs the "
+    "schema (tables and columns), so do not suggest sync_metadata as a next "
+    "step — call list_datasources or list_tables directly to confirm it "
+    "connected. sync_metadata is only for re-syncing after the database's own "
+    "schema changes later, not for a datasource that was just added."
 )
 
 

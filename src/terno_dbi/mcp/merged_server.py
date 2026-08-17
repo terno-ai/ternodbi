@@ -139,6 +139,11 @@ async def call_tool(name: str, arguments: Dict[str, Any]):
 
     if scopes is not None and name in CREDENTIAL_TOOLS:
         logger.warning("Refused %s over OAuth: takes a database credential", name)
+        if not (writable and tool_is_allowed("connect_datasource", effective_scopes(scopes, writable))):
+            return as_error_result(
+                f"'{name}' requires write access, which this connection was not "
+                f"granted. An organisation admin can add the datasource in Terno."
+            )
         handoff = handle_connect_datasource({"type": (arguments or {}).get("type")})
         return as_error_result(
             f"'{name}' cannot be used here: it would mean sending a database "

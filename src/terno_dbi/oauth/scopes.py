@@ -42,7 +42,7 @@ CREDENTIAL_TOOLS: FrozenSet[str] = frozenset({"add_datasource", "validate_connec
 # tool name -> the scope required to use it. None means always available.
 TOOL_SCOPES: Dict[str, Optional[str]] = {
     "terno_guide": None,
-    "connect_datasource": None,
+    "connect_datasource": ADMIN_WRITE,
     # --- query service (no @require_scope on the views; gated here) ---
     "list_datasources": QUERY_READ,
     "list_tables": QUERY_READ,

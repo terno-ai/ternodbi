@@ -182,6 +182,7 @@ def build_asgi_app(
             # Use frozenset() for no permissions. None means "unscoped" and allows
             # everything, so returning None here would accidentally grant full access.
             scopes=resolved.get("scopes", frozenset()),
+            org_subdomain=resolved.get("org_subdomain"),
         ):
             await manager.handle_request(scope, receive, send)
 
