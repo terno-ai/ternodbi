@@ -72,6 +72,18 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
             content={"type": "string", "description": "Markdown guide text."},
         ),
     },
+    "connect_datasource": {
+        "title": "Connect a database",
+        "hints": dict(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False),
+        "output": _out(
+            "Where the user connects a database. Never contains credentials.",
+            credential_required={"type": "boolean"},
+            reason={"type": "string", "description": "Why this cannot be done in the conversation."},
+            instruction={"type": "string", "description": "What to do with the link."},
+            setup_url={"type": "string", "description": "Link for the user to open. Absent if the workspace could not be resolved."},
+            setup_location={"type": "string", "description": "Prose fallback when no URL could be built."},
+        ),
+    },
     # ---------------------------------------------------------------- query
     "list_datasources": {
         "title": "List databases",

@@ -186,6 +186,51 @@ organisation prompt, which affects every user in the organisation.
 """
 
 
+CONNECT_DATASOURCE_TOOL = Tool(
+    name="connect_datasource",
+    description=(
+        "Get the link the user opens to connect a database to Terno. Call this "
+        "when they want to add a datasource, or when they have none yet. Takes no "
+        "credentials: the connection details are entered in Terno, never in this "
+        "conversation. Show the returned link to the user."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "type": {
+                "type": "string",
+                "description": (
+                    "Optional database type they mentioned (postgres, mysql, "
+                    "bigquery, snowflake, ...). Only used to phrase the reply."
+                ),
+            }
+        },
+        "required": [],
+    },
+)
+
+
+def handle_connect_datasource(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Hand the user a link instead of collecting their credential.
+
+    Deliberately succeeds rather than erroring: this is the supported path, not a
+    refusal, and an `isError` result invites the model to look for a workaround —
+    which in practice means asking the user for their connection string.
+    """
+    from terno_dbi.mcp.context import current_org_subdomain
+    from terno_dbi.mcp.setup_link import setup_handoff
+
+    db_type = (arguments or {}).get("type")
+    reason = (
+        f"Connecting a {db_type} database needs credentials, which are entered in "
+        f"Terno rather than sent through this conversation."
+        if db_type
+        else "Connection details are entered in Terno, not sent through this "
+             "conversation."
+    )
+    return setup_handoff(current_org_subdomain(), reason)
+
+
 def handle_guide(arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Return the guide payload. Kept here so every server shares one copy."""
     mode = (arguments or {}).get("mode") or "tour"

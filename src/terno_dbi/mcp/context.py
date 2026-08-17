@@ -30,6 +30,7 @@ class RequestCredentials:
     base_url: Optional[str] = None
     can_write: bool = True
     scopes: Optional[frozenset] = None
+    org_subdomain: Optional[str] = None
 
 
 _credentials: ContextVar[Optional[RequestCredentials]] = ContextVar(
@@ -65,6 +66,7 @@ def request_credentials(
     base_url: Optional[str] = None,
     can_write: bool = True,
     scopes: Optional[frozenset] = None,
+    org_subdomain: Optional[str] = None,
 ) -> Iterator[RequestCredentials]:
     """Scope the calling identity to this block.
 
@@ -72,7 +74,8 @@ def request_credentials(
     token to a `ServiceToken`.
     """
     creds = RequestCredentials(
-        api_key=api_key, base_url=base_url, can_write=can_write, scopes=scopes
+        api_key=api_key, base_url=base_url, can_write=can_write, scopes=scopes,
+        org_subdomain=org_subdomain,
     )
     token = _credentials.set(creds)
     try:
@@ -92,6 +95,12 @@ def can_write() -> bool:
     """
     creds = _credentials.get()
     return True if creds is None else creds.can_write
+
+
+def current_org_subdomain() -> Optional[str]:
+    """The organisation subdomain for this request, if the grant carries one."""
+    creds = _credentials.get()
+    return None if creds is None else creds.org_subdomain
 
 
 def current_scopes() -> Optional[frozenset]:

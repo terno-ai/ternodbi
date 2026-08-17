@@ -37,10 +37,12 @@ ALL_SCOPES: FrozenSet[str] = frozenset(SCOPE_DESCRIPTIONS)
 DEFAULT_SCOPES: FrozenSet[str] = frozenset({QUERY_READ, QUERY_EXECUTE})
 
 WRITE_SCOPES: FrozenSet[str] = frozenset({ADMIN_WRITE, ADMIN_SYNC})
+CREDENTIAL_TOOLS: FrozenSet[str] = frozenset({"add_datasource", "validate_connection"})
 
 # tool name -> the scope required to use it. None means always available.
 TOOL_SCOPES: Dict[str, Optional[str]] = {
     "terno_guide": None,
+    "connect_datasource": None,
     # --- query service (no @require_scope on the views; gated here) ---
     "list_datasources": QUERY_READ,
     "list_tables": QUERY_READ,
@@ -113,6 +115,9 @@ def granted_scopes(scopes: Iterable[str], *, can_write: bool) -> FrozenSet[str]:
 
 
 def tool_is_allowed(tool_name: str, scopes: FrozenSet[str]) -> bool:
+    if tool_name in CREDENTIAL_TOOLS:
+        return False
+
     required = TOOL_SCOPES.get(tool_name)
     if required is None:
         return tool_name in TOOL_SCOPES

@@ -10,29 +10,38 @@
 
 # Changelog
 
+## 0.1.39 — unreleased
+
+- New tool `connect_datasource`: returns a link to add a database in Terno
+  instead of taking `connection_str` in chat. `add_datasource` and
+  `validate_connection` are now withheld from every OAuth grant for the same
+  reason — a credential must never pass through a conversation.
+- Fixed: a demoted admin kept write access until reconnecting. Admin status is
+  now re-checked on every call, not just at grant time.
+
+## 0.1.38
+
+Version bump only.
+
+## 0.1.37
+
+- Consent screen redesigned to match the Terno app: organisation, read/write
+  access, and a notice when write will be withheld.
+
+## 0.1.36
+
+- Fixed: write access could never be granted. The check read the wrong group
+  field, so `admin:write`/`admin:sync` were stripped from every token.
+
 ## 0.1.35
 
-- **Fixed: `terno-dbi` 0.1.34 could not be installed fresh.** The `mcp`
-  dependency was uncapped, so a new install resolved to `mcp` 2.0, whose
-  breaking changes made the server fail on import with
-  `'Server' object has no attribute 'list_tools'`. Now `mcp>=1.25.0,<2.0`.
-- All 24 tools carry a display `title`, behaviour `annotations`
-  (`readOnlyHint` / `destructiveHint` / `idempotentHint` / `openWorldHint`), and
-  an `outputSchema`. Tool responses now include `structuredContent` alongside
-  the text form.
-- Server `instructions` rewritten to fit the 2,049-character client truncation
-  limit. The admin server previously exceeded it, so its guidance on
-  `org_prompt` versus memory was being silently cut and never reached the model.
-- **Removed the `find_similar_examples` tool.** Stale. Its `PromptExample` and
-  Milvus backing remain for now and are scheduled for removal.
-- `__version__` is read from installed package metadata; it had reported
-  `0.1.0` through the 0.1.34 release.
+- Fixed: 0.1.34 could not be installed fresh (`mcp` dependency uncapped).
+- Tools carry titles, behaviour annotations, and output schemas.
+- Removed the stale `find_similar_examples` tool.
 
 ## 0.1.34
 
-- Connectors are now closed on every query-execution and validation path,
-  fixing a connection leak.
-- Error handling in API response construction made consistent.
+- Connections are now closed on every query-execution and validation path.
 
 ## 0.1.33
 

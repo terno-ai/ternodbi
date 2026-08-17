@@ -22,9 +22,20 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool
 from terno_dbi.mcp import admin_server, query_server
 from terno_dbi.mcp.context import can_write, current_scopes
-from terno_dbi.oauth.scopes import TOOL_SCOPES, WRITE_SCOPES, tool_is_allowed
+from terno_dbi.oauth.scopes import (
+    CREDENTIAL_TOOLS,
+    TOOL_SCOPES,
+    WRITE_SCOPES,
+    tool_is_allowed,
+)
 from terno_dbi.mcp.instructions import MERGED_INSTRUCTIONS
-from terno_dbi.mcp.surface import GUIDE_TOOL, handle_guide, register_surface
+from terno_dbi.mcp.surface import (
+    CONNECT_DATASOURCE_TOOL,
+    GUIDE_TOOL,
+    handle_connect_datasource,
+    handle_guide,
+    register_surface,
+)
 from terno_dbi.mcp.tool_meta import (
     TOOL_META,
     apply_tool_meta,
@@ -54,7 +65,12 @@ def _is_write_tool(name: str) -> bool:
 
 def all_tools() -> List[Tool]:
     """Every tool this server can expose, before grant filtering."""
-    return [GUIDE_TOOL, *query_server.own_tools(), *admin_server.own_tools()]
+    return [
+        GUIDE_TOOL,
+        CONNECT_DATASOURCE_TOOL,
+        *query_server.own_tools(),
+        *admin_server.own_tools(),
+    ]
 
 
 def effective_scopes(
@@ -120,6 +136,16 @@ if _COLLISIONS:
 async def call_tool(name: str, arguments: Dict[str, Any]):
     scopes = current_scopes()
     writable = can_write()
+
+    if scopes is not None and name in CREDENTIAL_TOOLS:
+        logger.warning("Refused %s over OAuth: takes a database credential", name)
+        handoff = handle_connect_datasource({"type": (arguments or {}).get("type")})
+        return as_error_result(
+            f"'{name}' cannot be used here: it would mean sending a database "
+            f"password through this conversation. Use the link below instead.",
+            **handoff,
+        )
+
     if scopes is not None and not tool_is_allowed(name, effective_scopes(scopes, writable)):
         required = TOOL_SCOPES.get(name)
         withdrawn = bool(required and required in WRITE_SCOPES and required in scopes)
@@ -152,6 +178,8 @@ async def call_tool(name: str, arguments: Dict[str, Any]):
 
     if name == "terno_guide":
         return as_tool_result(handle_guide(arguments))
+    if name == "connect_datasource":
+        return as_tool_result(handle_connect_datasource(arguments))
     if name in _QUERY_NAMES:
         return await query_server.call_tool(name, arguments)
     if name in _ADMIN_NAMES:

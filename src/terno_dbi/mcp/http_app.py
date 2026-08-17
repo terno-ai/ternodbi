@@ -80,6 +80,7 @@ def default_token_resolver(resource_url: str = "") -> Callable[[str], Awaitable[
             "api_key": token_str,
             "can_write": summary["can_write"],
             "scopes": summary["scopes"],
+            "org_subdomain": getattr(token.organisation, "subdomain", None),
         }
 
     return sync_to_async(_verify, thread_sensitive=True)

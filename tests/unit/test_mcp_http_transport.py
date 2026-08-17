@@ -21,8 +21,11 @@ from terno_dbi.mcp.context import (
 )
 from terno_dbi.mcp.http_app import TokenRejected, build_asgi_app
 
+# Write tools available to a full grant. `add_datasource` and
+# `validate_connection` are excluded because they accept database credentials
+# and are not exposed through OAuth.
 WRITE_TOOLS = {
-    "add_datasource", "delete_datasource", "sync_metadata", "rename_table",
+    "delete_datasource", "sync_metadata", "rename_table",
     "rename_column", "update_table_description", "update_column_description",
     "save_memory", "edit_memory", "delete_memory", "update_org_prompt",
     "edit_org_prompt",
@@ -36,7 +39,7 @@ def test_merged_server_carries_both_registries():
     assert "execute_query" in names          # query registry
     assert "add_datasource" in names         # admin registry
     assert "terno_guide" in names            # shared surface
-    assert len(names) == 25
+    assert len(names) == 26
 
 
 def test_merged_instructions_fit_the_cap():
@@ -58,6 +61,53 @@ def test_write_tools_are_hidden_from_a_read_only_grant():
     assert {"execute_query", "list_tables", "get_memory", "terno_guide"} <= readonly
 
 
+def test_credential_tools_are_withheld_from_every_grant():
+    """D10. `add_datasource` and `validate_connection` take `connection_str` — a
+    DSN with the password in it — so a conversational "connect my Postgres" puts a
+    live credential into the model's context, the client's stored history, and the
+    client operator's logs. Terno controls none of those and cannot redact them.
+
+    No scope can fix this: the leak happens on the way *in*, before the server
+    sees the call. So they are absent from every OAuth listing, including a grant
+    holding all five scopes.
+    """
+    from terno_dbi.oauth.scopes import ALL_SCOPES, CREDENTIAL_TOOLS, tool_is_allowed
+
+    assert CREDENTIAL_TOOLS == {"add_datasource", "validate_connection"}
+
+    full = {t.name for t in merged_server.visible_tools(ALL_SCOPES)}
+    assert not (CREDENTIAL_TOOLS & full), "a credential tool is listed over OAuth"
+    for name in CREDENTIAL_TOOLS:
+        assert not tool_is_allowed(name, ALL_SCOPES)
+
+    # Still present over stdio: that process is started by the operator on their
+    # own machine with their own key, and removing it there would break existing
+    # `dbi-mcp` users without protecting anyone new.
+    assert CREDENTIAL_TOOLS <= {t.name for t in merged_server.visible_tools(None)}
+
+
+def test_a_credential_tool_called_anyway_is_refused_with_a_usable_message():
+    """A client working from a stale tools/list can still call it. The refusal
+    must not read as a missing scope — that would send the model off to request a
+    permission that would not help — and must tell it where the real path is
+    without asking the user for their connection string.
+    """
+    import asyncio
+
+    with request_credentials(api_key="k", can_write=True,
+                             scopes=frozenset({"admin:write"})):
+        result = asyncio.run(merged_server.call_tool("add_datasource", {}))
+
+    text = " ".join(c.text for c in result.content).lower()
+    assert result.isError
+    assert "scope" not in text, "refusal misattributes this to a missing scope"
+    # It must carry the same hand-off `connect_datasource` returns, so the model
+    # has somewhere to send the user rather than inventing a workaround.
+    assert "credential_required" in text
+    assert "do not ask them for a connection string" in text
+    assert "terno" in text
+
+
 def test_validate_connection_is_hidden_despite_being_read_only():
     """The case that proves listing must follow scopes, not annotations.
 
@@ -74,6 +124,8 @@ def test_validate_connection_is_hidden_despite_being_read_only():
 
     readonly = {t.name for t in merged_server.visible_tools(DEFAULT_SCOPES)}
     assert "validate_connection" not in readonly
+    # It is now withheld from write grants too, for taking a credential — but the
+    # scopes-not-annotations rule this test documents still governs the listing.
 
 
 def test_unscoped_stdio_sees_everything():
@@ -83,10 +135,16 @@ def test_unscoped_stdio_sees_everything():
     }
 
 
-def test_an_empty_grant_permits_only_the_guide():
-    """frozenset() is a real grant that allows nothing — the opposite of None."""
+def test_an_empty_grant_permits_only_the_unscoped_tools():
+    """frozenset() is a real grant that allows nothing — the opposite of None.
+
+    Two tools survive it, both by design: `terno_guide` explains the connector,
+    and `connect_datasource` returns a link into the user's own workspace. Neither
+    reads or writes data, and `connect_datasource` in particular has to be
+    reachable by a grant with nothing yet — that user is the one who needs it.
+    """
     names = {t.name for t in merged_server.visible_tools(frozenset())}
-    assert names == {"terno_guide"}
+    assert names == {"terno_guide", "connect_datasource"}
 
 
 def test_every_tool_has_a_scope_mapping():
@@ -334,3 +392,85 @@ def test_error_results_skip_output_schema_validation():
     result = as_error_result("boom", required_scope="admin:write")
     assert result.isError is True
     assert result.structuredContent == {"error": "boom", "required_scope": "admin:write"}
+
+
+# ------------------------------------------- D10: credentials handed over by link
+
+def test_connect_datasource_returns_a_link_and_never_asks_for_a_credential():
+    """The pattern Supermetrics uses: per-source auth is a **link**, not a tool
+    parameter. Their `data_source_discovery` returns `login_link` +
+    `login_note: You need to log in with this link before using this data source.`
+
+    Withholding `add_datasource` alone stopped the leak but stranded the user —
+    over a hosted connector there was then no route to a first datasource at all.
+    This tool completes the loop without the secret entering the conversation.
+    """
+    import asyncio
+
+    from django.test import override_settings
+
+    with override_settings(MAIN_DOMAIN="app.terno.ai"):
+        with request_credentials(api_key="k", can_write=False,
+                                 scopes=frozenset({"query:read"}),
+                                 org_subdomain="acme"):
+            content, structured = asyncio.run(
+                merged_server.call_tool("connect_datasource", {"type": "postgres"})
+            )
+
+    assert structured["setup_url"] == "https://acme.app.terno.ai/admin/terno/datasource/add/"
+    assert structured["credential_required"] is True
+    assert "do not ask them for a connection string" in structured["instruction"].lower()
+
+    # No input on this tool may accept a secret.
+    tool = next(t for t in merged_server.all_tools() if t.name == "connect_datasource")
+    assert not ({"connection_str", "connection_json", "password"}
+                & set(tool.inputSchema["properties"]))
+
+
+def test_the_setup_link_carries_no_token():
+    """Supermetrics' `login_link` embeds a bearer token, which makes the link
+    itself a credential — and it lands in the transcript, the exact place we are
+    keeping secrets out of. Anyone who reads the conversation can open it.
+
+    Ours is a plain deep link: opening it requires the user's own Terno session,
+    so it grants nothing on its own and is safe in a log or a screenshot.
+    """
+    from django.test import override_settings
+
+    from terno_dbi.mcp.setup_link import datasource_setup_url
+
+    with override_settings(MAIN_DOMAIN="app.terno.ai"):
+        url = datasource_setup_url("acme")
+
+    assert url == "https://acme.app.terno.ai/admin/terno/datasource/add/"
+    assert "?" not in url and "token" not in url.lower()
+
+
+def test_no_setup_link_is_invented_when_the_workspace_is_unknown():
+    """A dead link on this path is worse than prose: the user clicks it, gets an
+    error, and gives up. Fall back to naming where to go instead."""
+    from django.test import override_settings
+
+    from terno_dbi.mcp.setup_link import datasource_setup_url, setup_handoff
+
+    with override_settings(MAIN_DOMAIN="app.terno.ai"):
+        assert datasource_setup_url(None) is None
+    with override_settings(MAIN_DOMAIN=""):
+        assert datasource_setup_url("acme") is None
+
+        payload = setup_handoff("acme", reason="x")
+        assert "setup_url" not in payload
+        assert "Datasources" in payload["setup_location"]
+
+
+def test_connect_datasource_succeeds_rather_than_erroring():
+    """It is the supported path, not a refusal. An `isError` result invites the
+    model to look for a workaround, and the workaround is asking the user to paste
+    a DSN — which is the thing this exists to prevent."""
+    import asyncio
+
+    with request_credentials(api_key="k", scopes=frozenset()):
+        result = asyncio.run(merged_server.call_tool("connect_datasource", {}))
+
+    # Success is the (content, structuredContent) pair; a refusal is CallToolResult.
+    assert isinstance(result, tuple), "connect_datasource returned an error result"
