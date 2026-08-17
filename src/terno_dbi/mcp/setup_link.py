@@ -16,8 +16,12 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Terno's admin route for adding a datasource, on the org's own subdomain.
-DATASOURCE_ADMIN_PATH = "/admin/terno/datasource/add/"
+
+def _datasource_admin_path() -> str:
+    from terno_dbi.core.models import DataSource
+    meta = DataSource._meta
+    return f"/admin/{meta.app_label}/{meta.model_name}/add/"
+
 
 SETUP_INSTRUCTION = (
     "Show this link to the user as a clickable link and ask them to add the "
@@ -64,7 +68,7 @@ def datasource_setup_url(org_subdomain: Optional[str]) -> Optional[str]:
             "TERNO_ROOT_DOMAIN is set."
         )
         return None
-    return f"https://{org_subdomain}.{root}{DATASOURCE_ADMIN_PATH}"
+    return f"https://{org_subdomain}.{root}{_datasource_admin_path()}"
 
 
 def setup_handoff(org_subdomain: Optional[str], reason: str) -> dict:
@@ -89,7 +93,6 @@ def setup_handoff(org_subdomain: Optional[str], reason: str) -> dict:
 
 
 __all__ = [
-    "DATASOURCE_ADMIN_PATH",
     "SETUP_INSTRUCTION",
     "datasource_setup_url",
     "setup_handoff",

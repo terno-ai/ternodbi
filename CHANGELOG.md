@@ -10,7 +10,7 @@
 
 # Changelog
 
-## 0.1.39, 0.1.40 and 0.1.41
+## 0.1.39, 0.1.40 , 0.1.41 and 0.1.42
 
 - New tool `connect_datasource`: returns a link to add a database in Terno
   instead of taking `connection_str` in chat. `add_datasource` and
