@@ -1,37 +1,19 @@
-"""The seam between django-oauth-toolkit and `ServiceToken`.
+"""Bridge django-oauth-toolkit and `ServiceToken`.
 
-DOT owns the OAuth protocol — authorize, consent, PKCE, token exchange, refresh,
-revoke. TernoDBI owns authorization — organisation scoping, groups, table and
-column visibility, SQLShield. This class is the two-line bridge between them.
+django-oauth-toolkit handles the OAuth flow, while TernoDBI handles
+organisation scoping and authorization. This class connects the two by
+creating a `ServiceToken` for each approved OAuth grant.
 
-## The access token *is* the ServiceToken key
+The OAuth access token is generated as a `dbi_`-prefixed token, so it can be
+resolved by the existing `verify_token` path without changing token lookup or
+adding a separate OAuth-to-service-token mapping.
 
-DOT's `ACCESS_TOKEN_GENERATOR` is pointed at
-`minting.generate_oauth_access_token`, which emits `dbi_oauth_<random>`. Since
-`verify_token` accepts any `dbi_`-prefixed key and looks it up by SHA-256 hash,
-the bearer Claude sends resolves through the existing path with:
-
-- no change to `verify_token`
-- no join table mapping an `AccessToken` to a `ServiceToken`
-- no second database lookup per request
-
-Two rows describe the same secret from two angles: DOT's `AccessToken` for the
-protocol, `ServiceToken` for authorization. Neither stores the other's identity
-because the hash already links them.
-
-## Failing closed
-
-If the `ServiceToken` cannot be minted — the user has no organisation, most
-likely because they arrived from Claude without signing up first — the whole
-token issuance is aborted. Handing back a working OAuth token whose
-authorization half is missing would produce a connector that authenticates
-successfully and then fails every tool call with a confusing error.
+Token issuance fails if a `ServiceToken` cannot be created. An OAuth token
+without a valid authorization context must never be issued.
 """
 
 import logging
-
 from oauth2_provider.oauth2_validators import OAuth2Validator
-
 from terno_dbi.oauth.minting import (
     deactivate_service_token_for_key,
     mint_service_token_for_key,

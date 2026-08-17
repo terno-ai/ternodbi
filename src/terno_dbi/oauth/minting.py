@@ -1,37 +1,22 @@
-"""Turn an approved OAuth grant into a `ServiceToken`.
+"""Create a `ServiceToken` from an approved OAuth grant.
 
-This is the seam that keeps the blast radius small. Everything downstream —
-`verify_token`, `require_service_auth`, `_resolve_roles`,
-`get_admin_config_object`, SQLShield — already works against a `ServiceToken`
-and does not change at all. OAuth only has to produce one.
+This keeps OAuth isolated from the existing authorization layer. The rest of
+TernoDBI continues to work with `ServiceToken` without needing OAuth-specific
+logic.
 
-## Groups are the part that is easy to skip and expensive to miss
+The user's organisation groups must be copied to the token to preserve the
+same table visibility as the web application. Without them, restricted tables
+may be hidden even though the user can access them through the web app.
 
-`OrganisationUser.groups` must be copied onto the token. Not for the write gate
-— for **read parity**. `get_all_group_tables` is additive:
-
-    global_tables = all_non_hidden - PrivateTableSelector.tables   # removed for everyone
-    group_tables  = tables granted to `roles`                      # added back per group
-
-so a token with no groups does not fail — it silently sees *fewer* tables than
-the same person sees in the web app. Same user, same org, different answer, no
-error message. Any customer who has restricted a sensitive table to one team
-would hit this, and it would look like a bug in the connector.
-
-## Write access needs both halves
-
-The scope says what the *client* asked for at consent; the group says what the
-*user* is permitted to do in this organisation. Requiring both means a user who
-is not an org admin cannot gain write access just by clicking through a consent
-screen, and a client granted read-only cannot reach write tools even if the user
-happens to be an admin.
+Write access requires both the OAuth scope and the user's organisation role.
+The scope controls what the client was granted, while the role controls what
+the user is allowed to do.
 """
 
 import hashlib
 import logging
 import secrets
 from typing import Iterable, Tuple
-
 from terno_dbi.oauth.scopes import granted_scopes, scope_string
 
 logger = logging.getLogger(__name__)
@@ -106,8 +91,6 @@ def mint_token_for_grant(
         scopes=sorted(granted),
     )
 
-    # The read-parity copy. Without it the connector shows fewer tables than the
-    # web app, with no error to explain why.
     groups = list(membership.groups.all())
     if groups:
         token.groups.set(groups)

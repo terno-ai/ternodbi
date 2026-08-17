@@ -1,29 +1,22 @@
-"""Discovery documents and Dynamic Client Registration.
+"""Serve OAuth discovery documents and Dynamic Client Registration.
 
-These are Django views, unlike `/mcp`. They are reached through the normal URL
-resolver and middleware, which is what you want here — they are ordinary
-request/response endpoints with no streaming.
+These are normal Django views, unlike `/mcp`, so they use the URL resolver and
+Django middleware.
 
-`register` creates the client record. It is deliberately thin: all validation
-lives in `dcr.py`, so the rules can be tested without a database or a request.
+`register` creates the OAuth client record. Validation is kept in `dcr.py` so
+it can be tested independently of Django and the database.
 
-## The DOT dependency is soft on purpose
-
-`django-oauth-toolkit` provides the `Application` model this writes to, but the
-discovery documents do not need it. Importing DOT lazily means
-`/.well-known/...` still serves correctly in a deployment where DOT is not yet
-installed — useful while Phase 4 is landing, and it keeps this module importable
-in ternodbi's own test suite, which has no DOT.
+`django-oauth-toolkit` is an optional dependency here. It is imported lazily
+so the discovery endpoints and TernoDBI test suite can still work without DOT
+installed.
 """
 
 import json
 import logging
 import time
-
 from django.conf import settings
 from django.http import HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-
 from terno_dbi.oauth.dcr import (
     InvalidRegistration,
     registration_response,
@@ -37,9 +30,8 @@ from terno_dbi.oauth.scopes import UnknownScope
 
 logger = logging.getLogger(__name__)
 
-# Registrations per IP per window. The endpoint is unauthenticated by design
-# (RFC 7591), so it is a row-creation vector; this bounds it without needing a
-# dependency on a rate-limit package.
+# Limit registrations per IP because DCR is unauthenticated and can otherwise
+# be used to create an unbounded number of client records.
 REGISTRATION_RATE_LIMIT = 10
 REGISTRATION_RATE_WINDOW_SECONDS = 3600
 
@@ -53,13 +45,6 @@ def _auth_server_url() -> str:
 
 
 def _absolute_issuer() -> str:
-    """The issuer as an absolute origin.
-
-    Settings sometimes hold a bare host ('app.terno.ai') and sometimes a full
-    origin ('http://127.0.0.1:8000'). Prefixing a scheme unconditionally turns
-    the second into 'https://http://127.0.0.1:8000', which 404s — a real bug hit
-    while testing locally.
-    """
     value = (_auth_server_url() or "app.terno.ai").rstrip("/")
     if value.startswith(("http://", "https://")):
         return value
@@ -74,11 +59,10 @@ def _cors(response: JsonResponse) -> JsonResponse:
 
 
 def oauth_protected_resource(request):
-    """RFC 9728 — served on the resource host, `mcp.terno.ai`.
+    """Return RFC 9728 resource metadata for the MCP endpoint.
 
-    The 401 from `/mcp` points here via `WWW-Authenticate`; without this the
-    client follows that pointer to a 404 and shows the user a bare auth error
-    instead of starting sign-in.
+    The `/mcp` 401 response points clients here via `WWW-Authenticate`. This
+    metadata lets clients discover the authorization server and start sign-in.
     """
     return _cors(JsonResponse(
         protected_resource_metadata(_resource_url(), _auth_server_url())
@@ -154,7 +138,7 @@ def register(request):
 
     try:
         from oauth2_provider.models import get_application_model
-    except ImportError:  # pragma: no cover - deployment without DOT
+    except ImportError:
         logger.error("DCR requested but django-oauth-toolkit is not installed")
         return JsonResponse(
             {"error": "temporarily_unavailable",
@@ -175,18 +159,11 @@ def register(request):
         # is being requested. Never skip it for a self-registered client.
         skip_authorization=False,
     )
-    # CAPTURE THE SECRET BEFORE SAVING. `client_secret` is a DOT
-    # `ClientSecretField`: the model default generates a 128-char plaintext at
-    # instantiation, and `save()` replaces it in place with a
-    # `pbkdf2_sha256$...` hash. Reading it after `save()` therefore returns the
-    # hash, and returning that to the client makes every token exchange fail
-    # with a 401 — the client authenticates with the hash, DOT hashes it again,
-    # and the two never match.
-    #
-    # This is not hypothetical: it is exactly how the first real Claude connect
-    # attempt failed. A public client does not care (it authenticates with
-    # client_id plus PKCE and the secret is never consulted), which is why the
-    # bug hid until a confidential client appeared.
+    # Save the generated client secret before saving the Application. DOT hashes
+    # `client_secret` during `save()`, so reading it afterwards returns the hash
+    # instead of the secret the client needs for authentication.
+    # Public clients are not affected because they use PKCE and do not authenticate
+    # with the secret.
     plaintext_secret = app.client_secret
     app.save()
 
@@ -234,16 +211,13 @@ def make_authorization_view():
     )
 
     class TernoAllowForm(AllowForm):
-        """DOT's consent form plus an organisation selector.
+        """DOT consent form with an organisation selector.
 
-        The choice is merged into `claims`, which DOT already round-trips onto
-        the `Grant`. That is the only place it can live: the token exchange that
-        follows is a back-channel POST with no session.
+        The selected organisation is stored in `claims`, which DOT carries through to
+        the `Grant` and makes available during token exchange.
 
-        `clean` re-validates the submitted id against the user's memberships.
-        The field is a browser POST and `claims` is a hidden input, so both are
-        attacker-controlled — an unvalidated value here would become a grant for
-        an organisation the user has no access to.
+        The organisation ID is validated against the user's memberships in `clean()`
+        because both the form data and hidden `claims` field are untrusted input.
         """
 
         organisation = django_forms.ChoiceField(
@@ -290,17 +264,14 @@ def make_authorization_view():
         """
 
         def get_login_url(self):
-            """Where an unauthenticated user is sent to sign in or sign up.
+            """Return the login URL for unauthenticated OAuth users.
 
-            Not `settings.LOGIN_URL`, which is the bare domain — a user who
-            clicks Connect in Claude with no account lands on the site root with
-            no idea what to do. Signup lives in terno-web, reached at
-            `/accounts/…` on this same host (nginx routes it to the provisioner),
-            so point at the login screen there. Django appends `?next=` with the
-            authorize URL, and the provisioner carries it through signup.
+            Uses the account login page instead of `settings.LOGIN_URL`, which points to
+            the site root. Django appends the OAuth authorize URL as `next`, allowing the
+            signup flow to return the user to the consent screen.
 
-            Overridden here rather than changing `LOGIN_URL` globally, which
-            every other login in the app also depends on.
+            This is overridden locally so other application login flows keep using the
+            global `LOGIN_URL`.
             """
             configured = getattr(settings, "TERNO_CONNECTOR_LOGIN_URL", None)
             if configured:
@@ -329,10 +300,6 @@ def make_authorization_view():
             context["read_scopes"] = [r for r in rows if r["scope"] not in WRITE_SCOPES]
             context["write_scopes"] = [r for r in rows if r["scope"] in WRITE_SCOPES]
 
-            # Provision here rather than at token issuance so the consent
-            # screen can name the organisation the user is about to connect —
-            # and so a failure to create one surfaces before they approve,
-            # not after.
             organisation = ensure_organisation(self.request.user)
             context["organisation"] = organisation
             context["user_can_write"] = (
@@ -341,8 +308,6 @@ def make_authorization_view():
                 else False
             )
 
-            # Only offer the selector when there is a genuine choice. A single
-            # membership is stated, not presented as a decision.
             choices = organisation_choices(self.request.user)
             context["organisation_choices"] = choices if len(choices) > 1 else []
             context["selected_organisation_id"] = str(organisation.pk) if organisation else ""

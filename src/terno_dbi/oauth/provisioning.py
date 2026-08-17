@@ -1,37 +1,25 @@
-"""Creating an organisation for a user who arrives via OAuth without one.
+"""Create a personal organisation for users who arrive through OAuth without one.
 
-A user who finds Terno through Claude has no Terno account yet. They sign in (or
-sign up) through allauth, land back on the consent screen — and have no
-organisation, so there is nothing to scope a grant to. Without this the grant is
-refused and the connector is a dead end for exactly the users a directory
-listing is meant to bring in.
+A user can reach TernoDBI through an OAuth client before having a Terno
+organisation. In that case, the OAuth flow needs to create one before a grant
+can be scoped.
 
-## The rule: a personal organisation, never an existing one
+Each new user gets a personal organisation. Existing organisations are never
+selected based on email domain, since domain matching does not prove
+membership and could grant access to another organisation's data.
 
-A new user whose email domain matches an existing organisation **must not** be
-added to it. Email-domain matching is not proof of employment, and silently
-joining someone to an organisation would give them that organisation's
-datasources. Every user provisioned here gets their own organisation, exactly as
-the web signup flow does.
-
-## Why the creation itself is a hook
-
-The sequence — `LLMCredit`, `CoreOrganisation`, then the terno-ai `Organisation`
-extension whose `save()` bootstraps the membership, staff flag, `org_owner`
-group and preferences — depends on terno-ai models that this package cannot
-import. So terno-ai supplies the callable and ternodbi calls it. Configure with:
-
-    TERNO_ORG_PROVISIONER = "terno.provisioning.provision_personal_org"
-
-With no provisioner configured, `ensure_organisation` returns None and the grant
-is refused with a message telling the user to sign in to the web app once. That
-is the correct degradation: it fails closed, and it is what a deployment without
-terno-ai (a bare ternodbi install) should do.
+Organisation creation is provided by the host application through
+`TERNO_ORG_PROVISIONER`, since the required organisation models and setup logic
+are not part of TernoDBI. If no provisioner is configured, no organisation is
+created and the grant is refused.
 """
 
 import logging
 import re
 from typing import Optional
+from django.utils.text import slugify
+from django.conf import settings
+from django.utils.module_loading import import_string
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +30,8 @@ SUBDOMAIN_REGEX = re.compile(r"^(?!-)[a-z0-9-]{1,25}(?<!-)$")
 MAX_SUBDOMAIN_LENGTH = 25
 
 
-def _slug(value: str) -> str:
-    from django.utils.text import slugify
+def _slug(value: str) -> str:    
 
-    # slugify keeps underscores but the regex rejects them, which is what made
-    # 8% of a production sample fall back to a generic name. Truncation matters
-    # for the same reason: an over-long slug fails the regex and would otherwise
-    # be discarded entirely rather than shortened.
     slug = slugify(value).replace("_", "-").strip("-")
     return slug[:MAX_SUBDOMAIN_LENGTH].strip("-")
 
@@ -67,9 +50,6 @@ def generate_subdomain(seed: str, taken=None) -> str:
 
     base = _slug(seed or "")
     if not SUBDOMAIN_REGEX.match(base):
-        # Non-Latin names slugify to an empty string, so seeding from the name
-        # is not always possible. "org" plus a counter is ugly but reachable and
-        # unique, which beats refusing to create the organisation.
         base = "org"
 
     candidate, counter = base, 1
@@ -91,9 +71,6 @@ def default_org_name(user) -> str:
 
 
 def _configured_provisioner():
-    from django.conf import settings
-    from django.utils.module_loading import import_string
-
     path = getattr(settings, "TERNO_ORG_PROVISIONER", None)
     if not path:
         return None

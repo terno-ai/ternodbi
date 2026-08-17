@@ -4,10 +4,9 @@ import json
 import asyncio
 import logging
 from typing import Any, Dict, List
-
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import Tool
 from terno_dbi.mcp.context import client, describe_backend
 from terno_dbi.mcp.instructions import QUERY_INSTRUCTIONS
 from terno_dbi.mcp.surface import GUIDE_TOOL, handle_guide, register_surface
@@ -20,10 +19,9 @@ from terno_dbi.mcp.tool_meta import (
 
 logger = logging.getLogger(__name__)
 
-# `client` is a request-scoped proxy (terno_dbi/mcp/context.py), not an
-# instance. Under stdio it resolves to environment credentials exactly as
-# before; under HTTP it resolves per request, so one process can serve many
-# organisations without them sharing a credential.
+# `client` is a request-scoped proxy, not a client instance. Under stdio it
+# uses environment credentials; under HTTP it resolves credentials per request,
+# allowing one process to safely serve multiple organisations.
 
 server = Server(
     "ternodbi-query",
@@ -316,7 +314,6 @@ def _dispatch(name: str, arguments: Dict[str, Any]):
                 "count": len(columns)
             }
 
-
         elif name == "execute_query":
             datasource = arguments["datasource"]
             sql = arguments["sql"]
@@ -357,9 +354,6 @@ def _dispatch(name: str, arguments: Dict[str, Any]):
 
     except Exception as e:
         logger.exception("Error in Query MCP tool %s", name)
-        # isError=True so the client can tell this call failed. Without it a
-        # connection refusal reads as a successful call whose payload mentions
-        # an error, and the model reasons about the "result".
         return as_error_result(str(e))
 
 

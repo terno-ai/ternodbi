@@ -1,22 +1,17 @@
 """Build the OAuth discovery documents required by MCP clients.
 
-Pure functions returning dicts, so they can be tested directly against the
-relevant RFCs without a Django request.
+These are pure functions that return dictionaries, making them easy to test
+against the relevant RFCs without a Django request.
 
-The protected `/mcp` endpoint points clients to RFC 9728 metadata via
-`WWW-Authenticate`; these documents provide the discovery chain needed to
-start authentication.
+The protected `/mcp` endpoint uses `WWW-Authenticate` to point clients to the
+RFC 9728 resource metadata. That metadata points to the authorization server,
+whose RFC 8414 metadata describes its endpoints and supported features.
 
-RFC 9728 metadata is served on the resource host (`mcp.terno.ai`) and points
-to the authorization server. RFC 8414 metadata is served on the auth host
-(`app.terno.ai`) and describes its endpoints and supported features.
-
-The hosts are intentionally separate because the MCP endpoint and existing
-allauth session are served by different vhosts.
+The resource and authorization servers use separate hosts because `/mcp` and
+the existing authentication flow are served by different vhosts.
 """
 
 from typing import Any, Dict
-
 from terno_dbi.oauth.scopes import ALL_SCOPES, scope_string
 
 

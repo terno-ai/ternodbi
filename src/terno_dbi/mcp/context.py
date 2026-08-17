@@ -1,15 +1,14 @@
-"""Per-request credential resolution for MCP servers.
+"""Resolve MCP credentials per request.
 
-Replaces import-time credentials with ContextVar-based per-request identity,
-preventing cross-tenant credential sharing under HTTP.
+Uses a ContextVar to keep credentials isolated between concurrent requests,
+preventing credentials from one tenant being reused by another.
 
-ContextVar safely isolates concurrent asyncio requests. The client is created
-per request because it is lightweight and has no connection pool; do not add
-credential-based caching without benchmarking, as it could reintroduce
-cross-tenant credential leakage.
+A client is created for each request. It is lightweight and does not maintain a
+connection pool, so credential-based caching should not be added without
+careful consideration.
 
-HTTP must call require_request_credentials() at startup so missing request
-credentials raise an error instead of falling back to process-level credentials.
+HTTP transports must call require_request_credentials() at startup to ensure
+requests cannot fall back to process-level credentials.
 """
 
 import logging
@@ -18,7 +17,6 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Iterator, Optional
-
 from terno_dbi.client import TernoDBIClient
 
 logger = logging.getLogger(__name__)

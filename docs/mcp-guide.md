@@ -104,3 +104,21 @@ Use this if you are modifying TernoDBI code locally.
 *   **Authentication Failed**: Check that your `TERNODBI_API_KEY` matches a valid active token in the database.
 *   **Module Not Found**: If using local dev, ensure you ran `pip install -e .` and are pointing to the `dbi-mcp` binary in your virtualenv.
 *   **Memory tools return "no organisation/user" errors**: Your token wasn't minted with `--org`/`--user`. Re-issue it — see `issue_token` above.
+*   **A user was just made an Org Admin, but write tools still don't appear**: Expected, not a fault — they need to **disconnect and reconnect** Terno in their client. See below.
+*   **Write tools vanished mid-conversation**: The user's Org Admin role was removed. Reconnecting will *not* help; an administrator has to restore the role in Terno.
+
+### Why write access changes without the connection changing
+
+Over an OAuth connection, write needs two things at once:
+
+| | what it is | when it's decided |
+|---|---|---|
+| **scope** (`admin:write`, `admin:sync`) | what the *client* was granted at consent | frozen into the token when the user connects |
+| **Org Admin group** | what the *user* may do in this organisation | re-read from the database on **every request** |
+
+Because only the second is live, the two directions are not symmetric:
+
+*   **Losing Org Admin takes effect immediately.** Write tools stop being listed and stop working on the very next request, without waiting for the token to expire (up to 8 hours). Read access is unaffected — demotion is not disconnection.
+*   **Gaining Org Admin changes nothing until reconnect.** A connection made by a non-admin was minted with the write scopes stripped, and the consent screen said so at the time ("the connection will be read-only"). Granting the role later does not silently widen a grant the user already approved — so the fix is to reconnect and approve again.
+
+This is why "I made them an admin and it still won't write" is expected behaviour rather than a bug.

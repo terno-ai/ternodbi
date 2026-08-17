@@ -1168,3 +1168,161 @@ def test_consent_screen_makes_no_external_requests():
     html = _render_consent()
     external = re.findall(r'(?:src|href)="(?!#)(https?:|//)[^"]*"', html)
     assert not external, f"consent screen loads external resources: {external}"
+
+
+# ------------------------------------------------- write access over time
+#
+# Write needs two halves that answer different questions: the *scope* is what
+# the client was granted at consent and is frozen into the token; the *group* is
+# what the user may do right now and is re-read on every request. These four
+# cases are the whole matrix.
+
+@pytest.fixture
+def connectable(db):
+    from django.contrib.auth.models import Group, User
+
+    from terno_dbi.core.models import CoreOrganisation, OrganisationUser
+
+    owner = User.objects.create(username="wa-owner")
+    org = CoreOrganisation.objects.create(name="Acme", subdomain="wa-acme", owner=owner)
+    user = User.objects.create(username="wa-user")
+    OrganisationUser.objects.create(user=user, organisation=org)
+    group, _ = Group.objects.get_or_create(name="Org Admin")
+    return {"org": org, "user": user, "group": group}
+
+
+_ALL_REQUESTED = ["query:read", "query:execute", "admin:read", "admin:write", "admin:sync"]
+
+
+def _mint(user, org):
+    from terno_dbi.oauth.minting import (
+        generate_oauth_access_token,
+        mint_service_token_for_key,
+    )
+
+    return mint_service_token_for_key(
+        generate_oauth_access_token(), user, org, _ALL_REQUESTED
+    )
+
+
+def _per_request(token):
+    """What the transport recomputes on every request."""
+    from terno_dbi.oauth.minting import token_grant_summary
+
+    token.refresh_from_db()
+    return token_grant_summary(token)
+
+
+def _tool_names(token):
+    from terno_dbi.mcp.merged_server import visible_tools
+
+    summary = _per_request(token)
+    return {t.name for t in visible_tools(summary["scopes"], summary["can_write"])}
+
+
+@pytest.mark.django_db
+def test_write_case1_non_admin_never_receives_write(connectable):
+    """Consent alone cannot escalate: the scopes are stripped at mint."""
+    token = _mint(connectable["user"], connectable["org"])
+
+    assert not ({ADMIN_WRITE, ADMIN_SYNC} & set(token.scopes))
+    assert _per_request(token)["can_write"] is False
+    assert "delete_datasource" not in _tool_names(token)
+
+
+@pytest.mark.django_db
+def test_write_case2_admin_receives_write(connectable):
+    connectable["user"].groups.add(connectable["group"])
+    token = _mint(connectable["user"], connectable["org"])
+
+    assert {ADMIN_WRITE, ADMIN_SYNC} <= set(token.scopes)
+    assert _per_request(token)["can_write"] is True
+    assert "delete_datasource" in _tool_names(token)
+
+
+@pytest.mark.django_db
+def test_write_case3_demotion_takes_effect_without_reconnecting(connectable):
+    """The token still carries admin:write — the group is what changed.
+
+    Because the group is re-read per request, write dies on the next call rather
+    than lasting until the token expires (up to 8 hours). The listing has to
+    agree: showing a tool that can only ever fail wastes the model's turn and
+    reports the wrong cause.
+    """
+    connectable["user"].groups.add(connectable["group"])
+    token = _mint(connectable["user"], connectable["org"])
+    assert "delete_datasource" in _tool_names(token)
+
+    connectable["user"].groups.remove(connectable["group"])
+
+    assert {ADMIN_WRITE, ADMIN_SYNC} <= set(token.scopes), "scopes should be untouched"
+    assert _per_request(token)["can_write"] is False
+    assert "delete_datasource" not in _tool_names(token)
+    # readOnlyHint: true but gated on admin:write — the annotation-based check
+    # misses it, so only subtracting the scope hides it.
+    assert "validate_connection" not in _tool_names(token)
+    # Read access is unaffected: demotion is not disconnection.
+    assert "execute_query" in _tool_names(token)
+
+
+@pytest.mark.django_db
+def test_write_case4_promotion_does_not_upgrade_a_live_connection(connectable):
+    """The user is an admin now, but consented to a read-only connection — the
+    screen said so. Upgrading it silently would grant access the user never
+    approved, so it takes a reconnect."""
+    token = _mint(connectable["user"], connectable["org"])
+    assert _per_request(token)["can_write"] is False
+
+    connectable["user"].groups.add(connectable["group"])
+
+    summary = _per_request(token)
+    assert summary["is_org_admin"] is True
+    assert summary["can_write"] is False
+    assert "delete_datasource" not in _tool_names(token)
+
+    # Reconnecting is what grants it.
+    assert {ADMIN_WRITE, ADMIN_SYNC} <= set(_mint(connectable["user"], connectable["org"]).scopes)
+
+
+@pytest.mark.django_db
+def test_withdrawn_write_is_reported_as_withdrawn_not_ungranted(connectable):
+    """"was not granted" sends the user to reconnect, which cannot fix a
+    demotion. The message has to name the real cause."""
+    import asyncio
+
+    from terno_dbi.mcp import merged_server
+    from terno_dbi.mcp.context import request_credentials
+
+    connectable["user"].groups.add(connectable["group"])
+    token = _mint(connectable["user"], connectable["org"])
+    connectable["user"].groups.remove(connectable["group"])
+
+    summary = _per_request(token)
+    with request_credentials(
+        api_key="k", can_write=summary["can_write"], scopes=summary["scopes"]
+    ):
+        result = asyncio.run(merged_server.call_tool("delete_datasource", {}))
+
+    text = " ".join(c.text for c in result.content).lower()
+    assert "no longer an administrator" in text
+    assert "was not granted" not in text
+
+
+def test_the_promotion_asymmetry_is_documented():
+    """A user promoted to Org Admin keeps getting write refusals until they
+    reconnect. That is correct — their consent was for a read-only connection —
+    but it reads as a fault, so both the agent-facing docs resource and the
+    human-facing guide have to say so. An undocumented correct behaviour gets
+    "fixed" by the next person to hit it.
+    """
+    from terno_dbi.mcp.instructions import DOCS_LONG_FORM
+
+    assert "## When write tools disappear" in DOCS_LONG_FORM
+    assert "reconnect" in DOCS_LONG_FORM.lower()
+
+    guide = pathlib.Path(__file__).resolve().parents[2] / "docs/mcp-guide.md"
+    if not guide.is_file():
+        pytest.skip("docs/mcp-guide.md not present")
+    text = guide.read_text().lower()
+    assert "org admin" in text
+    assert "disconnect and reconnect" in text

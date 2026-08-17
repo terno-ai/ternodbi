@@ -1,51 +1,34 @@
-"""Streamable HTTP transport, and the authentication that must travel with it.
+"""Streamable HTTP transport and request authentication.
 
-## Why auth lives here and not in Django middleware
+TernoDBI is a standalone ASGI application and can be mounted inside another
+application's ASGI stack. When mounted under a ProtocolTypeRouter["http"],
+the /mcp endpoint is handled directly by TernoDBI and does not pass through
+the host application's Django middleware.
 
-The app is mounted in terno-ai's `mysite/asgi.py` under
-`ProtocolTypeRouter["http"]`, which means `/mcp` never enters Django's URL
-resolver — and therefore never passes through `MIDDLEWARE`.
-`ServiceTokenMiddleware` does not run. `SubdomainOrganisationMiddleware` does not
-run. Nothing sets `request.service_token`, because no Django `request` is ever
-built.
+Authentication is therefore handled at the transport layer using the same
+token verification logic used by the middleware.
 
-That is not an oversight in the mount: `StreamableHTTPSessionManager` is a raw
-ASGI app that needs `send`/`receive` to stream, which a Django view cannot give
-it. So the transport has to authenticate itself, using the same `verify_token`
-call the middleware uses.
+The session manager is started lazily because a mounted ASGI application may
+not have its own Starlette lifespan. The manager is started once on the first
+request and kept running for subsequent requests.
 
-## Lazy session-manager startup
-
-`StreamableHTTPSessionManager.handle_request` requires `run()` to have been
-entered — it raises otherwise, in both stateful and stateless mode. `run()` is
-designed for a Starlette lifespan, and there is no lifespan for a sub-app
-mounted inside `ProtocolTypeRouter`. So it is entered once, lazily, in a
-long-lived background task on the first request, guarded by a lock.
-
-## Failing closed
-
-`require_request_credentials()` is called when the app is built, so an
-unauthenticated path cannot silently fall back to the server's own environment
-credentials — which would run a stranger's request as Terno. After that, an
-unscoped resolution raises rather than transacting.
+Credentials are required for each request. If they cannot be resolved, the
+request fails rather than falling back to server-level credentials.
 """
 
 import asyncio
 import json
 import logging
 from typing import Any, Awaitable, Callable, Dict, Optional
-
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-
 from terno_dbi.mcp.context import request_credentials, require_request_credentials
 
 logger = logging.getLogger(__name__)
 
 MCP_PATH = "/mcp"
 
-# RFC 9728: the 401 points clients at the resource metadata, from which they
-# discover the authorization server. Claude Code runs sign-in automatically on
-# seeing this, rather than surfacing a bare 401 to the user.
+# RFC 9728: the 401 response points clients to the resource metadata, where
+# they can discover the authorization server and start the authentication flow.
 PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource"
 
 
@@ -89,10 +72,9 @@ def default_token_resolver(resource_url: str = "") -> Callable[[str], Awaitable[
         if token is None:
             raise TokenRejected("Invalid or expired token")
         update_token_usage(token)
-
-        # Write access needs both halves, and they answer different questions:
-        # the scope is what the *client* was granted at consent, the group is
-        # what the *user* may do in this org. Either alone leaves a hole.
+        # Write access requires both checks: the scope confirms what the client was
+        # granted, while the group confirms what the user is allowed to do in this org.
+        # Either check alone is insufficient.
         summary = token_grant_summary(token)
         return {
             "api_key": token_str,
@@ -113,15 +95,15 @@ def build_asgi_app(
     strict_credentials: bool = True,
     in_process: bool = False,
 ):
-    """Return a raw ASGI app serving `server` over Streamable HTTP.
+    """Return a raw ASGI app that serves server over Streamable HTTP.
 
-    `token_resolver` is injectable so the transport can be tested without a
-    database; it defaults to the real `ServiceToken` lookup.
+        token_resolver can be injected for testing and defaults to the real
+        ServiceToken lookup.
 
-    `in_process=True` when mounted inside the Django process that serves the
-    TernoDBI API — it stops every tool call making an HTTP request to
-    `127.0.0.1` from the process handling it, which wastes a worker per call and
-    deadlocks once concurrent calls exceed the worker count.
+        Set in_process=True when the app is mounted in the same process as the
+        TernoDBI API. This keeps tool calls in-process instead of making HTTP requests
+        back to 127.0.0.1, which can consume an extra worker per call and deadlock
+        under concurrent load.
     """
     if strict_credentials:
         require_request_credentials(True)
@@ -196,10 +178,8 @@ def build_asgi_app(
             api_key=resolved["api_key"],
             base_url=resolved.get("base_url", base_url),
             can_write=resolved.get("can_write", False),
-            # frozenset() — a grant that permits nothing — rather than None,
-            # which would mean "unscoped, allow everything". Defaulting the
-            # wrong way here would open every tool to a token whose resolver
-            # returned no scopes.
+            # Use frozenset() for no permissions. None means "unscoped" and allows
+            # everything, so returning None here would accidentally grant full access.
             scopes=resolved.get("scopes", frozenset()),
         ):
             await manager.handle_request(scope, receive, send)

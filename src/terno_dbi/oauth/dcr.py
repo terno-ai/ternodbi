@@ -1,15 +1,15 @@
-"""Dynamic Client Registration (RFC 7591) — validation without Django.
+"""Dynamic Client Registration (RFC 7591) validation.
 
-Client's has no client ID until it registers. DCR is an unauthenticated POST
-that creates a client record and returns credentials.
+DCR is an unauthenticated request because the client does not have a client ID
+until registration succeeds. This module validates registration data without
+depending on Django.
 
-Redirect URIs: Claude Code uses a random localhost callback port unless
---callback-port is set. Allow any localhost port per RFC 8252 §7.3; require
-HTTPS for all non-loopback URIs to prevent authorization-code exposure.
+Loopback redirect URIs may use any port, as clients such as Claude Code can use
+a random localhost callback port (RFC 8252 §7.3). Non-loopback redirect URIs
+must use HTTPS.
 
-Rate limiting: DCR is intentionally unauthenticated, so it can be abused for
-unbounded client creation. check_registration_rate is the hook for the caller
-to enforce registration limits.
+Registration is unauthenticated, so callers should use `check_registration_rate`
+to limit client creation and prevent abuse.
 """
 
 import ipaddress
@@ -72,9 +72,6 @@ def validate_redirect_uri(uri: str) -> str:
                                   error="invalid_redirect_uri")
 
     if parsed.scheme == "http":
-        # http is acceptable only on loopback, where the code cannot leave the
-        # machine. Anywhere else it would put an authorization code on the wire
-        # in plaintext.
         if not _is_loopback(parsed):
             raise InvalidRegistration(
                 f"http redirect_uri is only allowed on loopback, got: {uri}",

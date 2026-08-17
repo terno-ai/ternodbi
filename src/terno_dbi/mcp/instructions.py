@@ -197,4 +197,28 @@ did not know mattered.
 
 Because this text changes behaviour for every user in the organisation, show
 the requesting user the exact wording before writing it.
+
+## When write tools disappear
+
+Write access needs two things at once: the connection must have been granted
+write scopes at consent, and the user must be an **Org Admin** in this
+organisation *right now*. The first is fixed when the connection is made; the
+second is re-checked on every request. So the tools available to you can change
+mid-conversation without the user doing anything to the connection.
+
+| what changed | effect |
+|---|---|
+| user loses Org Admin | write tools disappear immediately; read is unaffected |
+| user gains Org Admin | **nothing changes until they reconnect** |
+
+The second row is the one that looks like a bug and is not. A connection minted
+while the user was not an admin carries no write scopes, and the consent screen
+told them so — "the connection will be read-only". Granting the role later does
+not silently widen a grant the user already approved.
+
+So if a user says they have just been made an administrator and writes are still
+refused, do not retry and do not report a fault: tell them to disconnect and
+reconnect Terno in their client. If instead a write tool refuses with *"you are
+no longer an administrator"*, reconnecting will **not** help — their role was
+removed, and only an administrator can restore it in Terno.
 """

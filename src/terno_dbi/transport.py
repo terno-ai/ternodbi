@@ -1,29 +1,16 @@
-"""How `TernoDBIClient` reaches the TernoDBI API.
+"""Transport layer for `TernoDBIClient`.
 
-Two transports, the same four methods.
+Supports two transports with the same API:
 
-**`HttpTransport`** — the default, and what stdio and any out-of-process caller
-uses. A thin pass-through to `requests`.
+- `HttpTransport` — the default for stdio and out-of-process clients. Uses
+  `requests` to call the TernoDBI API over HTTP.
+- `InProcessTransport` — used when the MCP server runs in the same Django
+  process as the API. Avoids HTTP requests to `127.0.0.1`, which would consume
+  another worker and can deadlock under concurrent tool calls.
 
-**`InProcessTransport`** — for when the MCP server runs *inside* the Django
-process that serves the API. Without it, mounting `/mcp` in terno-ai means every
-tool call makes an HTTP request to `127.0.0.1` from the very process handling
-it: a real socket, a second worker occupied for the duration, and a deadlock
-risk once concurrent tool calls exceed the worker count. That last part is the
-reason this exists — it is not only a wasted hop.
-
-## Why it dispatches through the URL resolver
-
-It would be faster to call `services.query` and `services.schema_utils`
-directly, and it would also be a second implementation of every endpoint's
-permission logic. `@require_service_auth` resolves datasources and checks table
-and column access; `@require_scope` enforces scopes; the views themselves
-normalise arguments and shape responses. Re-deriving that would mean the
-in-process path could drift from the HTTP path — and a drift in *this* code is a
-permission bug.
-
-So it resolves the same URL against the same URLconf and calls the same view,
-skipping only the socket. One implementation, two entry points.
+The in-process transport uses Django's URL resolver instead of calling service
+functions directly. This keeps authentication, permissions, argument handling,
+and response formatting on the same code path as HTTP requests.
 """
 
 import json as _json

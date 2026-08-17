@@ -1,27 +1,18 @@
-"""Display titles, behaviour annotations, and output schemas for every tool.
+"""Metadata and output schemas for all MCP tools.
 
-Kept as one table rather than inline on each `Tool(...)` for three reasons: the
-annotations are a directory-submission gate and reviewing them means reading
-them side by side; the same table serves both stdio servers today and the merged
-hosted server later; and `apply_tool_meta` can then *fail* on a tool with no
-entry, so a new tool cannot quietly ship without a title or a `readOnlyHint`.
+Kept in one table so tool titles, annotations, and schemas can be reviewed
+together and applied consistently across stdio and hosted servers.
+`apply_tool_meta` also fails if a tool has no entry, preventing new tools from
+shipping without required metadata such as a title or `readOnlyHint`.
 
-## On the output schemas being permissive
-
-The MCP SDK validates `structuredContent` against `outputSchema` and turns a
-mismatch into a tool error. A tight schema would therefore convert every
-backend response shape change — and every error path, which returns
-`{"error": ...}` — into a failed call.
-
-So each schema below documents the keys a caller can expect, sets no `required`,
-and leaves `additionalProperties` open. It describes what exists rather than
-constraining it, which is what Phase 0.3 asked for. Tightening a schema is a
-deliberate later decision with a test behind it, not a default.
+Output schemas are intentionally permissive. The MCP SDK validates
+`structuredContent` against the schema, while backend responses and error
+responses may vary in shape. The schemas therefore document expected keys
+without requiring them or rejecting additional fields.
 """
 
 import json
 from typing import Any, Dict, List, Tuple
-
 from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
 
 _ERROR = {
@@ -45,11 +36,6 @@ def _out(description: str, **props: Dict[str, Any]) -> Dict[str, Any]:
 _COUNT = {"type": "integer", "description": "Number of items returned."}
 _ROWS = {
     "type": "array",
-    # Verified against a live response, not assumed: rows come back as objects
-    # keyed by column name — [{"status": "paid", "n": 3}] — not as positional
-    # arrays. An earlier version of this schema said `items: {type: array}`,
-    # which made the SDK reject every successful `execute_query` result with an
-    # output-validation error.
     "description": "Result rows, each an object keyed by column name.",
     "items": {"type": "object", "additionalProperties": True},
 }
@@ -128,9 +114,6 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
     },
     "execute_query": {
         "title": "Run a SQL query",
-        # readOnlyHint is verified, not assumed: SQLShield parses every
-        # statement, requires a single SELECT, and rejects DML/DDL anywhere in
-        # the tree before execution. See docs/mcp-token-type-shield-asgi.md §2.
         "hints": dict(readOnlyHint=True, destructiveHint=False, idempotentHint=False, openWorldHint=True),
         "output": _out(
             "Query results.",
@@ -242,9 +225,6 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
     },
     "sync_metadata": {
         "title": "Sync schema metadata",
-        # Non-destructive on the stated assumption that a sync does not clobber
-        # human-written descriptions. Flagged in IMPLEMENTATION-PLAN.md §0.2 as
-        # a judgment call — if it can overwrite them, this becomes true.
         "hints": dict(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True),
         "output": _out(
             "What the sync discovered and changed.",
@@ -342,9 +322,6 @@ def apply_tool_meta(tools: List[Tool]) -> List[Tool]:
         decorated.append(
             tool.model_copy(
                 update={
-                    # Both spellings on purpose: `title` is where the current
-                    # spec puts the display name, `annotations.title` is where
-                    # older clients still read it from.
                     "title": meta["title"],
                     "annotations": ToolAnnotations(title=meta["title"], **meta["hints"]),
                     "outputSchema": meta["output"],
@@ -355,18 +332,13 @@ def apply_tool_meta(tools: List[Tool]) -> List[Tool]:
 
 
 def as_error_result(message: str, **extra: Any) -> "CallToolResult":
-    """Return a failed tool call, with `isError` actually set.
+    """Return a failed tool call with `isError` set.
 
-    Handlers used to catch every exception and return `{"error": ...}` as a
-    normal result. MCP clients read `isError` to decide whether a call failed, so
-    a connection refusal looked like a successful call whose payload happened to
-    mention an error — the model would go on to reason about the "result".
+    Using `CallToolResult` lets MCP clients correctly identify the call as failed
+    instead of treating an `{"error": ...}` payload as a successful result.
 
-    Returning a `CallToolResult` also short-circuits the SDK's output
-    validation, which is what you want: an error payload should not have to
-    satisfy the tool's success schema. (It is also what would let those schemas
-    be tightened later — they are currently permissive partly to accommodate
-    error dicts flowing through the success path.)
+    Error responses also bypass success output-schema validation, so a tool's
+    success schema does not need to describe error payloads.
     """
     payload: Dict[str, Any] = {"error": message, **extra}
     return CallToolResult(
@@ -377,16 +349,11 @@ def as_error_result(message: str, **extra: Any) -> "CallToolResult":
 
 
 def as_tool_result(result: Any) -> Tuple[List[TextContent], Dict[str, Any]]:
-    """Return a handler result as the (content, structuredContent) pair.
+    """Return a handler result as `(content, structuredContent)`.
 
-    Once a tool declares an `outputSchema`, the SDK rejects a call that returns
-    no structured content — so returning text alone is no longer an option for
-    any tool in `TOOL_META`.
-
-    `structuredContent` must be a JSON object. Handlers that pass a backend
-    response straight through can yield a list or a scalar, so anything that is
-    not a dict is wrapped under `result` rather than allowed to fail validation
-    at the transport layer.
+    Tools with an `outputSchema` must return structured content. Since MCP requires
+    `structuredContent` to be a JSON object, non-dict backend responses are wrapped
+    under `result` before being returned.
     """
     structured = result if isinstance(result, dict) else {"result": result}
     text = json.dumps(structured, indent=2, default=str)
@@ -394,28 +361,15 @@ def as_tool_result(result: Any) -> Tuple[List[TextContent], Dict[str, Any]]:
 
 
 async def dispatch_in_worker(dispatch, name: str, arguments: Dict[str, Any]):
-    """Run a synchronous tool dispatch off the event loop.
+    """Run synchronous tool dispatch outside the event loop.
 
-    Tool handlers are `async def`, but everything they call is synchronous: the
-    client, and — under the in-process transport — the Django views and the ORM
-    behind them. Django refuses sync ORM access from an async context outright
-    (`SynchronousOnlyOperation`), so without this **every tool call fails** when
-    the server is mounted inside Django.
+    Tool handlers are async, but the client, Django views, and ORM are synchronous.
+    Running them directly in the event loop causes `SynchronousOnlyOperation` and
+    would block other MCP sessions while queries are running.
 
-    Two reasons this is a thread rather than an `DJANGO_ALLOW_ASYNC_UNSAFE`
-    escape hatch:
-
-    1. That flag suppresses the error without fixing what it warns about — the
-       ORM would still block the event loop.
-    2. A SQL connector runs slow queries by definition. Blocking the loop for
-       the duration would stall every other session in the process, including
-       the keep-alives that stop clients timing out.
-
-    `thread_sensitive=False` so calls run concurrently in a pool rather than
-    serialising through one shared thread — which would make a single slow query
-    block every other tool call in the process. The trade-off is that each pool
-    thread holds its own database connection, so expired ones are released after
-    every call.
+    The dispatch runs in a thread pool with `thread_sensitive=False` so tool calls
+    can run concurrently. This avoids the need for `DJANGO_ALLOW_ASYNC_UNSAFE` and
+    prevents slow queries from blocking the event loop.
     """
     from asgiref.sync import sync_to_async
 
@@ -430,7 +384,7 @@ async def dispatch_in_worker(dispatch, name: str, arguments: Dict[str, Any]):
                 from django.db import close_old_connections
 
                 close_old_connections()
-            except Exception:  # pragma: no cover - Django not configured (stdio)
+            except Exception:
                 pass
 
     return await sync_to_async(_run, thread_sensitive=False)()

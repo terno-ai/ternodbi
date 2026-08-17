@@ -1,33 +1,28 @@
-"""The single hosted server: one endpoint carrying both tool registries.
+"""The hosted MCP server combining query and admin tools on one endpoint.
 
-The `query`/`admin` split exists because stdio has no notion of identity — the
-only way to separate read from write was two processes holding two tokens. Over
-HTTP the grant carries that, so the split becomes two Connect buttons, two OAuth
-clients, and two directory listings for one product. Supermetrics runs 14 tools
-spanning read and write on one endpoint, including one that spends real money.
+The query/admin split is useful for stdio, where separate processes and tokens
+provide the permission boundary. Over HTTP, OAuth scopes provide that boundary,
+so both tool sets can be exposed through a single endpoint.
 
-This module composes rather than redefines: tool definitions come from
-`query_server.own_tools()` and `admin_server.own_tools()`, and dispatch delegates
-to the same handlers the stdio servers use. There is no third copy to keep in
-sync, and `dbi-mcp query` / `dbi-mcp admin` keep working unchanged for local use.
+This module only composes the existing servers. Tool definitions come from
+`query_server.own_tools()` and `admin_server.own_tools()`, and dispatch uses
+the same handlers as the stdio servers. The existing `dbi-mcp query` and
+`dbi-mcp admin` commands remain unchanged.
 
-**Write tools are omitted from `tools/list` when the grant does not allow
-writes** — better than listing them and failing the call, and it keeps the
-common read-only case cheaper in context.
+Write tools are excluded from `tools/list` when the current grant does not
+allow writes, so clients only see tools they can use.
 """
 
 import asyncio
 import logging
 import sys
 from typing import Any, Dict, List, Optional
-
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool
-
 from terno_dbi.mcp import admin_server, query_server
 from terno_dbi.mcp.context import can_write, current_scopes
-from terno_dbi.oauth.scopes import TOOL_SCOPES, tool_is_allowed
+from terno_dbi.oauth.scopes import TOOL_SCOPES, WRITE_SCOPES, tool_is_allowed
 from terno_dbi.mcp.instructions import MERGED_INSTRUCTIONS
 from terno_dbi.mcp.surface import GUIDE_TOOL, handle_guide, register_surface
 from terno_dbi.mcp.tool_meta import (
@@ -46,14 +41,13 @@ register_surface(server)
 
 
 def _is_write_tool(name: str) -> bool:
-    """Whether a tool mutates state, per its annotations.
+    """Whether a tool mutates state, based on its annotations.
 
-    Used for the defence-in-depth check at call time. **Not** used to decide
-    what `tools/list` shows — that is `TOOL_SCOPES`, because the two disagree:
-    `validate_connection` is annotated `readOnlyHint: true` (it changes nothing
-    in Terno) but its endpoint is guarded by `admin:write`. Filtering on the
-    annotation would list it for a read-only grant and then 403.
-    """
+    Used as a defence-in-depth check when a tool is called. It does not control
+    `tools/list`; that is handled by `TOOL_SCOPES`, since annotations and access
+    requirements are not always the same. For example, `validate_connection` is
+    read-only but requires the `admin:write` scope.
+"""
     meta = TOOL_META.get(name)
     return bool(meta) and not meta["hints"]["readOnlyHint"]
 
@@ -63,12 +57,32 @@ def all_tools() -> List[Tool]:
     return [GUIDE_TOOL, *query_server.own_tools(), *admin_server.own_tools()]
 
 
-def visible_tools(scopes: Optional[frozenset]) -> List[Tool]:
+def effective_scopes(
+    scopes: Optional[frozenset], writable: bool = True
+) -> Optional[frozenset]:
+    """Return the scopes the current grant can use.
+
+    Scopes are fixed when the token is granted, but write access is checked against
+    the user's current organisation role. If an admin is demoted, their
+    `admin:write` scope remains on the token but is temporarily inactive.
+
+    Keeping this effective scope set in one place ensures `tools/list` and
+    call-time permission checks use the same access rules. It also handles tools
+    such as `validate_connection`, which is marked read-only but requires
+    `admin:write`.
+    """
+    if scopes is None or writable:
+        return scopes
+    return scopes - WRITE_SCOPES
+
+
+def visible_tools(scopes: Optional[frozenset], writable: bool = True) -> List[Tool]:
     """The tools a grant may use.
 
     `scopes=None` means stdio — no grant applies, so everything is shown.
     """
     tools = all_tools()
+    scopes = effective_scopes(scopes, writable)
     if scopes is not None:
         tools = [t for t in tools if tool_is_allowed(t.name, scopes)]
     return apply_tool_meta(tools)
@@ -77,17 +91,21 @@ def visible_tools(scopes: Optional[frozenset]) -> List[Tool]:
 @server.list_tools()
 async def list_tools() -> List[Tool]:
     scopes = current_scopes()
-    tools = visible_tools(scopes)
+    writable = can_write()
+    tools = visible_tools(scopes, writable)
+    if scopes is not None and not writable and (scopes & WRITE_SCOPES):
+        logger.info(
+            "Withholding write tools: the grant carries %s but the user is no "
+            "longer an Org Admin.",
+            " ".join(sorted(scopes & WRITE_SCOPES)),
+        )
     logger.debug(
-        "tools/list: %d tools (scopes=%s)",
-        len(tools), "unscoped" if scopes is None else sorted(scopes),
+        "tools/list: %d tools (scopes=%s, writable=%s)",
+        len(tools), "unscoped" if scopes is None else sorted(scopes), writable,
     )
     return tools
 
 
-# Built once at import. Both registries are checked for name collisions here
-# rather than at request time, so a collision introduced later fails loudly at
-# startup instead of silently routing to whichever module happens to win.
 _QUERY_NAMES = {t.name for t in query_server.own_tools()}
 _ADMIN_NAMES = {t.name for t in admin_server.own_tools()}
 _COLLISIONS = _QUERY_NAMES & _ADMIN_NAMES
@@ -100,22 +118,33 @@ if _COLLISIONS:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: Dict[str, Any]):
-    # Reachable only if a client calls a tool it was never shown — a stale
-    # tools/list, or a client ignoring it. Checked again here rather than
-    # trusting that filtering the listing was enough.
     scopes = current_scopes()
-    if scopes is not None and not tool_is_allowed(name, scopes):
+    writable = can_write()
+    if scopes is not None and not tool_is_allowed(name, effective_scopes(scopes, writable)):
         required = TOOL_SCOPES.get(name)
-        logger.warning("Refused %s: grant lacks %s", name, required)
-        return as_error_result(
-            f"'{name}' requires the '{required}' scope, which this connection "
-            f"was not granted."
-            if required
-            else f"'{name}' is not available to this connection.",
-            required_scope=required,
-        )
+        withdrawn = bool(required and required in WRITE_SCOPES and required in scopes)
+        if withdrawn:
+            logger.warning(
+                "Refused %s: '%s' is in the grant but the user is no longer an "
+                "Org Admin.", name, required,
+            )
+            message = (
+                f"'{name}' needs write access. This connection was granted it, "
+                f"but you are no longer an administrator of this organisation, "
+                f"so write access is suspended. An administrator can restore it "
+                f"in Terno — reconnecting will not."
+            )
+        else:
+            logger.warning("Refused %s: grant lacks %s", name, required)
+            message = (
+                f"'{name}' requires the '{required}' scope, which this connection "
+                f"was not granted."
+                if required
+                else f"'{name}' is not available to this connection."
+            )
+        return as_error_result(message, required_scope=required)
 
-    if _is_write_tool(name) and not can_write():
+    if _is_write_tool(name) and not writable:
         logger.warning("Refused write tool %s: grant is read-only", name)
         return as_error_result(
             f"'{name}' requires write access, which this connection was not granted."

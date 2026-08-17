@@ -2,12 +2,13 @@ from django.apps import AppConfig
 
 
 class TernoDbiOAuthConfig(AppConfig):
-    """Registered as an app so its templates are discoverable.
+    """Django app used to provide the OAuth consent template.
 
-    It has no models — the only reason it is in `INSTALLED_APPS` is the
-    app-directories template loader, which is how
-    `templates/oauth2_provider/authorize.html` overrides DOT's consent screen.
-    That override only works if this app is listed *before* `oauth2_provider`.
+    This app has no models. It is included in `INSTALLED_APPS` so Django can find
+    `templates/oauth2_provider/authorize.html`, which overrides DOT's default
+    consent screen.
+
+    It must be listed before `oauth2_provider` so the override takes precedence.
     """
 
     name = "terno_dbi.oauth"

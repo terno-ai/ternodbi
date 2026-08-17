@@ -1,28 +1,13 @@
-"""Letting a multi-organisation user choose which one to connect.
+"""Let a user choose which organisation to connect for OAuth.
 
-Before this, `resolve_organisation` picked the oldest membership and logged a
-warning. That warning fired on the first real Claude connect against a live
-server, so it was the default experience, not an edge case.
+Users may belong to multiple organisations, so the organisation cannot be
+selected automatically. The choice must survive from the consent screen to
+token exchange, which happens as a separate back-channel request without the
+user's session cookie. It is therefore stored on the OAuth `Grant`.
 
-## Where the choice has to live
-
-The consent screen is a browser POST; the token exchange that follows is a
-**back-channel POST from Anthropic's server with no session cookie**. So the
-Django session cannot carry the choice — it has to be persisted on the `Grant`
-row that the authorization code refers to.
-
-DOT's `Grant.claims` is a pass-through `TextField` for OIDC claims, and
-`AllowForm` already round-trips it. The choice is merged in under a namespaced
-key so a future OIDC use can coexist.
-
-## The choice is untrusted input
-
-`claims` is a hidden form field in a POST from the user's browser. Anyone can
-edit it. So the organisation id is validated against `OrganisationUser` **twice**
-— once when the form is submitted, once again when the code is redeemed — and a
-value the user is not a member of is discarded rather than honoured. Validating
-only at submission would mean a tampered hidden field became a grant for someone
-else's organisation.
+The selected organisation is treated as untrusted input and validated against
+the user's `OrganisationUser` membership both when submitted and when the
+authorization code is redeemed.
 """
 
 import json
@@ -118,7 +103,7 @@ def organisation_from_grant(user, code, application):
     """The validated organisation recorded against an authorization code."""
     try:
         from oauth2_provider.models import get_grant_model
-    except ImportError:  # pragma: no cover
+    except ImportError:
         return None
 
     grant = get_grant_model().objects.filter(code=code, application=application).first()

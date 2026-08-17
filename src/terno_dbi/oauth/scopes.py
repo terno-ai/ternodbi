@@ -1,39 +1,19 @@
-"""The OAuth scopes, and which tool each one gates.
+"""OAuth scopes and the tools they grant access to.
 
-## These are the scopes that already exist
+OAuth uses the existing `ServiceToken.scopes` values and `@require_scope`
+checks: `query:read`, `query:execute`, `admin:read`, `admin:write`, and
+`admin:sync`. This avoids introducing a second scope system.
 
-`ServiceToken.scopes` and `@require_scope` were built before any of this and are
-enforced across 11 views today. So the OAuth grant declares **those** names —
-`query:read`, `query:execute`, `admin:read`, `admin:write`, `admin:sync` — and
-maps straight onto `ServiceToken.scopes`. Inventing a parallel `ternodbi:*`
-vocabulary would mean two systems to keep in agreement.
+`TOOL_SCOPES` is based on the scopes required by the views each tool calls.
+`validate_connection` is a notable exception: it is read-only by annotation
+but requires `admin:write` at the endpoint.
 
-## Where the mapping comes from
+The query service does not use `@require_scope`, so `query:read` and
+`query:execute` are enforced at the MCP layer.
 
-`TOOL_SCOPES` is transcribed from the `@require_scope` decorators on the views
-each tool actually calls, not from what the tool sounds like it should need. Two
-consequences worth knowing:
-
-- **`validate_connection` requires `admin:write`**, even though it only tests a
-  connection and is annotated `readOnlyHint: true`. Testing a connection changes
-  nothing in Terno, so the annotation is right — but the endpoint behind it is
-  guarded by `admin:write`, so a read-only grant cannot reach it. Filtering on
-  the annotation instead of on this table would list it and then 403.
-- **The query service has no `@require_scope` at all.** `query:read` and
-  `query:execute` are declared here and enforced *at the MCP layer*, not by the
-  Django view.
-
-## Why MCP-layer enforcement is sufficient for these tokens
-
-An OAuth bearer can only ever reach `/mcp`: `app.terno.ai/api/` is mTLS-gated
-and Anthropic cannot present a client certificate, and the `mcp.terno.ai` vhost
-returns 404 for everything except `/mcp` and `/.well-known/`. So the MCP
-boundary is the only reachable path, which makes it the right place to enforce
-and avoids changing `require_scope` behaviour for existing REST integrations.
-
-If that ever stops being true — if an OAuth token becomes usable against the
-REST API directly — the query views need real `@require_scope` decorators before
-that happens.
+OAuth tokens are currently restricted to `/mcp`, making MCP-level enforcement
+sufficient. If OAuth tokens are ever allowed to access the REST API, the query
+views must enforce their scopes there as well.
 """
 
 from typing import Dict, FrozenSet, Iterable, Optional
@@ -54,9 +34,6 @@ SCOPE_DESCRIPTIONS: Dict[str, str] = {
 
 ALL_SCOPES: FrozenSet[str] = frozenset(SCOPE_DESCRIPTIONS)
 
-# Requested when a client asks for nothing specific. Read-only by default was
-# decision 5: write is a deliberate second step, not something a user grants by
-# clicking through the screen that connects them.
 DEFAULT_SCOPES: FrozenSet[str] = frozenset({QUERY_READ, QUERY_EXECUTE})
 
 WRITE_SCOPES: FrozenSet[str] = frozenset({ADMIN_WRITE, ADMIN_SYNC})
@@ -77,7 +54,7 @@ TOOL_SCOPES: Dict[str, Optional[str]] = {
     "execute_query": QUERY_EXECUTE,
     # --- admin service (transcribed from @require_scope) ---
     "get_table_info": ADMIN_READ,
-    "validate_connection": ADMIN_WRITE,      # see module docstring
+    "validate_connection": ADMIN_WRITE,
     "add_datasource": ADMIN_WRITE,
     "delete_datasource": ADMIN_WRITE,
     "rename_table": ADMIN_WRITE,
@@ -87,9 +64,6 @@ TOOL_SCOPES: Dict[str, Optional[str]] = {
     "update_org_prompt": ADMIN_WRITE,
     "edit_org_prompt": ADMIN_WRITE,
     "sync_metadata": ADMIN_SYNC,
-    # Memory writes live on the query service and carry no view-level scope, but
-    # they mutate shared organisation state, so they sit behind admin:write
-    # rather than being reachable with a read-only grant.
     "save_memory": ADMIN_WRITE,
     "edit_memory": ADMIN_WRITE,
     "delete_memory": ADMIN_WRITE,
@@ -141,8 +115,5 @@ def granted_scopes(scopes: Iterable[str], *, can_write: bool) -> FrozenSet[str]:
 def tool_is_allowed(tool_name: str, scopes: FrozenSet[str]) -> bool:
     required = TOOL_SCOPES.get(tool_name)
     if required is None:
-        # Either an always-available tool, or one with no mapping — treat an
-        # unmapped tool as unavailable rather than open, so a new tool cannot
-        # reach a read-only grant by being forgotten here.
         return tool_name in TOOL_SCOPES
     return required in scopes
