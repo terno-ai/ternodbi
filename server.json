@@ -1,0 +1,16 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.terno-ai/terno",
+  "description": "Query, explore, and manage your databases through natural conversation — Postgres, MySQL, Snowflake, BigQuery, Databricks, Oracle, and SQLite, via MCP.",
+  "repository": {
+    "url": "https://github.com/terno-ai/ternodbi",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.terno.ai/mcp"
+    }
+  ]
+}
