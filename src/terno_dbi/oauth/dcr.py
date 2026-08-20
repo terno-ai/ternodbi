@@ -6,7 +6,7 @@ depending on Django.
 
 Loopback redirect URIs may use any port, as clients such as Claude Code can use
 a random localhost callback port (RFC 8252 §7.3). Non-loopback redirect URIs
-must use HTTPS.
+must use HTTPS, or a private-use URI scheme for a native app (RFC 8252 §7.1).
 
 Registration is unauthenticated, so callers should use `check_registration_rate`
 to limit client creation and prevent abuse.
@@ -21,6 +21,11 @@ MAX_REDIRECT_URIS = 10
 MAX_CLIENT_NAME = 200
 
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
+
+# Block known executable schemes that can bypass the structural URI checks.
+# This is a backstop for parser quirks, not the primary defence; the allowlist
+# in `validate_redirect_uri` remains the main protection.
+_EXECUTABLE_SCHEMES = frozenset({"javascript", "vbscript"})
 
 
 class InvalidRegistration(ValueError):
@@ -85,17 +90,33 @@ def validate_redirect_uri(uri: str) -> str:
                                       error="invalid_redirect_uri")
         return uri
 
-    # Custom schemes are how native apps receive callbacks; allow a plausible
-    # one rather than blocking a whole client class, but reject the empty and
-    # dangerous cases.
-    if parsed.scheme and "." in parsed.scheme:
-        return uri
+# Native apps use private-use URI schemes for OAuth callbacks (RFC 8252 §7.1).
+# Do not require a dot or a specific scheme name; valid clients can use schemes
+# such as `cursor`.
+#
+# Validate the URI structurally instead: a callback must have a non-empty
+# authority. This supports arbitrary native schemes while excluding opaque
+# schemes such as `data:`, `about:`, `blob:`, `filesystem:`, and `file:`.
+    if not parsed.scheme:
+        raise InvalidRegistration(
+            f"redirect_uri must have a scheme, got: {uri}",
+            error="invalid_redirect_uri",
+        )
 
-    raise InvalidRegistration(
-        f"redirect_uri scheme must be https, loopback http, or a reverse-domain "
-        f"custom scheme, got: {uri}",
-        error="invalid_redirect_uri",
-    )
+    if parsed.scheme.lower() in _EXECUTABLE_SCHEMES:
+        raise InvalidRegistration(
+            f"redirect_uri scheme '{parsed.scheme}' executes its payload, got: {uri}",
+            error="invalid_redirect_uri",
+        )
+
+    if not parsed.netloc:
+        raise InvalidRegistration(
+            f"redirect_uri must be hierarchical, with a host after '//', "
+            f"got: {uri}",
+            error="invalid_redirect_uri",
+        )
+
+    return uri
 
 
 def validate_registration(body: Dict[str, Any]) -> ClientRegistration:

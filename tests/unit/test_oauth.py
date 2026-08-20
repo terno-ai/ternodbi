@@ -249,6 +249,103 @@ def test_dangerous_or_empty_schemes_are_rejected(uri):
         validate_redirect_uri(uri)
 
 
+@pytest.mark.parametrize("uri", [
+    "file:///etc/passwd",
+    "blob:https://evil.example.com/x",
+    "about:blank",
+    "filesystem:https://evil.example.com/x",
+    "data:text/html,<script>fetch('//evil')</script>",
+])
+def test_opaque_schemes_are_rejected_as_a_class(uri):
+    """A callback is a location, so it must be hierarchical. These carry no
+    authority, which excludes them structurally rather than by name — the point
+    being that a scheme nobody has thought of yet is excluded too."""
+    with pytest.raises(InvalidRegistration, match="hierarchical"):
+        validate_redirect_uri(uri)
+
+
+@pytest.mark.parametrize("uri", [
+    "javascript:alert(1)",
+    "javascript://comment%0Aalert(1)",
+    "JavaScript://x%0Aalert(document.cookie)",
+    "vbscript:msgbox(1)",
+])
+def test_executable_schemes_are_rejected_even_with_a_fake_authority(uri):
+    """The structural rule alone is not enough here.
+
+    `javascript://comment%0Aalert(1)` parses with a non-empty authority: `//`
+    opens a JavaScript comment and the newline closes it, so the tail executes.
+    That is why these two schemes are named explicitly, and why the check runs
+    before the authority test rather than after.
+    """
+    with pytest.raises(InvalidRegistration, match="executes"):
+        validate_redirect_uri(uri)
+
+
+def test_a_private_use_scheme_needs_no_dot_in_the_scheme():
+    """RFC 8252 §7.1 recommends reverse-domain naming for a native app's
+    private-use scheme but does not require it. Demanding a dot in the scheme
+    rejects real clients.
+
+    Regression guard: Cursor registers exactly this URI, and refusing it is
+    what made the connector unusable there — the dot is in the host,
+    `anysphere.cursor-mcp`, not in the scheme, `cursor`.
+    """
+    uri = "cursor://anysphere.cursor-mcp/oauth/callback"
+    assert validate_redirect_uri(uri) == uri
+
+
+def test_cursors_real_registration_is_accepted():
+    """The payload captured from Cursor 3.16.29, verbatim.
+
+    All three of its redirect URIs must survive: `validate_registration` maps
+    over the list and raises on the first failure, so rejecting the private-use
+    scheme discarded the valid https and loopback entries with it, and the
+    client was left with no way to register at all.
+    """
+    reg = validate_registration({
+        "redirect_uris": [
+            "cursor://anysphere.cursor-mcp/oauth/callback",
+            "https://www.cursor.com/agents/mcp/oauth/callback",
+            "http://localhost:8787/callback",
+        ],
+        "token_endpoint_auth_method": "none",
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "client_name": "Cursor",
+        "logo_uri": "https://example.com/logo.svg",
+    })
+    assert len(reg.redirect_uris) == 3
+    assert reg.redirect_uris[0].startswith("cursor://")
+    assert reg.is_public
+
+
+def test_a_reverse_domain_scheme_still_works():
+    """The shape the old rule required must not regress."""
+    uri = "com.example.app://oauth/callback"
+    assert validate_redirect_uri(uri) == uri
+
+
+def test_a_uri_with_no_scheme_is_rejected():
+    """Without a scheme there is no way to know where the code would be sent."""
+    with pytest.raises(InvalidRegistration, match="must have a scheme"):
+        validate_redirect_uri("//evil.example.com/callback")
+
+
+def test_one_dangerous_uri_still_fails_the_whole_registration():
+    """Leniency about scheme *shape* is not leniency about scheme *safety*. A
+    client that asks for a script-executing callback is refused outright rather
+    than quietly registered with that entry dropped."""
+    with pytest.raises(InvalidRegistration):
+        validate_registration({
+            "client_name": "Sneaky",
+            "redirect_uris": [
+                "https://legit.example.com/cb",
+                "javascript:alert(document.cookie)",
+            ],
+        })
+
+
 def test_minimal_claude_registration():
     reg = validate_registration({
         "client_name": "Claude",
