@@ -26,12 +26,23 @@ def protected_resource_metadata(resource_url: str, auth_server_url: str) -> Dict
     }
 
 
-def authorization_server_metadata(auth_server_url: str) -> Dict[str, Any]:
-    """RFC 8414. Served at `/.well-known/oauth-authorization-server`."""
+def authorization_server_metadata(
+    auth_server_url: str, authorize_base: str = ""
+) -> Dict[str, Any]:
+    """Return the RFC 8414 authorization server metadata.
+
+    `authorize_base` separates the browser-based authorization endpoint from the
+    programmatic registration and token endpoints. This is required because the
+    browser flow can use the mTLS-protected host, while background MCP clients
+    cannot provide a client certificate.
+
+    Defaults to `auth_server_url` so single-host deployments continue to work.
+    """
     base = auth_server_url.rstrip("/")
+    authz = (authorize_base or auth_server_url).rstrip("/")
     return {
         "issuer": base,
-        "authorization_endpoint": f"{base}/oauth/authorize/",
+        "authorization_endpoint": f"{authz}/oauth/authorize/",
         "token_endpoint": f"{base}/oauth/token/",
         "revocation_endpoint": f"{base}/oauth/revoke_token/",
         "registration_endpoint": f"{base}/oauth/register",

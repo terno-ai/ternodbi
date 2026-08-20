@@ -439,7 +439,7 @@ def test_connect_datasource_returns_a_link_and_never_asks_for_a_credential():
                 merged_server.call_tool("connect_datasource", {"type": "postgres"})
             )
 
-    assert structured["setup_url"] == "https://acme.app.terno.ai/admin/terno/datasource/add/"
+    assert structured["setup_url"] == "https://acme.app.terno.ai/admin/core/datasource/add/"
     assert structured["credential_required"] is True
     assert "do not ask them for a connection string" in structured["instruction"].lower()
 
@@ -500,8 +500,23 @@ def test_the_setup_link_carries_no_token():
     with override_settings(MAIN_DOMAIN="app.terno.ai"):
         url = datasource_setup_url("acme")
 
-    assert url == "https://acme.app.terno.ai/admin/terno/datasource/add/"
+    assert url == "https://acme.app.terno.ai/admin/core/datasource/add/"
     assert "?" not in url and "token" not in url.lower()
+
+
+def test_setup_link_path_matches_the_real_admin_app_label():
+    """The path must be derived from `DataSource._meta`, not hardcoded a second
+    time. `app_label` is not the package name — it defaults to the last dotted
+    segment of `AppConfig.name` (`terno_dbi.core` -> `core`), so a hand-typed
+    `/admin/terno/datasource/add/` looked plausible and 404'd on every real
+    deployment. Confirmed live on staging: the actual admin route is
+    `/admin/core/datasource/`.
+    """
+    from terno_dbi.core.models import DataSource
+    from terno_dbi.mcp.setup_link import _datasource_admin_path
+
+    assert DataSource._meta.app_label == "core"
+    assert _datasource_admin_path() == "/admin/core/datasource/add/"
 
 
 def test_no_setup_link_is_invented_when_the_workspace_is_unknown():

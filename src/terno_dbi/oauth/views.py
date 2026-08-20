@@ -44,6 +44,19 @@ def _auth_server_url() -> str:
     return getattr(settings, "PROVISIONER_URL", "https://app.terno.ai")
 
 
+def _issuer_url() -> str:
+    """Return the OAuth issuer and programmatic endpoint host.
+
+    Uses the same host as the MCP endpoint so OAuth clients can access the
+    programmatic endpoints without a client certificate. Keeping this tied to
+    `TERNO_MCP_BASE_URL` avoids introducing another setting that could drift.
+
+    It is intentionally separate from `PROVISIONER_URL`, which controls actual
+    provisioner API requests.
+    """
+    return _resource_url()
+
+
 def _absolute_issuer() -> str:
     value = (_auth_server_url() or "app.terno.ai").rstrip("/")
     if value.startswith(("http://", "https://")):
@@ -65,13 +78,21 @@ def oauth_protected_resource(request):
     metadata lets clients discover the authorization server and start sign-in.
     """
     return _cors(JsonResponse(
-        protected_resource_metadata(_resource_url(), _auth_server_url())
+        protected_resource_metadata(_resource_url(), _issuer_url())
     ))
 
 
 def oauth_authorization_server(request):
-    """RFC 8414 — served on the auth host, `app.terno.ai`."""
-    return _cors(JsonResponse(authorization_server_metadata(_auth_server_url())))
+    """Return RFC 8414 authorization server metadata.
+
+    The metadata is served on the issuer host and points the browser-based
+    `authorization_endpoint` to the authentication host. Registration and token
+    exchange remain on the MCP host so background clients do not need a client
+    certificate.
+    """
+    return _cors(JsonResponse(
+        authorization_server_metadata(_issuer_url(), _auth_server_url())
+    ))
 
 
 def _client_ip(request) -> str:

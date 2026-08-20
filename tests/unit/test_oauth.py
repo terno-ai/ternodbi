@@ -147,6 +147,73 @@ def test_metadata_urls_have_no_double_slashes():
             assert "//" not in value[len("https://"):], f"{key} -> {value}"
 
 
+def test_only_the_browser_endpoint_moves_to_the_authorize_host():
+    """The programmatic endpoints must not resolve to the mTLS host.
+
+    `app.terno.ai` asks for a client certificate during the TLS handshake.
+    A browser sends none and carries on, but a Chromium-based MCP client
+    fetching from its own process fails with ERR_SSL_CLIENT_AUTH_CERT_NEEDED.
+    Registration and token exchange are made by that process; authorization is
+    not. Regression guard: this is exactly the shape Cursor could not connect
+    through when every endpoint shared the mTLS host.
+    """
+    doc = authorization_server_metadata(RESOURCE, ISSUER)
+
+    assert doc["authorization_endpoint"].startswith(ISSUER)
+    for key in ("registration_endpoint", "token_endpoint", "revocation_endpoint"):
+        assert doc[key].startswith(RESOURCE), f"{key} must avoid the mTLS host"
+
+
+def test_the_issuer_matches_the_host_serving_this_document():
+    """RFC 8414: a client that fetches the document from the issuer URL and
+    finds a different issuer inside is entitled to reject it."""
+    doc = authorization_server_metadata(RESOURCE, ISSUER)
+    assert doc["issuer"] == RESOURCE
+
+
+def test_a_single_host_deployment_still_works():
+    """Self-hosted installs serve everything from one origin; omitting the
+    authorize base must not leave the endpoint unset or malformed."""
+    doc = authorization_server_metadata(ISSUER)
+    assert doc["authorization_endpoint"] == f"{ISSUER}/oauth/authorize/"
+
+
+def test_discovery_points_clients_at_the_non_mtls_host(settings):
+    """The 401 sends clients to the resource metadata, which names the
+    authorization server they then fetch from. If that names the mTLS host,
+    the very next request fails before any HTTP status is returned."""
+    from terno_dbi.oauth.views import _issuer_url
+
+    settings.TERNO_MCP_BASE_URL = RESOURCE
+    settings.PROVISIONER_URL = ISSUER
+
+    doc = protected_resource_metadata(RESOURCE, _issuer_url())
+    assert doc["authorization_servers"] == [RESOURCE]
+
+
+def test_the_issuer_does_not_ride_on_the_provisioner_setting(settings):
+    """`PROVISIONER_URL` also drives real provisioner API calls. Deriving the
+    issuer from it would mean moving the issuer silently repoints that
+    traffic, so the two are kept independent."""
+    from terno_dbi.oauth.views import _auth_server_url, _issuer_url
+
+    settings.PROVISIONER_URL = "https://app.terno.ai"
+    settings.TERNO_MCP_BASE_URL = "https://mcp.terno.ai"
+
+    assert _issuer_url() == "https://mcp.terno.ai"
+    assert _auth_server_url() == "https://app.terno.ai"
+
+
+def test_the_issuer_needs_no_deployment_setting_of_its_own(settings):
+    """The issuer follows `TERNO_MCP_BASE_URL`, which every hosted deployment
+    already sets. A separate setting would only let the two drift apart, and
+    an issuer pointing at the mTLS host is exactly the failure this avoids."""
+    from terno_dbi.oauth.views import _issuer_url
+
+    settings.TERNO_MCP_BASE_URL = "https://mcp.example.com"
+    assert _issuer_url() == "https://mcp.example.com"
+
+
 # -------------------------------------------------------------------- DCR
 
 def test_localhost_callback_on_any_port_is_accepted():
