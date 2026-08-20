@@ -10,6 +10,19 @@
 
 # Changelog
 
+## 1.0.1
+
+- OAuth issuer moved to `https://mcp.terno.ai`. Client registration and token
+  exchange are served there; authorization stays on `https://app.terno.ai`.
+  Clients registered against the old issuer must register again and users must
+  re-consent.
+- Fixed: registration was refused for a client whose callback used a
+  private-use URI scheme without a dot in the scheme, such as Cursor's
+  `cursor://anysphere.cursor-mcp/oauth/callback`. One rejected entry failed the
+  whole request, so the valid https and loopback callbacks sent alongside it
+  were discarded too. Redirect URIs are now accepted on structure — a scheme
+  plus a host — rather than on the shape of the scheme name.
+
 ## 0.1.39, 0.1.40 , 0.1.41 and 0.1.42
 
 - New tool `connect_datasource`: returns a link to add a database in Terno
