@@ -1031,3 +1031,41 @@ class TestConnectDatasource:
         data = json.loads(response.content)
         assert 'setup_url' not in data
         assert data['setup_location']
+
+    def test_host_ui_path_replaces_the_admin_form_path(
+        self, request_factory, setup_admin_data
+    ):
+        """terno-ai points the link at its connector modal, keeping the origin
+        computed for the org."""
+        from terno_dbi.core.admin_service.views import connect_datasource
+
+        request = self._request(request_factory, setup_admin_data, {})
+
+        with patch('django.conf.settings.MAIN_DOMAIN', 'app.terno.ai', create=True), \
+                patch('django.conf.settings.ENABLE_SUBDOMAIN', True, create=True), \
+                patch('django.conf.settings.TERNO_DATASOURCE_SETUP_PATH',
+                      '/?connect_datasource=1', create=True):
+            response = connect_datasource(request)
+
+        data = json.loads(response.content)
+        assert data['setup_url'] == 'https://acme.app.terno.ai/?connect_datasource=1'
+
+
+@pytest.mark.django_db
+def test_mcp_connect_tool_ignores_the_host_ui_path():
+    """The hosted MCP connector must not follow TERNO_DATASOURCE_SETUP_PATH.
+
+    mysite.asgi mounts merged_server in terno-ai's own Django process, so the
+    connector submitted to ChatGPT and Claude reads the same settings module.
+    The setting is consulted in the HTTP view only — this test fails if anyone
+    moves it into setup_link, which would retarget the live connector.
+    """
+    from terno_dbi.mcp.surface import handle_connect_datasource
+
+    with patch('django.conf.settings.MAIN_DOMAIN', 'app.terno.ai', create=True), \
+            patch('django.conf.settings.TERNO_DATASOURCE_SETUP_PATH',
+                  '/?connect_datasource=1', create=True), \
+            patch('terno_dbi.mcp.context.current_org_subdomain', return_value='acme'):
+        payload = handle_connect_datasource({'type': 'postgres'})
+
+    assert payload['setup_url'] == 'https://acme.app.terno.ai/admin/core/datasource/add/'

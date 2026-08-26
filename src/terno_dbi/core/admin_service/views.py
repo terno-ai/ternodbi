@@ -1,5 +1,6 @@
 import json
 import logging
+from urllib.parse import urlsplit, urlunsplit
 from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
@@ -104,6 +105,20 @@ def connect_datasource(request):
                 base = f"https://{base}"
             payload["setup_url"] = f"{base}{_datasource_admin_path()}"
             payload.pop("setup_location", None)
+
+    # A host with its own connector UI points the link at that instead of the
+    # Django admin form. Read here rather than in setup_link so the MCP
+    # connector, which runs in the same Django process, cannot see it: its
+    # link must stay on the admin page.
+    ui_path = (getattr(settings, "TERNO_DATASOURCE_SETUP_PATH", "") or "").strip()
+    if ui_path and payload.get("setup_url"):
+        if not ui_path.startswith("/"):
+            ui_path = f"/{ui_path}"
+        origin = urlsplit(payload["setup_url"])
+        path, _, query = ui_path.partition("?")
+        payload["setup_url"] = urlunsplit(
+            (origin.scheme, origin.netloc, path, query, "")
+        )
 
     payload["status"] = "success"
     return JsonResponse(payload)
