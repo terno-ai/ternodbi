@@ -879,3 +879,155 @@ class TestEditOrgPrompt:
         assert response.status_code == 200
         org.refresh_from_db()
         assert not org.org_prompt.startswith('typo ')
+
+
+@pytest.mark.django_db
+class TestConnectDatasource:
+    """Tests for POST /api/admin/connect/
+
+    The endpoint terno-ai's sandbox `connect_datasource()` helper wraps. It
+    replaces credential-taking datasource creation from an agent: the payload
+    must be a link, never a place to put a connection string.
+    """
+
+    def _request(self, request_factory, setup_admin_data, body, subdomain='acme'):
+        from terno_dbi.core.models import CoreOrganisation
+
+        org = CoreOrganisation.objects.create(
+            name='Acme', subdomain=subdomain, owner=setup_admin_data['user']
+        )
+        request = request_factory.post(
+            '/api/admin/connect/',
+            data=json.dumps(body),
+            content_type='application/json'
+        )
+        # require_service_auth derives token_organisation from the token, so
+        # setting it on the request directly would be overwritten.
+        token = setup_admin_data['token']
+        token.organisation = org
+        token.save(update_fields=['organisation'])
+        setup_request_for_admin(request, token)
+        return request
+
+    def test_returns_setup_link_and_takes_no_credential(
+        self, request_factory, setup_admin_data
+    ):
+        from terno_dbi.core.admin_service.views import connect_datasource
+
+        request = self._request(request_factory, setup_admin_data, {'type': 'postgres'})
+
+        with patch('django.conf.settings.MAIN_DOMAIN', 'app.terno.ai', create=True):
+            response = connect_datasource(request)
+
+        assert response.status_code == 200
+        data = json.loads(response.content)
+        assert data['status'] == 'success'
+        assert data['credential_required'] is True
+        assert data['setup_url'].startswith('https://acme.app.terno.ai/')
+        assert 'postgres' in data['reason']
+        # The whole point: nothing here invites the model to collect a secret.
+        assert 'connection_str' not in response.content.decode()
+
+    def test_works_without_a_type(self, request_factory, setup_admin_data):
+        from terno_dbi.core.admin_service.views import connect_datasource
+
+        request = self._request(request_factory, setup_admin_data, {})
+
+        with patch('django.conf.settings.MAIN_DOMAIN', 'app.terno.ai', create=True):
+            response = connect_datasource(request)
+
+        assert response.status_code == 200
+        assert json.loads(response.content)['status'] == 'success'
+
+    def test_link_matches_the_page_the_mcp_connector_sends_users_to(
+        self, request_factory, setup_admin_data
+    ):
+        """One destination for both surfaces.
+
+        The hosted MCP connector runs in terno-ai's own Django process
+        (mysite.asgi mounts merged_server), so keeping this endpoint on the same
+        admin page as the MCP tool leaves a single add-datasource flow to
+        maintain — and nothing here can drift the submitted connector."""
+        from terno_dbi.core.admin_service.views import connect_datasource
+
+        request = self._request(request_factory, setup_admin_data, {})
+
+        with patch('django.conf.settings.MAIN_DOMAIN', 'app.terno.ai', create=True):
+            response = connect_datasource(request)
+
+        data = json.loads(response.content)
+        assert data['setup_url'] == 'https://acme.app.terno.ai/admin/core/datasource/add/'
+
+    def test_missing_org_returns_400(self, request_factory, setup_admin_data):
+        from terno_dbi.core.admin_service.views import connect_datasource
+
+        request = request_factory.post(
+            '/api/admin/connect/', data='{}', content_type='application/json'
+        )
+        token = setup_admin_data['token']
+        token.organisation = None
+        token.save(update_fields=['organisation'])
+        setup_request_for_admin(request, token)
+
+        response = connect_datasource(request)
+
+        assert response.status_code == 400
+
+
+    def test_single_tenant_host_gets_a_link_from_main_domain(
+        self, request_factory, setup_admin_data
+    ):
+        """ENABLE_SUBDOMAIN=False means one address for everyone.
+
+        Local dev and self-hosted installs have no per-org subdomain, so the
+        `{subdomain}.{root}` form resolves to nothing and the user would be sent
+        prose. Fall back to MAIN_DOMAIN instead.
+        """
+        from terno_dbi.core.admin_service.views import connect_datasource
+
+        request = self._request(request_factory, setup_admin_data, {}, subdomain='')
+
+        with patch('django.conf.settings.MAIN_DOMAIN',
+                   'http://127.0.0.1:8000', create=True), \
+                patch('django.conf.settings.ENABLE_SUBDOMAIN', False, create=True):
+            response = connect_datasource(request)
+
+        data = json.loads(response.content)
+        assert data['setup_url'] == 'http://127.0.0.1:8000/admin/core/datasource/add/'
+        assert 'setup_location' not in data
+
+    def test_single_tenant_bare_host_main_domain_gets_https(
+        self, request_factory, setup_admin_data
+    ):
+        """MAIN_DOMAIN is a bare host in some deployments, a full origin in
+        others. A bare host must not produce a scheme-less, unclickable link."""
+        from terno_dbi.core.admin_service.views import connect_datasource
+
+        request = self._request(request_factory, setup_admin_data, {}, subdomain='')
+
+        with patch('django.conf.settings.MAIN_DOMAIN', 'terno.example.com', create=True), \
+                patch('django.conf.settings.ENABLE_SUBDOMAIN', False, create=True):
+            response = connect_datasource(request)
+
+        data = json.loads(response.content)
+        assert data['setup_url'] == 'https://terno.example.com/admin/core/datasource/add/'
+
+    def test_multi_tenant_blank_subdomain_stays_on_prose(
+        self, request_factory, setup_admin_data
+    ):
+        """The bare domain must NOT be substituted on a multi-tenant host.
+
+        A blank subdomain there means an incomplete org row, and the bare domain
+        is some other tenant's workspace. Prose is the safe answer.
+        """
+        from terno_dbi.core.admin_service.views import connect_datasource
+
+        request = self._request(request_factory, setup_admin_data, {}, subdomain='')
+
+        with patch('django.conf.settings.MAIN_DOMAIN', 'app.terno.ai', create=True), \
+                patch('django.conf.settings.ENABLE_SUBDOMAIN', True, create=True):
+            response = connect_datasource(request)
+
+        data = json.loads(response.content)
+        assert 'setup_url' not in data
+        assert data['setup_location']

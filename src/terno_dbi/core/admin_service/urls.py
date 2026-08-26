@@ -6,6 +6,7 @@ app_name = "admin_service"
 urlpatterns = [
     path("organisation/prompt/", views.update_org_prompt, name="update_org_prompt"),
     path("organisation/prompt/edit/", views.edit_org_prompt, name="edit_org_prompt"),
+    path("connect/", views.connect_datasource, name="connect_datasource"),
     path("datasources/", views.create_datasource, name="create_datasource"),
     path("datasources/<str:datasource_identifier>/", views.update_datasource, name="update_datasource"),
     path("datasources/<str:datasource_identifier>/delete/", views.delete_datasource, name="delete_datasource"),

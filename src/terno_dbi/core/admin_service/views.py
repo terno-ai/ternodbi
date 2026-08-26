@@ -1,5 +1,6 @@
 import json
 import logging
+from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
@@ -9,6 +10,7 @@ from terno_dbi.decorators import require_service_auth, require_scope
 from terno_dbi.services import schema_utils
 from terno_dbi.services.shield import delete_cache
 from terno_dbi.services.query import execute_native_sql
+from terno_dbi.mcp.setup_link import _datasource_admin_path, setup_handoff
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +70,43 @@ def update_org_prompt(request):
         "org_prompt": org.org_prompt,
         "content_hash": org.org_prompt_hash,
     })
+
+
+@csrf_exempt
+@require_service_auth()
+@require_scope('admin:write')
+@require_http_methods(["POST"])
+def connect_datasource(request):
+    org = getattr(request, "token_organisation", None)
+    if not org:
+        return JsonResponse({"status": "error", "error": "org is required"}, status=400)
+
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        body = {}
+
+    db_type = body.get("type")
+    reason = (
+        f"Connecting a {db_type} database needs credentials, which are entered in "
+        f"Terno rather than sent through this conversation."
+        if db_type
+        else "Connection details are entered in Terno, not sent through this "
+             "conversation."
+    )
+
+    payload = setup_handoff(org.subdomain, reason)
+
+    if not getattr(settings, "ENABLE_SUBDOMAIN", True):
+        base = (getattr(settings, "MAIN_DOMAIN", "") or "").strip().rstrip("/")
+        if base:
+            if "://" not in base:
+                base = f"https://{base}"
+            payload["setup_url"] = f"{base}{_datasource_admin_path()}"
+            payload.pop("setup_location", None)
+
+    payload["status"] = "success"
+    return JsonResponse(payload)
 
 
 @csrf_exempt
