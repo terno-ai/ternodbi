@@ -124,6 +124,23 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
             count=_COUNT,
         ),
     },
+    "list_foreign_keys": {
+        "title": "List declared foreign keys",
+        "hints": dict(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True),
+        "output": _out(
+            "Foreign keys the schema declares, in public names. Absence is not proof "
+            "two tables are unrelated — verify join cardinality against the data.",
+            foreign_keys={
+                "type": "array",
+                "description": (
+                    "Each declared constraint: constrained_table/constrained_column "
+                    "referencing referred_table/referred_column."
+                ),
+                "items": {"type": "object", "additionalProperties": True},
+            },
+            count=_COUNT,
+        ),
+    },
     "execute_query": {
         "title": "Run a SQL query",
         "hints": dict(readOnlyHint=True, destructiveHint=False, idempotentHint=False, openWorldHint=True),

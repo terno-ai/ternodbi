@@ -14,7 +14,9 @@ import pytest
 from terno_dbi.mcp import admin_server, query_server, surface
 from terno_dbi.mcp.instructions import (
     ADMIN_INSTRUCTIONS,
+    DOCS_LONG_FORM,
     INSTRUCTIONS_CHAR_CAP,
+    MERGED_INSTRUCTIONS,
     QUERY_INSTRUCTIONS,
 )
 from terno_dbi.mcp.tool_meta import (
@@ -24,8 +26,8 @@ from terno_dbi.mcp.tool_meta import (
     as_tool_result,
 )
 
-# 10 query + 14 admin, each plus the shared `terno_guide`.
-EXPECTED_QUERY_TOOLS = 11
+# 11 query + 14 admin, each plus the shared `terno_guide`.
+EXPECTED_QUERY_TOOLS = 12
 EXPECTED_ADMIN_TOOLS = 15
 
 
@@ -71,6 +73,45 @@ def test_essentials_land_in_the_first_512_chars(name, blob, must_mention):
     head = blob[:512]
     for token in must_mention:
         assert token in head, f"{name}: '{token}' must appear in the first 512 chars"
+
+
+# ------------------------------------------------- how to write a fact
+
+@pytest.mark.parametrize(
+    "name,blob",
+    [("admin", ADMIN_INSTRUCTIONS), ("merged", MERGED_INSTRUCTIONS)],
+)
+def test_write_blobs_demand_properties_not_answers(name, blob):
+    """A fact phrased as an answer to one question helps only that question.
+
+    Both write-capable blobs must carry this; the cap makes the wording
+    terse, so match on the load-bearing words rather than a sentence.
+    """
+    lowered = blob.lower()
+    assert "not answers" in lowered or "never as answers" in lowered, (
+        f"{name}: lost the properties-not-answers rule"
+    )
+
+
+@pytest.mark.parametrize(
+    "name,blob",
+    [("admin", ADMIN_INSTRUCTIONS), ("merged", MERGED_INSTRUCTIONS)],
+)
+def test_write_blobs_demand_cited_evidence(name, blob):
+    """An unfalsifiable fact becomes permanent; a cited one can be re-run."""
+    assert "cite the query" in blob.lower() or "point to a query" in blob.lower(), (
+        f"{name}: lost the cite-your-evidence rule"
+    )
+
+
+def test_docs_carry_the_long_form_of_both_rules():
+    """The blobs are capped, so the reasoning lives in the docs resource."""
+    assert "properties, not answers" in DOCS_LONG_FORM
+    assert "### Cite the query" in DOCS_LONG_FORM
+    # The contrast example is what makes the rule actionable.
+    assert "cumulative within a season" in DOCS_LONG_FORM
+    # Sampling is the specific trap worth naming.
+    assert "Sampling" in DOCS_LONG_FORM
 
 
 # ------------------------------------------------- 0.2 annotations + titles
@@ -334,6 +375,10 @@ def test_row_schema_matches_the_real_response_shape(query_tools):
         ("list_datasources", {"datasources": [{"id": 1, "name": "shop"}], "count": 1}),
         ("list_tables", {"tables": [{"id": 1434, "name": "orders"}], "count": 1}),
         ("list_table_columns", {"columns": [{"public_name": "id"}], "count": 1}),
+        ("list_foreign_keys", {"foreign_keys": [{"id": 1, "constrained_table": "orders",
+                                                 "constrained_column": "customer_id",
+                                                 "referred_table": "customers",
+                                                 "referred_column": "id"}], "count": 1}),
         ("list_memories", {"memories": [], "count": 0}),
         ("grep_memory", {"matches": [], "count": 0}),
         ("get_memory", {"memory": {"name": "x", "content_hash": "abc"}}),

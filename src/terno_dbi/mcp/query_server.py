@@ -126,6 +126,28 @@ def own_tools() -> List[Tool]:
             }
         ),
         Tool(
+            name="list_foreign_keys",
+            description=(
+                "List the foreign keys declared for a datasource, as "
+                "constrained_table.constrained_column -> referred_table.referred_column, "
+                "using public names. These are the joins the schema itself asserts. "
+                "Absence of a row here does not mean two tables cannot be joined — many "
+                "databases carry no declared constraints — so treat this as evidence "
+                "about intended relationships, and still verify the cardinality of any "
+                "join you rely on."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "datasource": {
+                        "type": "string",
+                        "description": "Datasource name or ID"
+                    }
+                },
+                "required": ["datasource"]
+            }
+        ),
+        Tool(
             name="execute_query",
             description="""Execute a SQL query using high-performance server-side streaming.
 
@@ -312,6 +334,14 @@ def _dispatch(name: str, arguments: Dict[str, Any]):
             result = {
                 "columns": columns,
                 "count": len(columns)
+            }
+
+        elif name == "list_foreign_keys":
+            datasource = arguments["datasource"]
+            fks = client.list_foreign_keys(datasource)
+            result = {
+                "foreign_keys": fks,
+                "count": len(fks) if isinstance(fks, list) else 0
             }
 
         elif name == "execute_query":

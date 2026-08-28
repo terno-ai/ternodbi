@@ -40,7 +40,7 @@ def test_merged_server_carries_both_registries():
     assert "execute_query" in names          # query registry
     assert "add_datasource" in names         # admin registry
     assert "terno_guide" in names            # shared surface
-    assert len(names) == 26
+    assert len(names) == 27
 
 
 def test_merged_instructions_fit_the_cap():

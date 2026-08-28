@@ -47,6 +47,7 @@ TOOL_SCOPES: Dict[str, Optional[str]] = {
     "list_datasources": QUERY_READ,
     "list_tables": QUERY_READ,
     "list_table_columns": QUERY_READ,
+    "list_foreign_keys": QUERY_READ,
     "get_sample_data": QUERY_READ,
     "list_memories": QUERY_READ,
     "get_memory": QUERY_READ,

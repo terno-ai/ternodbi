@@ -149,6 +149,12 @@ class TernoDBIClient:
         data = self._handle_response(response)
         return data.get("columns", [])
 
+    def list_foreign_keys(self, datasource: DatasourceIdentifier) -> List[Dict]:
+        url = f"{self.base_url}/api/query/datasources/{datasource}/foreign-keys/"
+        response = self._http.get(url, headers=self._get_headers())
+        data = self._handle_response(response)
+        return data.get("foreign_keys", [])
+
     def update_table(
         self,
         table_id: int,
