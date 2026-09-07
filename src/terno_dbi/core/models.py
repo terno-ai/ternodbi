@@ -9,6 +9,7 @@ import hashlib
 import reversion
 from cryptography.fernet import Fernet
 from django.conf import settings
+from terno_dbi.core.fields import EncryptedTextField, EncryptedJSONField
 
 logger = logging.getLogger(__name__)
 
@@ -131,8 +132,7 @@ class DataSource(models.Model):
         default=False,
         help_text="Flag to indicate if the datasource is an ERP system."
     )
-    connection_str = models.TextField(
-        max_length=1000, 
+    connection_str = EncryptedTextField(
         help_text=(
             "Connection string for the datasource.<br><br>"
             "<b>Examples:</b><br>"
@@ -144,7 +144,7 @@ class DataSource(models.Model):
             "&bull; <b>DataBricks:</b> <code>databricks://token:dapi_token@host:port?http_path=/sql/1.0/endpoints/12345</code>"
         )
     )
-    connection_json = models.JSONField(
+    connection_json = EncryptedJSONField(
         null=True, blank=True,
         help_text=(
             "JSON key file contents for authentication.<br><br>"
@@ -180,6 +180,21 @@ class DataSource(models.Model):
 
     def __str__(self):
         return self.display_name
+
+    @property
+    def decrypted_connection_str(self):
+        """The plaintext connection string. Use only where a connection is opened
+        — never for display, serialization or logging (those get the ciphertext
+        via `connection_str`). Legacy plaintext rows pass through unchanged."""
+        from terno_dbi.services import secrets
+        return secrets.decrypt_str(self.connection_str)
+
+    @property
+    def decrypted_connection_json(self):
+        """The plaintext credentials dict (e.g. a BigQuery service account). Same
+        rule as `decrypted_connection_str`: connect-path use only."""
+        from terno_dbi.services import secrets
+        return secrets.decrypt_dict(self.connection_json)
 
 
 class Table(models.Model):

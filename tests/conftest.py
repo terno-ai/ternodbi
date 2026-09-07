@@ -1,8 +1,16 @@
 import os
 import sys
 import pytest
+from cryptography.fernet import Fernet
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+# Set at module import — before pytest-django configures Django from
+# DJANGO_SETTINGS_MODULE, so `settings.MCP_ENCRYPTION_KEY` is populated. Credentials
+# are encrypted at rest, so saving a DataSource needs a key; this throwaway one
+# serves the whole suite. Tests exercising the key ring or the missing-key path
+# override it via the `settings` fixture.
+os.environ.setdefault('MCP_ENCRYPTION_KEY', Fernet.generate_key().decode())
 
 
 def pytest_configure(config):
@@ -10,6 +18,21 @@ def pytest_configure(config):
 
     import django
     django.setup()
+
+
+@pytest.fixture(autouse=True)
+def _encryption_key(settings):
+    """Every test can store credentials: ensure an encryption key and a clean
+    key-ring cache. Deterministic regardless of import/collection order — tests
+    that need a specific key (rotation, missing-key) override it after this runs.
+    """
+    from terno_dbi.services import secrets
+    if not getattr(settings, 'MCP_ENCRYPTION_KEY', '') and \
+       not getattr(settings, 'MCP_ENCRYPTION_KEYS', ''):
+        settings.MCP_ENCRYPTION_KEY = Fernet.generate_key().decode()
+    secrets.reset_cache()
+    yield
+    secrets.reset_cache()
 
 
 @pytest.fixture

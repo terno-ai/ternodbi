@@ -87,16 +87,17 @@ class TestDataSourceModel:
         assert ds.connection_json is None
 
     def test_connection_json_stores_dict(self, db):
-        """connection_json should store dict."""
+        """connection_json round-trips a dict — stored encrypted, read via the accessor."""
         ds = DataSource.objects.create(
             display_name='json_test',
             type='bigquery',
             connection_str='bigquery://project/dataset',
             connection_json={'type': 'service_account'}
         )
-        
+
         ds.refresh_from_db()
-        assert ds.connection_json['type'] == 'service_account'
+        # Stored encrypted (the attribute is the envelope), plaintext via accessor.
+        assert ds.decrypted_connection_json['type'] == 'service_account'
 
 
 @pytest.mark.django_db

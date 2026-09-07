@@ -126,8 +126,8 @@ def execute_native_sql(datasource, native_sql, page=1, per_page=50):
     try:
         connector = ConnectorFactory.create_connector(
             datasource.type,
-            datasource.connection_str,
-            credentials=datasource.connection_json
+            datasource.decrypted_connection_str,
+            credentials=datasource.decrypted_connection_json
         )
 
         with connector.get_connection() as con:
@@ -229,8 +229,8 @@ def execute_paginated_query(
 #     try:
 #         connector = ConnectorFactory.create_connector(
 #             datasource.type,
-#             datasource.connection_str,
-#             credentials=datasource.connection_json
+#             datasource.decrypted_connection_str,
+#             credentials=datasource.decrypted_connection_json
 #         )
 #
 #         mode = PaginationMode(pagination_mode)
@@ -367,8 +367,8 @@ def execute_native_sql_return_df(datasource, native_sql):
     try:
         connector = ConnectorFactory.create_connector(
             datasource.type,
-            datasource.connection_str,
-            credentials=datasource.connection_json
+            datasource.decrypted_connection_str,
+            credentials=datasource.decrypted_connection_json
         )
 
         with connector.get_connection() as con:
@@ -397,8 +397,8 @@ def execute_native_sql_return_df(datasource, native_sql):
 def export_native_sql_result(datasource, native_sql):
     connector = ConnectorFactory.create_connector(
         datasource.type,
-        datasource.connection_str,
-        credentials=datasource.connection_json
+        datasource.decrypted_connection_str,
+        credentials=datasource.decrypted_connection_json
     )
 
     utc_time = timezone.now().strftime('%Y-%m-%d_%H-%M-%S')
@@ -420,8 +420,8 @@ def export_native_sql_result(datasource, native_sql):
 def export_native_sql_streaming(datasource, native_sql):
     connector = ConnectorFactory.create_connector(
         datasource.type,
-        datasource.connection_str,
-        credentials=datasource.connection_json
+        datasource.decrypted_connection_str,
+        credentials=datasource.decrypted_connection_json
     )
 
     service = PaginationService(
@@ -465,8 +465,8 @@ def execute_streaming_query(datasource, native_sql, yield_size=1000):
     try:
         connector = ConnectorFactory.create_connector(
             datasource.type,
-            datasource.connection_str,
-            credentials=datasource.connection_json
+            datasource.decrypted_connection_str,
+            credentials=datasource.decrypted_connection_json
         )
 
         with connector.get_connection() as con:

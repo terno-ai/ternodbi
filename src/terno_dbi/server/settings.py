@@ -177,6 +177,9 @@ LOGGING = {
 # ---------------------------------------------------------------------------
 _LOCAL_PORT = os.environ.get('TERNO_LOCAL_PORT', '8376')
 TERNO_MCP_BASE_URL = os.environ.get('TERNO_MCP_BASE_URL', f'http://127.0.0.1:{_LOCAL_PORT}')
+
+MCP_ENCRYPTION_KEY = os.environ.get('MCP_ENCRYPTION_KEY', '')
+MCP_ENCRYPTION_KEYS = os.environ.get('MCP_ENCRYPTION_KEYS', '')
 PROVISIONER_URL = os.environ.get('PROVISIONER_URL', f'http://127.0.0.1:{_LOCAL_PORT}')
 
 # Self-serve org creation on first connect. The standalone server has no

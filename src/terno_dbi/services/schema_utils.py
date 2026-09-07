@@ -170,8 +170,8 @@ def get_sample_rows(conn, table_inspector, n: int = 10) -> List[List[Any]]:
 def get_table_info(datasource, table_name: str, sample_rows_count: int = 10) -> Dict[str, Any]:
     connector = ConnectorFactory.create_connector(
         datasource.type,
-        datasource.connection_str,
-        credentials=datasource.connection_json
+        datasource.decrypted_connection_str,
+        credentials=datasource.decrypted_connection_json
     )
 
     result = {
@@ -315,7 +315,7 @@ def _sync_from_information_schema(connector, datasource, result, overwrite=False
     tables_discovered = 0
 
     target_schema = None
-    conn_str = datasource.connection_str
+    conn_str = datasource.decrypted_connection_str
 
     if 'snowflake://' in conn_str:
         parts = conn_str.split('/')
@@ -459,8 +459,8 @@ def sync_metadata(datasource_id: int, overwrite: bool = False) -> Dict[str, Any]
 
     connector = ConnectorFactory.create_connector(
         datasource.type,
-        datasource.connection_str,
-        credentials=datasource.connection_json
+        datasource.decrypted_connection_str,
+        credentials=datasource.decrypted_connection_json
     )
 
     result = {
