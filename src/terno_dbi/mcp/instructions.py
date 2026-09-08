@@ -16,6 +16,13 @@ A length test guards the cap: tests/test_instruction_length.py.
 
 INSTRUCTIONS_CHAR_CAP = 2049
 
+# This is a client-compatibility limit, not an architectural constraint.
+# Keep long-form guidance in the `ternodbi://docs` resource and put response-
+# specific notes in `notes`, rather than relying on tool descriptions for it.
+#
+# A length check catches truncation that may otherwise go unnoticed.
+CLIENT_DESCRIPTION_CAP = 2049
+
 QUERY_INSTRUCTIONS = (
     "Read-only SQL access to this organisation's configured databases, and to "
     "the durable memory recorded about them.\n\n"

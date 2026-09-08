@@ -10,6 +10,7 @@ urlpatterns = [
     path('docs/<str:page>/', doc_view, name='docs'),
     path('admin/', admin.site.urls),
     path('api/', include('terno_dbi.core.urls')),
+    path('', include('terno_dbi.connectors.api.urls')),
 ]
 
 # Discovery documents and DCR. Always mounted: the 401 from /mcp points at the

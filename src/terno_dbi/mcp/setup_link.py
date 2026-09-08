@@ -13,6 +13,7 @@ log does not grant access.
 
 import logging
 from typing import Optional
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,30 @@ def datasource_setup_url(org_subdomain: Optional[str]) -> Optional[str]:
     return f"https://{org_subdomain}.{root}{_datasource_admin_path()}"
 
 
+def connect_url(org_subdomain: Optional[str], catalog) -> Optional[str]:
+    """Build a link that starts the connect flow for a catalog entry.
+
+    The URL identifies what to connect; the browser session identifies the user.
+    It grants no access and contains no credentials, so the same link can be used
+    for both initial connections and reconnects.
+
+    The `/connect` endpoint dispatches by the connector's `auth_type`, so the link
+    does not need to know whether the connector uses OAuth or manual credentials.
+    """
+    if not org_subdomain or catalog is None:
+        return None
+    root = _root_domain()
+    if not root:
+        logger.warning(
+            "Cannot build a connect link: neither MAIN_DOMAIN nor "
+            "TERNO_ROOT_DOMAIN is set."
+        )
+        return None
+
+    key = quote(catalog.key, safe="")
+    return f"https://{org_subdomain}.{root}/connect?connector={key}"
+
+
 def setup_handoff(org_subdomain: Optional[str], reason: str) -> dict:
     """The payload a tool returns instead of accepting a credential.
 
@@ -94,6 +119,7 @@ def setup_handoff(org_subdomain: Optional[str], reason: str) -> dict:
 
 __all__ = [
     "SETUP_INSTRUCTION",
+    "connect_url",
     "datasource_setup_url",
     "setup_handoff",
 ]

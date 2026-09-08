@@ -20,6 +20,7 @@ from terno_dbi.services.shield import prepare_mdb, generate_native_sql
 from terno_dbi.services.access import get_admin_config_object
 from terno_dbi.services.resolver import resolve_datasource
 from terno_dbi.decorators import require_service_auth
+from terno_dbi.mcp.setup_link import connect_url
 from django.contrib.auth.models import Group
 from django.contrib.auth.models import User
 
@@ -112,12 +113,22 @@ def grep_org_prompt(request):
 @require_service_auth()
 @require_http_methods(["GET"])
 def list_datasources(request):
-    datasources = request.allowed_datasources
-    logger.debug("List datasources requested: count=%d", len(datasources))
+    """Connected datasources, plus what this organisation could connect.
 
-    data = []
+    Returning both is what lets an agent offer a source nobody has set up yet
+    rather than being unable to mention it. `connected` keeps the exact shape it
+    had before this became a union, so existing callers are unaffected.
+    """
+    datasources = request.allowed_datasources.select_related('catalog')
+    org_subdomain = getattr(
+        getattr(request, 'token_organisation', None), 'subdomain', None,
+    )
+
+    connected = []
     for ds in datasources:
-        data.append({
+        if ds.is_api and ds.auth_status != models.DataSource.AuthStatus.CONNECTED:
+            continue
+        entry = {
             'id': ds.id,
             'name': ds.display_name,
             'type': ds.type,
@@ -125,13 +136,100 @@ def list_datasources(request):
             'is_erp': ds.is_erp,
             'dialect_name': ds.dialect_name,
             'dialect_version': ds.dialect_version,
-        })
+            'family': ds.family,
+            'auth_status': ds.auth_status,
+        }
+        if ds.catalog_id:
+            entry['key'] = ds.catalog.key
+        # Only surfaced when action is needed, so a healthy list stays terse.
+        if ds.needs_reconnect:
+            entry['reconnect_url'] = connect_url(
+                org_subdomain, ds.catalog,
+            ) if ds.catalog_id else None
+            if ds.auth_error:
+                entry['auth_error'] = ds.auth_error
+        connected.append(entry)
+
+    available = _available_connectors(datasources, org_subdomain)
 
     return JsonResponse({
         "status": "success",
-        "datasources": data,
-        "count": len(data)
+        "datasources": connected,
+        "count": len(connected),
+        "available": available,
+        "available_count": len(available),
+        "notes": _datasource_notes(connected, available),
     })
+
+
+def _available_connectors(datasources, org_subdomain):
+    """Enabled catalog entries this organisation has not connected.
+
+    A database already connected once is still offered — an organisation may
+    legitimately hold several Postgres connections. An API source is offered
+    only until it is connected, because a second connection to the same provider
+    means re-authorising, which is the reconnect path rather than this one.
+    """
+    connected_api_keys = {
+        ds.catalog.key for ds in datasources
+        if ds.catalog_id and ds.catalog.is_api
+        and ds.auth_status == models.DataSource.AuthStatus.CONNECTED
+    }
+
+    entries = []
+    for catalog in models.ConnectorCatalog.objects.filter(enabled=True):
+        if catalog.key in connected_api_keys:
+            continue
+        entry = {
+            'key': catalog.key,
+            'display_name': catalog.name,
+            'description': catalog.summary,
+            'provider': catalog.provider,
+            'category': catalog.category,
+            'family': catalog.family,
+            'auth_type': catalog.auth_type,
+            'auth_status': models.DataSource.AuthStatus.NOT_AUTHENTICATED,
+        }
+        if catalog.icon_url:
+            entry['icon_url'] = catalog.icon_url
+        if catalog.most_popular:
+            entry['most_popular'] = True
+        if catalog.scopes_label:
+            entry['scopes_label'] = catalog.scopes_label
+        url = connect_url(org_subdomain, catalog)
+        if url:
+            entry['connect_url'] = url
+        entries.append(entry)
+    return entries
+
+
+def _datasource_notes(connected, available):
+    """Per-response steering.
+
+    Cheaper than server `instructions`, which clients truncate at ~2k
+    characters, and cheaper than tool descriptions, which are always in context.
+    These cost nothing until this tool is actually called.
+    """
+    notes = []
+    if available:
+        notes.append(
+            "Entries under `available` are not connected yet. Show the user "
+            "`connect_url` as a clickable link and continue once they confirm. "
+            "Never ask for a password or connection string in this "
+            "conversation."
+        )
+    if any(e.get('reconnect_url') for e in connected):
+        notes.append(
+            "One or more datasources need reconnecting. Give the user the "
+            "`reconnect_url` rather than retrying the query."
+        )
+    if any(e.get('family') == 'api' for e in connected):
+        notes.append(
+            "For `family: api` sources use data_query, not execute_query. Call "
+            "list_datasources with a `datasource` argument first to see its "
+            "report types and their required settings."
+        )
+    return notes
 
 
 

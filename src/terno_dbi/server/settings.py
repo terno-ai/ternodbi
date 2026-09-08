@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 import terno_dbi
+import base64 as _b64
+import hashlib as _hashlib
 
 DEFAULT_DBI_HOME = Path.home() / '.ternodbi'
 
@@ -10,6 +12,20 @@ BASE_DIR = TERNO_DBI_PATH.parent.parent
 SECRET_KEY = os.environ.get('DBI_SECRET_KEY', 'django-insecure-change-me-in-production')
 DEBUG = os.environ.get('DBI_DEBUG', 'True').lower() == 'true'
 ALLOWED_HOSTS = os.environ.get('DBI_ALLOWED_HOSTS', '*').split(',')
+
+# Keys used to encrypt stored credentials such as OAuth tokens and service
+# account keys. `MCP_ENCRYPTION_KEYS` supports comma-separated key rotation:
+# the first key encrypts new values, while any key can decrypt existing ones.
+# `MCP_ENCRYPTION_KEY` is the single-key form.
+# In DEBUG, SECRET_KEY is used as a fallback for local development. Production
+# must set an encryption key explicitly.
+MCP_ENCRYPTION_KEYS = os.environ.get('MCP_ENCRYPTION_KEYS', '')
+MCP_ENCRYPTION_KEY = os.environ.get('MCP_ENCRYPTION_KEY', '')
+if not MCP_ENCRYPTION_KEY and not MCP_ENCRYPTION_KEYS:
+    if DEBUG:
+        MCP_ENCRYPTION_KEY = _b64.urlsafe_b64encode(
+            _hashlib.sha256(SECRET_KEY.encode()).digest()
+        ).decode()
 
 INSTALLED_APPS = [
     'django.contrib.admin',

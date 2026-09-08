@@ -4,11 +4,61 @@ their numeric ID or display name, enabling the hybrid lookup pattern.
 """
 
 import logging
-from typing import Union
+from dataclasses import dataclass, field
+from typing import List, Optional, Union
 from django.http import Http404
 from terno_dbi.core.models import DataSource
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Resolution:
+    """The outcome of resolving an identifier for a specific caller.
+
+    A small result object rather than exceptions or a bare datasource, so the
+    HTTP layer (decorator) and the tool layer (view) can map the *same* outcomes
+    to their own responses without duplicating the resolution logic.
+    """
+
+    status: str                                  # ok | forbidden | ambiguous | not_found
+    datasource: Optional[DataSource] = None      # set only when status == "ok"
+    matches: List[DataSource] = field(default_factory=list)  # for "ambiguous"
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ok"
+
+
+def resolve_for_caller(identifier: Union[int, str], allowed_datasources) -> Resolution:
+    """Resolve a datasource for a caller within `allowed_datasources`.
+
+    Resolution first tries the datasource ID or display name, then falls back to
+    the connector key within the caller's allowed set. Connector keys are not
+    globally unique because each organisation can have its own datasource.
+
+    Only `Http404` from the ID/name lookup is treated as not found. Other errors
+    propagate so database failures and unexpected bugs are not hidden as missing
+    datasources.
+    """
+    resolved_but_forbidden = False
+    try:
+        candidate = resolve_datasource(identifier)
+    except Http404:
+        candidate = None
+
+    if candidate is not None:
+        if allowed_datasources.filter(id=candidate.id).exists():
+            return Resolution("ok", candidate)
+        resolved_but_forbidden = True
+
+    key_matches = list(allowed_datasources.filter(catalog__key=identifier))
+    if len(key_matches) == 1:
+        return Resolution("ok", key_matches[0])
+    if len(key_matches) > 1:
+        return Resolution("ambiguous", matches=key_matches)
+
+    return Resolution("forbidden" if resolved_but_forbidden else "not_found")
 
 
 def resolve_datasource(identifier: Union[int, str], enabled_only: bool = True) -> DataSource:

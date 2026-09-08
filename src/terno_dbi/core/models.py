@@ -114,6 +114,93 @@ class OrganisationGroup(models.Model):
         return f"{self.group.name}"
 
 
+class ConnectorCatalog(models.Model):
+    """Catalog of every source TernoDBI can connect to.
+
+    Global by design, with no organisation FK. A row is an available connector;
+    `DataSource` represents an organisation's connected instance.
+
+    This table is a projection of `catalog.declarations`, not the source of truth.
+    `refresh_catalog()` updates code-owned fields on deploy while preserving
+    deployment-specific settings such as `enabled`, ordering, and display overrides.
+    """
+
+    class AuthType(models.TextChoices):
+        OAUTH = "oauth", _("OAuth")
+        MANUAL = "manual", _("Credentials")
+
+    class Family(models.TextChoices):
+        DATABASE = "database", _("Database")
+        API = "api", _("API")
+
+    key = models.SlugField(max_length=64, unique=True)
+
+    # ---- database-owned: safe to edit, survives a refresh -----------------
+    enabled = models.BooleanField(
+        default=True,
+        help_text="Turn a source off for this deployment. A catalog refresh "
+                  "never changes this.")
+    sort_order = models.IntegerField(default=100)
+    most_popular = models.BooleanField(default=False)
+    display_name_override = models.CharField(max_length=80, blank=True, default="")
+    description_override = models.TextField(blank=True, default="")
+
+    # ---- code-owned: overwritten by refresh_catalog(), read-only in admin --
+    display_name = models.CharField(max_length=80)
+    provider = models.CharField(max_length=60, blank=True, default="")
+    category = models.CharField(max_length=40, blank=True, default="")
+    description = models.TextField(blank=True, default="")
+    icon_url = models.URLField(blank=True, default="")
+    scopes_label = models.CharField(max_length=200, blank=True, default="")
+
+    family = models.CharField(max_length=16, choices=Family)
+    auth_type = models.CharField(max_length=16, choices=AuthType)
+
+    # Manual connectors only: the shape of the credentials form. Never values.
+    fields_spec = models.JSONField(default=list, blank=True)
+
+    has_account_list = models.BooleanField(default=False)
+    has_fields = models.BooleanField(default=False)
+    has_report_types = models.BooleanField(default=False)
+    is_date_range_required = models.BooleanField(default=False)
+    report_types = models.JSONField(default=list, blank=True)
+    default_report_type = models.CharField(max_length=64, blank=True, default="")
+
+    account_label_singular = models.CharField(max_length=40, default="Account")
+    account_label_plural = models.CharField(max_length=40, default="Accounts")
+
+    class Meta:
+        db_table = 'terno_connector_catalog'
+        ordering = ('sort_order', 'display_name')
+        verbose_name_plural = 'Connector catalog'
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def name(self) -> str:
+        return self.display_name_override or self.display_name
+
+    @property
+    def summary(self) -> str:
+        return self.description_override or self.description
+
+    @property
+    def is_api(self) -> bool:
+        return self.family == self.Family.API
+
+    def required_settings(self, report_type: str) -> list:
+        """Settings a report type needs before it can run at all.
+
+        Distinct from filters: these select which upstream call is made, so a
+        missing one is an error rather than an empty result.
+        """
+        for report in self.report_types:
+            if report.get("id") == report_type:
+                return [s for s in report.get("settings", []) if s.get("required", True)]
+        return []
+
+
 class DataSource(models.Model):
 
     class DBType(models.TextChoices):
@@ -175,6 +262,31 @@ class DataSource(models.Model):
         help_text="If True, this datasource is accessible by all organisations (read-only)."
     )
 
+    class AuthStatus(models.TextChoices):
+        NOT_AUTHENTICATED = "not_authenticated", _("Not authenticated")
+        CONNECTED = "connected", _("Connected")
+        EXPIRED = "expired", _("Needs reconnect")
+        ERROR = "error", _("Error")
+
+    catalog = models.ForeignKey(
+        ConnectorCatalog,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='datasources',
+        help_text=(
+            "Which catalog entry this connection is an instance of. "
+            "PROTECT, not CASCADE — retiring a catalog entry must never "
+            "silently delete a customer's configured datasource."
+        ),
+    )
+    auth_status = models.CharField(
+        max_length=32, choices=AuthStatus, default=AuthStatus.CONNECTED,
+        help_text="Whether this connection can currently reach its source.",
+    )
+    auth_error = models.TextField(blank=True, default="")
+    last_synced = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         db_table = 'terno_datasource'
 
@@ -195,6 +307,37 @@ class DataSource(models.Model):
         rule as `decrypted_connection_str`: connect-path use only."""
         from terno_dbi.services import secrets
         return secrets.decrypt_dict(self.connection_json)
+
+    @property
+    def family(self) -> str:
+        """Selects the execution strategy.
+
+        Falls back to 'database' for rows predating the catalog, which were all
+        databases by definition.
+        """
+        return self.catalog.family if self.catalog_id else ConnectorCatalog.Family.DATABASE
+
+    @property
+    def is_api(self) -> bool:
+        return self.family == ConnectorCatalog.Family.API
+
+    @property
+    def needs_reconnect(self) -> bool:
+        return self.auth_status in (
+            self.AuthStatus.EXPIRED, self.AuthStatus.NOT_AUTHENTICATED,
+        )
+
+    def clean(self):
+        super().clean()
+        if self.catalog_id and self.catalog.family == ConnectorCatalog.Family.API:
+            if not self.catalog.enabled:
+                raise ValidationError(
+                    f"{self.catalog.name} is not enabled on this deployment."
+                )
+        elif not (self.connection_str or "").strip():
+            raise ValidationError(
+                {"connection_str": "A database datasource needs a connection string."}
+            )
 
 
 class Table(models.Model):
@@ -754,3 +897,129 @@ class Memory(models.Model):
 
     def __str__(self):
         return f"[{self.store}/{self.scope}] {self.name}"
+
+
+class ApiQueryJob(models.Model):
+    """An asynchronous `data_query` job for an API source.
+
+    Long-running queries are executed as jobs so `data_query` can return a job ID
+    without waiting for the provider request to finish. `get_query_results` polls
+    the job for its result.
+
+    Jobs are scoped to their owning organisation, so a job ID alone can never be
+    used to access another organisation's result.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        RUNNING = "running", _("Running")
+        COMPLETED = "completed", _("Completed")
+        FAILED = "failed", _("Failed")
+
+    id = models.CharField(max_length=40, primary_key=True)
+    organisation = models.ForeignKey(
+        CoreOrganisation, on_delete=models.CASCADE, related_name="api_query_jobs",
+        null=True, blank=True,
+    )
+    data_source = models.ForeignKey(
+        DataSource, on_delete=models.CASCADE, related_name="api_query_jobs",
+    )
+    status = models.CharField(
+        max_length=16, choices=Status, default=Status.PENDING,
+    )
+    spec = models.JSONField(default=dict)
+    result = models.JSONField(null=True, blank=True)
+    error = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "terno_api_query_job"
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["organisation", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.id} [{self.status}]"
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.status in (self.Status.COMPLETED, self.Status.FAILED)
+
+
+class ConnectorOAuthState(models.Model):
+    """Transient state binding one in-flight OAuth authorization to its result.
+
+    Created when a connect flow starts, consumed when the provider redirects
+    back. Holds the PKCE verifier and the target datasource/org so the callback
+    can finish without trusting anything in the redirect except the opaque
+    `state` token (which it looks up here).
+
+    Distinct from `terno_dbi.oauth` state — that is TernoDBI's own provider side.
+    This is the client side, authorizing *to* Google/Meta.
+    """
+
+    state = models.CharField(max_length=128, unique=True, db_index=True)
+    connector_key = models.CharField(max_length=64)
+    code_verifier = models.CharField(max_length=128, blank=True, default="")
+    redirect_uri = models.CharField(max_length=500)
+    organisation = models.ForeignKey(
+        CoreOrganisation, on_delete=models.CASCADE,
+        related_name="connector_oauth_states", null=True, blank=True,
+    )
+    data_source = models.ForeignKey(
+        DataSource, on_delete=models.CASCADE,
+        related_name="oauth_states", null=True, blank=True,
+        help_text="Set when reconnecting an existing datasource; null on first connect.",
+    )
+    return_to = models.CharField(max_length=500, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "terno_connector_oauth_state"
+        indexes = [models.Index(fields=["expires_at"])]
+
+    def __str__(self):
+        return f"{self.connector_key} state {self.state[:8]}…"
+
+    @property
+    def is_expired(self) -> bool:
+        from django.utils import timezone
+        return timezone.now() >= self.expires_at
+
+
+class GroupAccountAllowlist(models.Model):
+    """Define which API accounts each group can query on a connected source.
+
+    For API sources, account access is the main authorization boundary: GA4
+    properties, ad accounts, and channels can be restricted even when they share
+    one OAuth connection.
+
+    If a datasource has an allowlist, callers may access only accounts granted to
+    their groups; no matching account means no access. If no allowlist exists, the
+    datasource is unrestricted within the owning organisation.
+    """
+
+    group = models.ForeignKey(
+        Group, on_delete=models.CASCADE, related_name="account_allowlists",
+    )
+    data_source = models.ForeignKey(
+        DataSource, on_delete=models.CASCADE, related_name="account_allowlists",
+    )
+    account_id = models.CharField(max_length=128)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "terno_group_account_allowlist"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group", "data_source", "account_id"],
+                name="uniq_group_datasource_account",
+            ),
+        ]
+        indexes = [models.Index(fields=["data_source"])]
+
+    def __str__(self):
+        return f"{self.group.name} → {self.data_source_id}:{self.account_id}"

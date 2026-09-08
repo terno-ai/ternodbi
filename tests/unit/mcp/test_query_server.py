@@ -34,7 +34,9 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
 
     async def test_call_tool_dispatch(self):
         """Should dispatch query tools to client."""
-        with patch('terno_dbi.mcp.query_server.client') as mock_client:
+        with patch('terno_dbi.mcp.query_server.client') as mock_client, \
+             patch('terno_dbi.mcp.query_server._api_mcp_tools_enabled',
+                   return_value=True):
             # 0. get_org_prompt
             mock_client.get_org_prompt.return_value = {"org_prompt": "Always answer in French."}
             result = await call_tool("get_org_prompt", {})
@@ -55,13 +57,25 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             mock_client.grep_org_prompt.assert_called_once_with("match")
             assert result[1]["count"] == 1
 
-            # 1. list_datasources
-            mock_client.list_datasources.return_value = [{"id": 1}]
+            # 1. list_datasources — the whole envelope passes through, because
+            # `available` is what lets the agent offer an unconnected source.
+            mock_client.list_datasources_full.return_value = {
+                "status": "success",
+                "datasources": [{"id": 1}],
+                "count": 1,
+                "available": [{"key": "meta_ads", "connect_url": "https://x/connect"}],
+                "available_count": 1,
+                "notes": ["Show the user connect_url."],
+            }
             result = await call_tool("list_datasources", {})
-            mock_client.list_datasources.assert_called()
+            mock_client.list_datasources_full.assert_called()
             data = result[1]
             assert data["datasources"][0]["id"] == 1
             assert data["count"] == 1
+            assert data["available"][0]["key"] == "meta_ads"
+            assert data["notes"]
+            # `status` belongs to the HTTP envelope, not the tool result.
+            assert "status" not in data
 
             # 2. execute_query
             mock_client.execute_query.return_value = {"rows": []}

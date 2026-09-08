@@ -3,6 +3,7 @@ Unit tests for decorators.py (require_service_auth decorator).
 
 Tests authentication, authorization, and resource resolution.
 """
+import json
 import pytest
 from unittest.mock import MagicMock, patch
 from django.http import JsonResponse
@@ -281,3 +282,93 @@ class TestRequireServiceAuthSupertoken:
         
         assert response.status_code == 403
         assert 'no datasource or organisation scope' in response.content.decode()
+
+
+@pytest.mark.django_db
+class TestRequireServiceAuthKeyResolution:
+    """The decorator must resolve a datasource by connector key, scoped to the
+    caller — the identifier list_datasources reports, and the one the agent
+    naturally passes. Regression for the live 'Datasource not found:
+    googleanalytics4' failure, which happened because the decorator only
+    resolved id/name and rejected the key before the view could run.
+    """
+
+    def _ga4(self, subdomain="acme", display_name="Our GA4"):
+        from django.contrib.auth.models import User
+        from terno_dbi.catalog.refresh import refresh_catalog
+        from terno_dbi.core.models import (
+            ConnectorCatalog, CoreOrganisation,
+        )
+        refresh_catalog()
+        user = User.objects.create_user(f"u_{subdomain}", f"{subdomain}@x.com", "pw")
+        org = CoreOrganisation.objects.create(
+            name=subdomain, subdomain=subdomain, owner=user)
+        return DataSource.objects.create(
+            display_name=display_name, type="googleanalytics4",
+            connection_str="", organisation=org,
+            catalog=ConnectorCatalog.objects.get(key="googleanalytics4"),
+        )
+
+    def _token_for(self, *datasources):
+        token = MagicMock(spec=ServiceToken)
+        token.token_type = ServiceToken.TokenType.QUERY
+        ids = [d.id for d in datasources]
+        token.get_accessible_datasources.return_value = DataSource.objects.filter(id__in=ids)
+        token.datasources.exists.return_value = True
+        token.organisation = None
+        return token
+
+    def test_resolves_by_connector_key(self, request_factory):
+        from terno_dbi.decorators import require_service_auth
+        ds = self._ga4()
+
+        @require_service_auth()
+        def view(request, datasource_identifier):
+            return JsonResponse({"ds_id": request.resolved_datasource.id})
+
+        request = request_factory.get("/test/")
+        request.service_token = self._token_for(ds)
+        response = view(request, datasource_identifier="googleanalytics4")
+        assert response.status_code == 200
+        assert json.loads(response.content)["ds_id"] == ds.id
+
+    def test_resolves_by_display_name(self, request_factory):
+        from terno_dbi.decorators import require_service_auth
+        ds = self._ga4(display_name="Google Analytics 4")
+
+        @require_service_auth()
+        def view(request, datasource_identifier):
+            return JsonResponse({"ds_id": request.resolved_datasource.id})
+
+        request = request_factory.get("/test/")
+        request.service_token = self._token_for(ds)
+        response = view(request, datasource_identifier="Google Analytics 4")
+        assert response.status_code == 200
+
+    def test_ambiguous_key_returns_404_with_ids(self, request_factory):
+        from terno_dbi.decorators import require_service_auth
+        a = self._ga4(subdomain="a", display_name="GA4 A")
+        b = self._ga4(subdomain="b", display_name="GA4 B")
+
+        @require_service_auth()
+        def view(request, datasource_identifier):
+            return JsonResponse({"ok": True})
+
+        request = request_factory.get("/test/")
+        request.service_token = self._token_for(a, b)
+        response = view(request, datasource_identifier="googleanalytics4")
+        assert response.status_code == 404
+        assert "specific ID" in json.loads(response.content)["error"]
+
+    def test_unknown_identifier_still_404(self, request_factory):
+        from terno_dbi.decorators import require_service_auth
+        ds = self._ga4()
+
+        @require_service_auth()
+        def view(request, datasource_identifier):
+            return JsonResponse({"ok": True})
+
+        request = request_factory.get("/test/")
+        request.service_token = self._token_for(ds)
+        response = view(request, datasource_identifier="nope")
+        assert response.status_code == 404

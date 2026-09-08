@@ -14,6 +14,7 @@ import pytest
 from terno_dbi.mcp import admin_server, query_server, surface
 from terno_dbi.mcp.instructions import (
     ADMIN_INSTRUCTIONS,
+    CLIENT_DESCRIPTION_CAP,
     INSTRUCTIONS_CHAR_CAP,
     QUERY_INSTRUCTIONS,
 )
@@ -24,9 +25,23 @@ from terno_dbi.mcp.tool_meta import (
     as_tool_result,
 )
 
-# 10 query + 14 admin, each plus the shared `terno_guide`.
-EXPECTED_QUERY_TOOLS = 11
+# 15 query + 14 admin, each plus the shared `terno_guide`. The query count
+# includes the API-source tools, which are gated off by default — these tests
+# assert the full (enabled) surface, so the fixture below turns them on.
+EXPECTED_QUERY_TOOLS = 16
 EXPECTED_ADMIN_TOOLS = 15
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _enable_api_mcp_tools():
+    import os
+    prev = os.environ.get("TERNO_ENABLE_API_MCP_TOOLS")
+    os.environ["TERNO_ENABLE_API_MCP_TOOLS"] = "true"
+    yield
+    if prev is None:
+        os.environ.pop("TERNO_ENABLE_API_MCP_TOOLS", None)
+    else:
+        os.environ["TERNO_ENABLE_API_MCP_TOOLS"] = prev
 
 
 def _tools(server_module):
@@ -57,6 +72,21 @@ def test_instructions_fit_the_truncation_cap(name, blob):
         f"{name} instructions are {len(blob)} chars; Claude Code truncates at "
         f"{INSTRUCTIONS_CHAR_CAP} and the tail would be silently lost."
     )
+
+
+def test_tool_descriptions_fit_the_truncation_cap(query_tools, admin_tools):
+    """The same cap applies per tool description, not only to instructions.
+
+    A description over the cap is silently cut mid-sentence, so whatever
+    guidance sits at the end never reaches the model. Long-form contract belongs
+    in `ternodbi://docs`; per-call steering belongs in a response's `notes`.
+    """
+    for tool in query_tools + admin_tools:
+        assert len(tool.description or "") < CLIENT_DESCRIPTION_CAP, (
+            f"{tool.name}: description is {len(tool.description)} chars; "
+            f"clients truncate at {CLIENT_DESCRIPTION_CAP}. Move the detail "
+            f"into ternodbi://docs or into the response's `notes`."
+        )
 
 
 @pytest.mark.parametrize(
@@ -160,6 +190,22 @@ def test_error_payloads_validate_against_every_schema(query_tools, admin_tools):
     instead of the actual cause.
     """
     _, structured = as_tool_result({"error": "connection refused"})
+    for tool in query_tools + admin_tools:
+        jsonschema.validate(instance=structured, schema=tool.outputSchema)
+
+
+def test_structured_error_object_validates_against_every_schema(query_tools, admin_tools):
+    """API tools fail with an error *object*, not a string.
+
+    A failed data_query returns {"error": {"code": ..., "message": ...}}. If a
+    schema only accepted a string error, the SDK would reject the failure
+    payload with an output-validation error — which is exactly what happened in
+    the field before this was fixed.
+    """
+    _, structured = as_tool_result({
+        "success": False,
+        "error": {"code": "INVALID_REPORT_TYPE", "message": "…", "retriable": False},
+    })
     for tool in query_tools + admin_tools:
         jsonschema.validate(instance=structured, schema=tool.outputSchema)
 

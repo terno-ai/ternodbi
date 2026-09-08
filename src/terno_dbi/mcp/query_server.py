@@ -32,12 +32,43 @@ server = Server(
 register_surface(server)
 
 
+# The API-source MCP tools (data_query et al.) are gated so a production deploy
+# can carry the new code while the submitted mcp.terno.ai tool manifest stays
+# exactly as reviewed. Enable with the Django setting or env var
+# TERNO_ENABLE_API_MCP_TOOLS once the directory listings are approved.
+_API_TOOL_NAMES = frozenset({
+    "get_today", "list_accounts", "list_fields", "data_query", "get_query_results",
+})
+
+# list_datasources' reviewed (stable) description. The richer, api-aware wording
+# below is shown only when the API tools are enabled, so the frozen manifest is
+# byte-for-byte unchanged while the tools are off.
+_LIST_DATASOURCES_DESC_STABLE = "List all configured database connections"
+
+
+def _api_mcp_tools_enabled() -> bool:
+    """Whether the API-source MCP tools are exposed on this server. Off by default."""
+    from django.conf import settings
+    val = getattr(settings, "TERNO_ENABLE_API_MCP_TOOLS", None)
+    if val is None:
+        val = os.environ.get("TERNO_ENABLE_API_MCP_TOOLS", "")
+    return str(val).strip().lower() in ("1", "true", "yes", "on")
+
+
 def own_tools() -> List[Tool]:
     """This server's own tools, without the shared surface.
 
     Separate from `list_tools` so the merged hosted server can compose both
-    registries rather than carrying a third copy of these definitions.
+    registries rather than carrying a third copy of these definitions. The
+    API-source tools are advertised only when TERNO_ENABLE_API_MCP_TOOLS is on.
     """
+    tools = _all_own_tools()
+    if not _api_mcp_tools_enabled():
+        tools = [t for t in tools if t.name not in _API_TOOL_NAMES]
+    return tools
+
+
+def _all_own_tools() -> List[Tool]:
     return [
         Tool(
             name="get_org_prompt",
@@ -86,7 +117,21 @@ def own_tools() -> List[Tool]:
         ),
         Tool(
             name="list_datasources",
-            description="List all configured database connections",
+            description=(
+                (
+                    "List the data sources this organisation has connected, and "
+                    "those it could connect but has not. Start here.\n"
+                    "`datasources` holds connected sources; `available` holds the "
+                    "rest, each with a `connect_url` to show the user as a "
+                    "clickable link. Never ask for a password or connection string "
+                    "in the conversation — that link exists so the credential never "
+                    "passes through it.\n"
+                    "Each entry carries `family`: use execute_query for "
+                    "'database', data_query for 'api'."
+                )
+                if _api_mcp_tools_enabled()
+                else _LIST_DATASOURCES_DESC_STABLE
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {},
@@ -254,6 +299,113 @@ Returns columns and data rows. Use max_rows to limit the number of rows returned
                 "required": ["pattern"]
             }
         ),
+        Tool(
+            name="get_today",
+            description=(
+                "Current UTC date and time. Call before resolving a relative "
+                "range like 'last month' into the start/end dates data_query "
+                "needs. Pass a datasource's timezone to also get its local date."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "timezone": {
+                        "type": "string",
+                        "description": "Optional IANA timezone, e.g. 'America/New_York'."
+                    }
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="list_accounts",
+            description=(
+                "List the accounts (properties, ad accounts, channels) you may "
+                "query on a connected API datasource. Only accounts you are "
+                "permitted to see are returned."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "datasource": {"type": "string", "description": "Datasource name or ID"},
+                },
+                "required": ["datasource"]
+            }
+        ),
+        Tool(
+            name="list_fields",
+            description=(
+                "List the dimensions and metrics available on an API datasource. "
+                "A source may return hundreds — pass `filter` to narrow. Metrics "
+                "flagged is_non_aggregatable must not be summed across rows. The "
+                "response also lists valid report_types for data_query."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "datasource": {"type": "string", "description": "Datasource name or ID"},
+                    "report_type": {"type": "string", "description": "Optional report type id"},
+                    "filter": {"type": "string", "description":
+                               "Optional, comma-separated. Matches field id, name, "
+                               "or group, e.g. 'session,user'."},
+                    "kind": {"type": "string", "enum": ["metric", "dimension"],
+                             "description": "Optional: return only metrics or only "
+                                            "dimensions."},
+                },
+                "required": ["datasource"]
+            }
+        ),
+        Tool(
+            name="data_query",
+            description=(
+                "Query an API datasource (GA4, Meta, Google Ads…). Returns a "
+                "query_id; poll get_query_results with it. Resolve relative "
+                "dates with get_today first. List dimensions before metrics."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "datasource": {"type": "string", "description": "Datasource name or ID"},
+                    "accounts": {"type": "array", "items": {"type": "string"},
+                                 "description": "Account ids from list_accounts"},
+                    "fields": {"type": "array", "items": {"type": "string"},
+                               "description": "Field ids from list_fields, dimensions first"},
+                    "report_type": {"type": "string"},
+                    "settings": {"type": "object", "description": "Report-type settings, e.g. {\"video_id\": \"...\"}"},
+                    "date_range": {
+                        "type": "object",
+                        "properties": {
+                            "start": {"type": "string", "description": "YYYY-MM-DD"},
+                            "end": {"type": "string", "description": "YYYY-MM-DD"},
+                            "inclusive_of_today": {"type": "boolean"},
+                        },
+                        "required": ["start", "end"],
+                    },
+                    "filters": {"type": "string", "description": "e.g. 'country == US AND clicks > 100'"},
+                    "compare": {
+                        "type": "object",
+                        "description": "Period comparison: {type, show, start?, end?}",
+                    },
+                    "timezone": {"type": "string"},
+                    "max_rows": {"type": "integer"},
+                },
+                "required": ["datasource", "accounts", "fields", "date_range"]
+            }
+        ),
+        Tool(
+            name="get_query_results",
+            description=(
+                "Retrieve a data_query result by its query_id. Poll until "
+                "status is 'completed' or 'failed'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query_id": {"type": "string", "description": "From data_query. Copy verbatim."},
+                },
+                "required": ["query_id"]
+            }
+        ),
 
     ]
 
@@ -280,6 +432,11 @@ def _dispatch(name: str, arguments: Dict[str, Any]):
     try:
         result = None
 
+        # Defence in depth: a gated API tool is not advertised, but a client
+        # could still call it by name. When off, treat it as non-existent.
+        if name in _API_TOOL_NAMES and not _api_mcp_tools_enabled():
+            return as_error_result(f"Unknown tool: {name}")
+
         if name == "terno_guide":
             result = handle_guide(arguments)
 
@@ -293,9 +450,31 @@ def _dispatch(name: str, arguments: Dict[str, Any]):
             result = client.grep_org_prompt(arguments["pattern"])
 
         elif name == "list_datasources":
-            result = {"datasources": client.list_datasources()}
-            if isinstance(result["datasources"], list):
-                result["count"] = len(result["datasources"])
+            payload = client.list_datasources_full()
+            if _api_mcp_tools_enabled():
+                # Pass the envelope through rather than rebuilding it: `available`
+                # and `notes` are the point of this tool now, and re-deriving
+                # `count` here would let the two drift.
+                result = {
+                    key: value for key, value in payload.items()
+                    if key != "status"
+                }
+                if "count" not in result and isinstance(result.get("datasources"), list):
+                    result["count"] = len(result["datasources"])
+            else:
+                # Frozen 1.0.2 shape: connected database sources only, original
+                # fields, no `available`/`notes`/`family`. Keeps the submitted
+                # mcp.terno.ai response byte-for-byte identical while API tools
+                # are off. (API-family sources are omitted here — there is no
+                # data_query tool to query them in this manifest.)
+                stable_keys = ("id", "name", "type", "description",
+                               "is_erp", "dialect_name", "dialect_version")
+                dbs = [
+                    {k: entry.get(k) for k in stable_keys}
+                    for entry in (payload.get("datasources") or [])
+                    if entry.get("family", "database") == "database"
+                ]
+                result = {"datasources": dbs, "count": len(dbs)}
 
         elif name == "list_tables":
             datasource = arguments["datasource"]
@@ -345,6 +524,26 @@ def _dispatch(name: str, arguments: Dict[str, Any]):
             matches = client.grep_memory(arguments["pattern"],
                                          datasource_id=arguments.get("datasource_id"))
             result = {"matches": matches, "count": len(matches)}
+
+        elif name == "get_today":
+            result = client.get_today(arguments.get("timezone"))
+
+        elif name == "list_accounts":
+            result = client.list_accounts(arguments["datasource"])
+
+        elif name == "list_fields":
+            result = client.list_fields(arguments["datasource"],
+                                        report_type=arguments.get("report_type"),
+                                        filter=arguments.get("filter"),
+                                        kind=arguments.get("kind"))
+
+        elif name == "data_query":
+            datasource = arguments["datasource"]
+            payload = {k: v for k, v in arguments.items() if k != "datasource"}
+            result = client.data_query(datasource, payload)
+
+        elif name == "get_query_results":
+            result = client.get_query_results(arguments["query_id"])
 
         else:
             return as_error_result(f"Unknown tool: {name}")

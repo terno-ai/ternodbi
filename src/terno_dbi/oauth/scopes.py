@@ -54,6 +54,12 @@ TOOL_SCOPES: Dict[str, Optional[str]] = {
     "get_org_prompt": QUERY_READ,
     "grep_org_prompt": QUERY_READ,
     "execute_query": QUERY_EXECUTE,
+    # --- API-source (marketing/analytics) tools ---
+    "get_today": QUERY_READ,
+    "list_accounts": QUERY_READ,
+    "list_fields": QUERY_READ,
+    "data_query": QUERY_EXECUTE,
+    "get_query_results": QUERY_READ,
     # --- admin service (transcribed from @require_scope) ---
     "get_table_info": ADMIN_READ,
     "validate_connection": ADMIN_WRITE,

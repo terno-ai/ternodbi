@@ -1,9 +1,20 @@
 from django.urls import path
 from . import views
+from . import api_views
 
 app_name = "query_service"
 
 urlpatterns = [
+    # API-source (marketing/analytics) tools.
+    path("today/", api_views.api_get_today, name="api_get_today"),
+    path("datasources/<str:datasource_identifier>/accounts/",
+         api_views.api_list_accounts, name="api_list_accounts"),
+    path("datasources/<str:datasource_identifier>/fields/",
+         api_views.api_list_fields, name="api_list_fields"),
+    path("datasources/<str:datasource_identifier>/data-query/",
+         api_views.api_data_query, name="api_data_query"),
+    path("query-results/<str:query_id>/",
+         api_views.api_query_results, name="api_query_results"),
     path("organisation/prompt/", views.get_org_prompt, name="get_org_prompt"),
     path("organisation/prompt/grep/", views.grep_org_prompt, name="grep_org_prompt"),
     path("datasources/", views.list_datasources, name="list_datasources"),

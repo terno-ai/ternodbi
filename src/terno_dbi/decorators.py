@@ -3,7 +3,7 @@ from functools import wraps
 from django.http import JsonResponse
 from terno_dbi.core.models import Table, TableColumn
 from terno_dbi.core import conf
-from terno_dbi.services.resolver import resolve_datasource
+from terno_dbi.services.resolver import resolve_for_caller
 
 logger = logging.getLogger(__name__)
 
@@ -55,23 +55,32 @@ def require_service_auth(allowed_types=None):
             )
 
             if ds_identifier:
-                try:
-                    ds = resolve_datasource(ds_identifier)
-                    if not allowed_ds.filter(id=ds.id).exists():
-                        logger.warning(
-                            "Datasource access denied: token '%s' attempted access to datasource '%s'",
-                            token.name, ds_identifier
-                        )
-                        return JsonResponse(
-                            {"error": "Access denied to datasource"},
-                            status=403
-                        )
-
-                    request.resolved_datasource = ds
-                    logger.debug("Datasource resolved: %s -> id=%d", ds_identifier, ds.id)
-                except Exception as e:
+                res = resolve_for_caller(ds_identifier, allowed_ds)
+                if res.status == "ok":
+                    request.resolved_datasource = res.datasource
+                    logger.debug("Datasource resolved: %s -> id=%d",
+                                 ds_identifier, res.datasource.id)
+                elif res.status == "ambiguous":
+                    ids = ", ".join(str(m.id) for m in res.matches)
+                    return JsonResponse(
+                        {"error": f"Multiple datasources match '{ds_identifier}'. "
+                                  f"Use a specific ID: {ids}."},
+                        status=404,
+                    )
+                elif res.status == "forbidden":
+                    logger.warning(
+                        "Datasource access denied: token '%s' -> '%s'",
+                        token.name, ds_identifier,
+                    )
+                    return JsonResponse(
+                        {"error": "Access denied to datasource"}, status=403
+                    )
+                else:  # not_found
                     logger.warning("Datasource not found: %s", ds_identifier)
-                    return JsonResponse({"error": f"Datasource not found: {ds_identifier}"}, status=404)
+                    return JsonResponse(
+                        {"error": f"Datasource not found: {ds_identifier}"},
+                        status=404,
+                    )
 
             table_id = kwargs.get('table_id')
             if table_id:

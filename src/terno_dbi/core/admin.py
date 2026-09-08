@@ -24,12 +24,64 @@ PARENT_APP_INSTALLED = apps.is_installed('terno')
 
 if not PARENT_APP_INSTALLED:
     from .models import (
+        ConnectorCatalog,
         DataSource, Table, TableColumn, ForeignKey,
         PrivateTableSelector, GroupTableSelector,
         PrivateColumnSelector, GroupColumnSelector,
         GroupTableRowFilter, TableRowFilter,
-        CoreOrganisation, OrganisationUser, OrganisationGroup, 
+        CoreOrganisation, OrganisationUser, OrganisationGroup,
     )
+
+    @admin.register(ConnectorCatalog)
+    class ConnectorCatalogAdmin(admin.ModelAdmin):
+        """The catalog is a projection of code — most of it is read-only here.
+
+        Only the operational columns are editable, because those are the ones
+        `refresh_catalog()` preserves. Everything else is overwritten on the
+        next deploy, so allowing edits would silently discard them.
+
+        Rows are not addable or deletable for the same reason: they come from
+        `terno_dbi.catalog.declarations`, and a connector withdrawn from code is
+        disabled rather than removed so that any DataSource pointing at it keeps
+        resolving.
+        """
+
+        list_display = ('key', 'display_name', 'family', 'auth_type',
+                        'category', 'enabled', 'most_popular', 'sort_order')
+        list_filter = ('family', 'auth_type', 'enabled', 'category')
+        list_editable = ('enabled', 'most_popular', 'sort_order')
+        search_fields = ('key', 'display_name', 'provider', 'category')
+        ordering = ('sort_order', 'display_name')
+
+        _CODE_OWNED = (
+            'key', 'display_name', 'provider', 'category', 'description',
+            'icon_url', 'scopes_label', 'family', 'auth_type', 'fields_spec',
+            'has_account_list', 'has_fields', 'has_report_types',
+            'is_date_range_required', 'report_types', 'default_report_type',
+            'account_label_singular', 'account_label_plural',
+        )
+        readonly_fields = _CODE_OWNED
+
+        fieldsets = (
+            ('Deployment settings', {
+                'fields': ('enabled', 'sort_order', 'most_popular',
+                           'display_name_override', 'description_override'),
+                'description': 'These are yours. A catalog refresh never '
+                               'changes them.',
+            }),
+            ('Declared in code', {
+                'fields': _CODE_OWNED,
+                'description': 'Projected from terno_dbi.catalog.declarations '
+                               'and overwritten on every deploy.',
+                'classes': ('collapse',),
+            }),
+        )
+
+        def has_add_permission(self, request):
+            return False
+
+        def has_delete_permission(self, request, obj=None):
+            return False
 
     class TableColumnInline(admin.TabularInline):
         model = TableColumn

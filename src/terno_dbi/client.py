@@ -93,10 +93,58 @@ class TernoDBIClient:
         return self._handle_response(response)
 
     def list_datasources(self) -> List[Dict]:
+        """Connected datasources only.
+
+        Kept list-returning for callers that predate the catalog. Use
+        `list_datasources_full()` where the unconnected sources matter.
+        """
+        return self.list_datasources_full().get("datasources", [])
+
+    def list_datasources_full(self) -> Dict:
+        """The whole envelope: connected sources, available ones, and notes.
+
+        `available` is what lets an agent offer a source nobody has set up yet,
+        so the MCP tool wants this rather than the bare list.
+        """
         url = f"{self.base_url}/api/query/datasources/"
         response = self._http.get(url, headers=self._get_headers())
-        data = self._handle_response(response)
-        return data.get("datasources", [])
+        return self._handle_response(response)
+
+    # -- API-source (marketing/analytics) tools -----------------------------
+
+    def get_today(self, timezone: Optional[str] = None) -> Dict:
+        url = f"{self.base_url}/api/query/today/"
+        params = {"timezone": timezone} if timezone else None
+        response = self._http.get(url, params=params, headers=self._get_headers())
+        return self._handle_response(response)
+
+    def list_accounts(self, datasource: str) -> Dict:
+        url = f"{self.base_url}/api/query/datasources/{datasource}/accounts/"
+        response = self._http.get(url, headers=self._get_headers())
+        return self._handle_response(response)
+
+    def list_fields(self, datasource: str, report_type: Optional[str] = None,
+                    filter: Optional[str] = None, kind: Optional[str] = None) -> Dict:
+        url = f"{self.base_url}/api/query/datasources/{datasource}/fields/"
+        params = {}
+        if report_type:
+            params["report_type"] = report_type
+        if filter:
+            params["filter"] = filter
+        if kind:
+            params["kind"] = kind
+        response = self._http.get(url, params=params or None, headers=self._get_headers())
+        return self._handle_response(response)
+
+    def data_query(self, datasource: str, payload: Dict) -> Dict:
+        url = f"{self.base_url}/api/query/datasources/{datasource}/data-query/"
+        response = self._http.post(url, json=payload, headers=self._get_headers())
+        return self._handle_response(response)
+
+    def get_query_results(self, query_id: str) -> Dict:
+        url = f"{self.base_url}/api/query/query-results/{query_id}/"
+        response = self._http.get(url, headers=self._get_headers())
+        return self._handle_response(response)
 
     def create_datasource(self, display_name: str, db_type: str,
                           connection_str: str,

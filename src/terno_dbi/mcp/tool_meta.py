@@ -17,8 +17,12 @@ from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
 
 _ERROR = {
     "error": {
-        "type": "string",
-        "description": "Present instead of the payload when the call failed.",
+        "anyOf": [
+            {"type": "string"},
+            {"type": "object"},
+        ],
+        "description": "Present instead of the payload when the call failed. "
+                       "A string for SQL tools, an object for API tools.",
     }
 }
 
@@ -34,6 +38,15 @@ def _out(description: str, **props: Dict[str, Any]) -> Dict[str, Any]:
 
 
 _COUNT = {"type": "integer", "description": "Number of items returned."}
+_NOTES = {
+    "type": "array",
+    "description": (
+        "Guidance about this particular response. Carried per response rather "
+        "than in the tool description or server instructions, because those are "
+        "always in context and clients truncate them."
+    ),
+    "items": {"type": "string"},
+}
 _ROWS = {
     "type": "array",
     "description": "Result rows, each an object keyed by column name.",
@@ -86,16 +99,32 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
     },
     # ---------------------------------------------------------------- query
     "list_datasources": {
-        "title": "List databases",
+        "title": "List data sources",
         "hints": dict(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False),
         "output": _out(
-            "The database connections this token may reach.",
+            "Data sources this token may reach, plus those it could connect.",
             datasources={
                 "type": "array",
-                "description": "Configured datasources, each with at least an id and a display name.",
+                "description": (
+                    "Connected sources. Each carries at least an id and a "
+                    "display name, plus `family` ('database' or 'api') and "
+                    "`auth_status`. A source needing reauthorisation also "
+                    "carries `reconnect_url`."
+                ),
                 "items": {"type": "object", "additionalProperties": True},
             },
             count=_COUNT,
+            available={
+                "type": "array",
+                "description": (
+                    "Sources not connected yet. Each carries `key`, "
+                    "`display_name`, `auth_type` and a `connect_url` to give "
+                    "the user."
+                ),
+                "items": {"type": "object", "additionalProperties": True},
+            },
+            available_count=_COUNT,
+            notes=_NOTES,
         ),
     },
     "list_tables": {
@@ -176,6 +205,52 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
             "Index rows whose bodies matched the pattern. Bodies are not returned.",
             matches=_INDEX_ROWS,
             count=_COUNT,
+        ),
+    },
+    "get_today": {
+        "title": "Get today's date",
+        "hints": dict(readOnlyHint=True, destructiveHint=False, idempotentHint=False, openWorldHint=False),
+        "output": _out(
+            "Current UTC date/time, plus the datasource-local date when a timezone is given.",
+            utc_date={"type": "string"},
+            utc_datetime={"type": "string"},
+        ),
+    },
+    "list_accounts": {
+        "title": "List queryable accounts",
+        "hints": dict(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True),
+        "output": _out(
+            "The accounts you may query on this source, already filtered to your allowlist.",
+            accounts=_ROWS,
+            count=_COUNT,
+        ),
+    },
+    "list_fields": {
+        "title": "List available fields",
+        "hints": dict(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True),
+        "output": _out(
+            "Dimensions and metrics available on this source. is_non_aggregatable metrics must not be summed.",
+            fields=_ROWS,
+            count=_COUNT,
+        ),
+    },
+    "data_query": {
+        "title": "Query a marketing source",
+        "hints": dict(readOnlyHint=True, destructiveHint=False, idempotentHint=False, openWorldHint=True),
+        "output": _out(
+            "A query handle. Poll get_query_results with query_id.",
+            query_id={"type": "string"},
+            status={"type": "string"},
+        ),
+    },
+    "get_query_results": {
+        "title": "Get query results",
+        "hints": dict(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False),
+        "output": _out(
+            "The query's status and, once completed, its rows.",
+            status={"type": "string"},
+            rows=_ROWS,
+            row_count=_COUNT,
         ),
     },
     "get_org_prompt": {
