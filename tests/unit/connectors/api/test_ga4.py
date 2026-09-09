@@ -285,3 +285,68 @@ class TestRegistration:
 
         conn = make_ga4_connector(_D())
         assert conn._token_refresher is not None
+
+
+class TestPerPropertyMetadata:
+    """Metadata is fetched and cached per property, so custom dimensions defined
+    on one property are discoverable and valid there — and only there."""
+
+    A, B = "440705731", "111222333"
+
+    def _http(self):
+        meta_a = {
+            "dimensions": [
+                {"apiName": "date", "uiName": "Date", "category": "Time"},
+                {"apiName": "customEvent:foo", "uiName": "Foo", "category": "Custom"},
+            ],
+            "metrics": [
+                {"apiName": "sessions", "uiName": "Sessions",
+                 "type": "TYPE_INTEGER", "category": "Session"},
+            ],
+        }
+        meta_b = {
+            "dimensions": [
+                {"apiName": "date", "uiName": "Date", "category": "Time"},
+                {"apiName": "customEvent:bar", "uiName": "Bar", "category": "Custom"},
+            ],
+            "metrics": [
+                {"apiName": "sessions", "uiName": "Sessions",
+                 "type": "TYPE_INTEGER", "category": "Session"},
+            ],
+        }
+
+        def http(method, url, token, body=None):
+            assert token == "tok"
+            if "accountSummaries" in url:
+                return ACCOUNT_SUMMARIES
+            if "/metadata" in url:
+                return meta_a if self.A in url else meta_b
+            if ":runReport" in url:
+                return REPORT
+            raise AssertionError(f"unexpected call: {method} {url}")
+        return http
+
+    def _spec(self, account, fields):
+        return QuerySpec(
+            accounts=[account], fields=list(fields),
+            date_range=DateRange("2026-08-01", "2026-08-31"),
+            report_type="Default",
+        )
+
+    def test_list_fields_unions_custom_dimensions_across_properties(self):
+        conn = GA4Connector(_DS(), http=self._http())
+        ids = {f.id for f in conn.list_fields()}
+        # Every property's custom dimensions are surfaced, not just the first's.
+        assert "customEvent:foo" in ids
+        assert "customEvent:bar" in ids
+
+    def test_custom_dimension_valid_on_its_own_property(self):
+        conn = GA4Connector(_DS(), http=self._http())
+        result = conn.query(self._spec(self.A, ["customEvent:foo", "sessions"]))
+        assert result.row_count == 2      # accepted — no false rejection
+
+    def test_custom_dimension_rejected_on_a_property_that_lacks_it(self):
+        conn = GA4Connector(_DS(), http=self._http())
+        with pytest.raises(ApiError) as exc:
+            conn.query(self._spec(self.B, ["customEvent:foo", "sessions"]))
+        assert exc.value.code == ErrorCode.INVALID_FIELD

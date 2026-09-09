@@ -66,6 +66,16 @@ class TestConnect:
             _get("/connect", outsider, connector="googleanalytics4"))
         assert resp.status_code == 403
 
+    def test_non_admin_member_cannot_connect(self, member, settings):
+        # Connecting is an admin action; a plain member (not owner, not in the
+        # Org Admin group) is forbidden — they query, they don't connect.
+        settings.DEBUG = True
+        plain = User.objects.create_user("plain", "p@x.com", "pw")
+        OrganisationUser.objects.create(organisation=member["org"], user=plain)
+        resp = web.connect(
+            _get("/connect", plain, connector="googleanalytics4"))
+        assert resp.status_code == 403
+
     def test_member_is_redirected_to_google_consent(self, member, settings):
         settings.DEBUG = True
         resp = web.connect(
@@ -184,6 +194,28 @@ class TestCallback:
         # Tokens gone: connection_json is stored encrypted, so the decrypted
         # payload — not the (non-empty) envelope — must be empty.
         assert all(not secrets.decrypt_dict(d.connection_json) for d in remaining)
+
+    def test_non_admin_member_cannot_disconnect(self, member, settings):
+        from terno_dbi.core.models import ConnectorCatalog
+
+        cat = ConnectorCatalog.objects.get(key="googleanalytics4")
+        DataSource.objects.create(
+            display_name="GA4", type="googleanalytics4", connection_str="",
+            organisation=member["org"], catalog=cat,
+            auth_status=DataSource.AuthStatus.CONNECTED,
+            connection_json={"ACCESS_TOKEN": "at"})
+        plain = User.objects.create_user("plain2", "p2@x.com", "pw")
+        OrganisationUser.objects.create(organisation=member["org"], user=plain)
+
+        request = RequestFactory().post(
+            "/connectors/api/googleanalytics4/disconnect/",
+            HTTP_HOST="acme.app.terno.ai")
+        request.user = plain
+        resp = web.disconnect_connector(request, "googleanalytics4")
+        assert resp.status_code == 403
+        # The source is untouched.
+        assert DataSource.objects.get(type="googleanalytics4").auth_status == (
+            DataSource.AuthStatus.CONNECTED)
 
     def test_declined_authorization_is_reported(self, member):
         resp = web.oauth_callback(

@@ -62,6 +62,24 @@ def _login_redirect(request):
     return redirect(f"{login_url}?next={request.get_full_path()}")
 
 
+def _is_org_admin(user, org) -> bool:
+    """Whether `user` may manage (connect/disconnect) sources for `org`.
+
+    Connecting a source exposes the connector's data to the whole organisation on
+    that user's provider credentials, so it is an admin action — mirroring how a
+    database source is added. The admin set is: a member of the configurable
+    "Org Admin" group (the same group that grants the agent its admin scope), the
+    organisation's owner, or a Django superuser. Querying a connected source
+    stays open to every member (narrowed only by the account allowlist).
+    """
+    if getattr(user, "is_superuser", False):
+        return True
+    if getattr(org, "owner_id", None) == getattr(user, "id", None):
+        return True
+    group = getattr(settings, "TERNO_ORG_ADMIN_GROUP", "Org Admin")
+    return user.groups.filter(name=group).exists()
+
+
 def _callback_uri(request) -> str:
     """The single redirect URI registered with the OAuth provider.
 
@@ -97,6 +115,13 @@ def connect(request):
     org = _authorised_org(request)
     if org is None:
         return HttpResponse("You are not a member of this organisation.", status=403)
+
+    if not _is_org_admin(request.user, org):
+        return HttpResponse(
+            "Only organisation admins can connect a data source. Ask an admin "
+            "to connect it — once connected, everyone in the org can query it.",
+            status=403,
+        )
 
     return_to = request.GET.get("return_to", "")
     if return_to and not url_has_allowed_host_and_scheme(
@@ -224,7 +249,12 @@ def list_api_connectors(request):
         if not getattr(request, "user", None) or not request.user.is_authenticated:
             return _login_redirect(request)
         return HttpResponse("You are not a member of this organisation.", status=403)
-    return JsonResponse({"connectors": _connector_cards(org)})
+    # can_manage tells the gallery whether to show Connect/Disconnect controls;
+    # the connect and disconnect endpoints enforce it server-side regardless.
+    return JsonResponse({
+        "connectors": _connector_cards(org),
+        "can_manage": _is_org_admin(request.user, org),
+    })
 
 
 @require_http_methods(["POST"])
@@ -245,6 +275,10 @@ def disconnect_connector(request, connector_key):
     org = _authorised_org(request)
     if org is None:
         return HttpResponse("Not permitted.", status=403)
+
+    if not _is_org_admin(request.user, org):
+        return HttpResponse(
+            "Only organisation admins can disconnect a data source.", status=403)
 
     rows = list(DataSource.objects.filter(
         organisation=org, catalog__key=connector_key, catalog__family="api",

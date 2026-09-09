@@ -62,7 +62,7 @@ class GA4Connector(ApiConnector):
                  token_refresher: Optional[Callable] = None):
         super().__init__(datasource, token_refresher=token_refresher)
         self._http = http or _default_http
-        self._metadata_cache: Optional[Dict[str, Field]] = None
+        self._metadata_cache: Dict[str, Dict[str, Field]] = {}
 
     # -- transport ----------------------------------------------------------
 
@@ -107,22 +107,20 @@ class GA4Connector(ApiConnector):
                 ))
         return accounts
 
-    def _load_metadata(self) -> Dict[str, Field]:
-        """Field metadata for a representative property, cached on the instance.
+    def _property_metadata(self, account_id: str) -> Dict[str, Field]:
+        """Field metadata for one property, cached per property.
 
-        GA4 metadata is per-property (custom dimensions differ), but the standard
-        catalogue is shared; we fetch it once against the first accessible
-        property. Custom dimensions of other properties are not surfaced here.
+        The standard catalogue (~200 dimensions/metrics) is identical across
+        properties, but custom dimensions/metrics (customEvent:*, customUser:*)
+        are defined per property. Caching by property keeps each property's custom
+        fields distinct, so both discovery and validation are correct for every
+        property — not just the first accessible one.
         """
-        if self._metadata_cache is not None:
-            return self._metadata_cache
+        prop = self._property_path(account_id)
+        cached = self._metadata_cache.get(prop)
+        if cached is not None:
+            return cached
 
-        accounts = self.list_accounts()
-        if not accounts:
-            self._metadata_cache = {}
-            return self._metadata_cache
-
-        prop = self._property_path(accounts[0].id)
         data = self._call("GET", f"{_DATA_BASE}/{prop}/metadata")
 
         fields: Dict[str, Field] = {}
@@ -153,20 +151,37 @@ class GA4Connector(ApiConnector):
                 is_non_aggregatable=api_name in _NON_AGGREGATABLE,
                 is_monetary=gtype == "TYPE_CURRENCY",
             )
-        self._metadata_cache = fields
+        self._metadata_cache[prop] = fields
         return fields
 
+    def _merged_metadata(self, account_ids: Optional[List[str]] = None) -> Dict[str, Field]:
+        """Union of field metadata across properties (all accessible ones when
+        `account_ids` is None). Standard fields dedupe; every property's custom
+        dimensions are included, so discovery surfaces the full catalogue."""
+        if account_ids is None:
+            account_ids = [a.id for a in self.list_accounts()]
+        merged: Dict[str, Field] = {}
+        for aid in account_ids:
+            merged.update(self._property_metadata(aid))
+        return merged
+
     def list_fields(self, report_type: Optional[str] = None) -> List[Field]:
-        return list(self._load_metadata().values())
+        return list(self._merged_metadata().values())
 
     # -- query --------------------------------------------------------------
 
     def _run(self, spec: QuerySpec) -> QueryResult:
-        meta = self._load_metadata()
-        if meta:
+        meta_by_account = {a: self._property_metadata(a) for a in spec.accounts}
+        for meta in meta_by_account.values():
+            if not meta:
+                continue
             unknown = [f for f in spec.fields if f not in meta]
             if unknown:
                 raise invalid_field(unknown[0], list(meta.keys()))
+
+        meta: Dict[str, Field] = {}
+        for m in meta_by_account.values():
+            meta.update(m)
 
         dimensions = [f for f in spec.fields
                       if f not in meta or meta[f].kind == "dimension"]
