@@ -75,6 +75,33 @@ class TestDeclarations:
             report_types=[ReportType("A", "A"), ReportType("B", "B")],
         )   # default_report_type unset — must not raise
 
+    def test_rate_limits_default_to_unlimited_and_are_projected(self):
+        spec = ConnectorSpec(
+            key="x", display_name="X",
+            family=Family.API, auth_type=AuthType.OAUTH,
+        )
+        owned = spec.code_owned_fields()
+        # Absent = 0 = no limit on that axis.
+        assert owned["rate_limit_per_second"] == 0
+        assert owned["rate_limit_per_day"] == 0
+
+        spec = ConnectorSpec(
+            key="y", display_name="Y",
+            family=Family.API, auth_type=AuthType.OAUTH,
+            rate_limit_per_second=10, rate_limit_per_day=10000,
+        )
+        owned = spec.code_owned_fields()
+        assert owned["rate_limit_per_second"] == 10
+        assert owned["rate_limit_per_day"] == 10000
+
+    def test_negative_rate_limit_is_rejected(self):
+        with pytest.raises(ValueError, match="rate_limit_per_second"):
+            ConnectorSpec(
+                key="x", display_name="X",
+                family=Family.API, auth_type=AuthType.OAUTH,
+                rate_limit_per_second=-1,
+            )
+
     def test_code_owned_fields_exclude_deployment_columns(self):
         fields = DECLARED_CONNECTORS[0].code_owned_fields()
         for owned_by_deployment in (

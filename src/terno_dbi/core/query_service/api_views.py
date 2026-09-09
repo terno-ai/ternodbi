@@ -26,10 +26,20 @@ from terno_dbi.services.resolver import resolve_for_caller
 
 logger = logging.getLogger(__name__)
 
+
 # Conservative default limits until per-connector limits are declared. Real
 # quotas (Google Ads) come with the connector.
-#temp
-_DEFAULT_RATE_LIMIT = RateLimit(per_second=100000, per_day=10000000000)
+def _rate_limit_for(ds) -> RateLimit:
+    """The connector's declared per-(org, source) rate limit, from its catalog.
+
+    0 on an axis means no limit there; a source with no catalog, or all zeros, is
+    unlimited — so the guard bites only where a connector declares a real provider
+    quota (see ConnectorSpec.rate_limit_per_second / _per_day).
+    """
+    cat = getattr(ds, "catalog", None)
+    per_second = getattr(cat, "rate_limit_per_second", 0) or None
+    per_day = getattr(cat, "rate_limit_per_day", 0) or None
+    return RateLimit(per_second=per_second, per_day=per_day)
 
 
 def _resolve_api_datasource(request, identifier):
@@ -207,7 +217,7 @@ def api_data_query(request, datasource_identifier):
             ds, spec,
             connector_factory=registry.build_connector,
             permitted_accounts=permitted,
-            rate_limit=_DEFAULT_RATE_LIMIT,
+            rate_limit=_rate_limit_for(ds),
         )
     except ApiError as exc:
         return _err(exc)

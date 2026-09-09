@@ -195,6 +195,12 @@ _APIS: List[ConnectorSpec] = [
             ReportType("CohortMonthly", "Monthly cohort"),
         ],
         default_report_type="Default",   # GA4 has an obvious default
+        # Conservative guard on the shared Google OAuth app's quota. The GA4 Data
+        # API bills in tokens, not requests, so this is a coarse safety net, not a
+        # mirror of the real quota — tune against production usage. Per (org,
+        # property): ~50 report calls/sec, ~10k/day.
+        rate_limit_per_second=50,
+        rate_limit_per_day=500000,
         default_enabled=True,
     ),
     ConnectorSpec(

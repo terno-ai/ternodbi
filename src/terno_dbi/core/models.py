@@ -169,6 +169,12 @@ class ConnectorCatalog(models.Model):
     account_label_singular = models.CharField(max_length=40, default="Account")
     account_label_plural = models.CharField(max_length=40, default="Accounts")
 
+    # Outbound provider rate limits, per (organisation, source). 0 = no limit on
+    # that axis. Code-owned (projected from the connector spec); enforced in the
+    # dispatch pipeline before each provider call.
+    rate_limit_per_second = models.IntegerField(default=0)
+    rate_limit_per_day = models.IntegerField(default=0)
+
     class Meta:
         db_table = 'terno_connector_catalog'
         ordering = ('sort_order', 'display_name')

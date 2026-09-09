@@ -99,6 +99,9 @@ class ConnectorSpec:
     account_label_singular: str = "Account"
     account_label_plural: str = "Accounts"
 
+    rate_limit_per_second: Optional[int] = None
+    rate_limit_per_day: Optional[int] = None
+
     # Only consulted when the catalog row is first created. Afterwards
     # `enabled` belongs to the database and a refresh leaves it alone.
     default_enabled: bool = True
@@ -127,6 +130,10 @@ class ConnectorSpec:
                     f"{self.default_report_type!r} is not one of its declared "
                     f"report types {sorted(ids)}"
                 )
+        for _name, _val in (("rate_limit_per_second", self.rate_limit_per_second),
+                            ("rate_limit_per_day", self.rate_limit_per_day)):
+            if _val is not None and _val < 0:
+                raise ValueError(f"{self.key}: {_name} must be >= 0, got {_val}")
 
     @property
     def has_report_types(self) -> bool:
@@ -156,6 +163,8 @@ class ConnectorSpec:
             "default_report_type": self.default_report_type or "",
             "account_label_singular": self.account_label_singular,
             "account_label_plural": self.account_label_plural,
+            "rate_limit_per_second": self.rate_limit_per_second or 0,
+            "rate_limit_per_day": self.rate_limit_per_day or 0,
         }
 
 
