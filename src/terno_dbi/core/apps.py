@@ -53,5 +53,13 @@ def _register_api_connectors():
     """
     from terno_dbi.connectors.api import registry
     from terno_dbi.connectors.api.sources.ga4 import make_ga4_connector
+    from terno_dbi.connectors.api.sources.gsc import make_gsc_connector
+    from terno_dbi.connectors.api.sources.google_ads import make_google_ads_connector
+    from terno_dbi.connectors.api.sources.meta_ads import make_meta_ads_connector
+    from terno_dbi.connectors.api.sources.youtube import make_youtube_connector
 
     registry.register("googleanalytics4", make_ga4_connector)
+    registry.register("google_search_console", make_gsc_connector)
+    registry.register("google_ads", make_google_ads_connector)
+    registry.register("meta_ads", make_meta_ads_connector)
+    registry.register("youtube", make_youtube_connector)

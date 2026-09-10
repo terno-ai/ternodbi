@@ -192,7 +192,7 @@ def _build_spec(body) -> QuerySpec:
         filters=body.get("filters"),
         compare=compare,
         timezone=body.get("timezone", "UTC"),
-        max_rows=int(body.get("max_rows", 1000)),
+        max_rows=int(body.get("max_rows") or 1000),
     )
 
 

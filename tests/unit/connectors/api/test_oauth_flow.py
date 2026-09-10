@@ -50,6 +50,23 @@ class TestStart:
         assert "analytics.readonly" in out["authorization_url"]
         assert ConnectorOAuthState.objects.filter(state=out["state"]).exists()
 
+    def test_consent_is_scoped_to_just_this_connector(self, org, catalog):
+        # Connecting GA4 must ask only for the GA4 scope — not Ads/YouTube/GSC.
+        # include_granted_scopes would make Google merge every previously-granted
+        # scope into this consent screen, so it must not be sent.
+        from urllib.parse import urlparse, parse_qs
+
+        out = oauth.start_authorization(
+            connector_key="googleanalytics4",
+            redirect_uri="https://acme.app.terno.ai/callback",
+            organisation=org,
+        )
+        qs = parse_qs(urlparse(out["authorization_url"]).query)
+        assert qs["scope"] == ["https://www.googleapis.com/auth/analytics.readonly"]
+        assert "include_granted_scopes" not in qs
+        for foreign in ("adwords", "webmasters", "youtube"):
+            assert foreign not in out["authorization_url"]
+
     def test_unconfigured_provider_is_refused(self, org, catalog, monkeypatch):
         monkeypatch.delenv("TERNO_GOOGLE_OAUTH_CLIENT_ID", raising=False)
         with pytest.raises(ApiError) as exc:

@@ -145,11 +145,11 @@ class TestAvailableBlock:
         payload = _call(_token_for(user, [postgres_ds], postgres_ds.organisation))
 
         keys = {e["key"] for e in payload["available"]}
-        # Approvals still pending — offering these would produce a connect link
-        # that cannot complete.
+        # meta_ads is still pending (Business Verification + App Review), so
+        # offering it would produce a connect link that cannot complete.
+        # google_ads and youtube are enabled now (their scopes/tokens are set),
+        # so they are expected in `available`.
         assert "meta_ads" not in keys
-        assert "google_ads" not in keys
-        assert "youtube" not in keys
         assert "generic" not in keys
 
     def test_connect_url_shape_follows_auth_type(

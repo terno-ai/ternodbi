@@ -124,6 +124,8 @@ def _store_tokens(data_source, token_response: Dict[str, Any]) -> None:
         bundle["ACCESS_TOKEN"] = token_response["access_token"]
     if token_response.get("refresh_token"):
         bundle["REFRESH_TOKEN"] = token_response["refresh_token"]
+    if token_response.get("scope"):
+        bundle["GRANTED_SCOPES"] = token_response["scope"]
     expires_in = token_response.get("expires_in")
     if expires_in:
         bundle["TOKEN_EXPIRES_AT"] = str(time.time() + float(expires_in))

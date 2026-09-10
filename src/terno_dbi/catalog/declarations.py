@@ -193,6 +193,22 @@ _APIS: List[ConnectorSpec] = [
             ReportType("CohortDaily", "Daily cohort"),
             ReportType("CohortWeekly", "Weekly cohort"),
             ReportType("CohortMonthly", "Monthly cohort"),
+            ReportType("Realtime", "Realtime report (last ~30 minutes)",
+                       is_date_range_required=False),
+            ReportType(
+                "Funnel", "Funnel exploration",
+                settings=[
+                    ReportSetting(
+                        "funnel_steps", type="json", label="Funnel steps",
+                        help_text="A JSON array of at least two "
+                                  "{name, event_name} objects, one per step, "
+                                  "in order (e.g. [{\"name\": \"View\", "
+                                  "\"event_name\": \"page_view\"}, "
+                                  "{\"name\": \"Purchase\", "
+                                  "\"event_name\": \"purchase\"}]).",
+                    ),
+                ],
+            ),
         ],
         default_report_type="Default",   # GA4 has an obvious default
         # Conservative guard on the shared Google OAuth app's quota. The GA4 Data
@@ -204,6 +220,30 @@ _APIS: List[ConnectorSpec] = [
         default_enabled=True,
     ),
     ConnectorSpec(
+        key="google_search_console",
+        display_name="Google Search Console",
+        provider="Google",
+        category="Analytics",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Search analytics — clicks, impressions, CTR and average "
+                    "position by query, page, country and device for verified "
+                    "sites.",
+        scopes_label="Google Search Console read-only access",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=True,
+        account_label_singular="Site",
+        account_label_plural="Sites",
+        report_types=[
+            ReportType("SearchAnalytics", "Search analytics"),
+        ],
+        default_report_type="SearchAnalytics",
+        rate_limit_per_second=50,
+        rate_limit_per_day=50000,
+        default_enabled=True,
+    ),
+    ConnectorSpec(
         key="youtube",
         display_name="YouTube",
         provider="Google",
@@ -212,7 +252,8 @@ _APIS: List[ConnectorSpec] = [
         auth_type=AuthType.OAUTH,
         description="Channel and video performance, demographics, traffic "
                     "sources and ad performance for YouTube channels.",
-        scopes_label="YouTube Analytics read-only access",
+        scopes_label="YouTube Analytics (incl. revenue), channel and "
+                     "memberships read-only access",
         has_account_list=True,
         has_fields=True,
         is_date_range_required=True,
@@ -236,8 +277,13 @@ _APIS: List[ConnectorSpec] = [
             ReportType("Demographic", "Demographics"),
             ReportType("Device", "Devices"),
             ReportType("TrafficSources", "Traffic sources"),
+            ReportType("Revenue", "Revenue (monetized channels)"),
+            ReportType("Members", "Channel members", is_date_range_required=False),
         ],
-        default_enabled=False,   # OAuth verification pending
+        default_report_type="ChannelTotals",
+        rate_limit_per_second=50,
+        rate_limit_per_day=50000,
+        default_enabled=True,
     ),
     ConnectorSpec(
         key="meta_ads",
@@ -260,6 +306,9 @@ _APIS: List[ConnectorSpec] = [
             ReportType("AdSets", "Ad sets"),
             ReportType("Ads", "Ads"),
         ],
+        default_report_type="Insights",
+        rate_limit_per_second=50,
+        rate_limit_per_day=100000,
         default_enabled=False,   # Business Verification + App Review pending
     ),
     ConnectorSpec(
@@ -283,7 +332,10 @@ _APIS: List[ConnectorSpec] = [
             ReportType("Keyword", "Keyword performance"),
             ReportType("SearchTerm", "Search terms"),
         ],
-        default_enabled=False,   # Developer token pending — longest lead item
+        default_report_type="Campaign",
+        rate_limit_per_second=50,
+        rate_limit_per_day=50000,
+        default_enabled=True,   # Developer token configured
     ),
 ]
 

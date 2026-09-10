@@ -128,5 +128,36 @@ class ApiConnector(ABC):
             )
         return token
 
+    def granted_scopes(self) -> set:
+        """The OAuth scopes the user actually granted at connect.
+
+        Empty when unknown — a source connected before scopes were recorded, or
+        a provider that does not return them. Callers must treat "unknown" as
+        "do not block": only an explicitly-present set that omits a scope is
+        evidence the user declined it.
+        """
+        try:
+            raw = self._tokens().get("GRANTED_SCOPES") or ""
+        except ApiError:
+            return set()
+        return {s for s in raw.replace(",", " ").split() if s}
+
+    def require_scope(self, scope: str, feature: str) -> None:
+        """Raise a clear error if the user demonstrably declined `scope`.
+
+        Used by optional features (e.g. YouTube revenue/members) so a declined
+        permission surfaces as an actionable message rather than a provider 403.
+        Silent when the granted set is unknown — see `granted_scopes`.
+        """
+        granted = self.granted_scopes()
+        if granted and scope not in granted:
+            raise ApiError(
+                ErrorCode.AUTH_EXPIRED,
+                f"{feature} needs the '{scope}' permission, which was not "
+                f"granted when {self.key} was connected. Reconnect the source "
+                f"and allow it.",
+                retriable=False,
+            )
+
 
 __all__ = ["ApiConnector"]

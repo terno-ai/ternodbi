@@ -16,6 +16,10 @@ class _Catalog:
     report_types = [
         {"id": "Default", "settings": []},
         {"id": "CohortWeekly", "settings": []},
+        {"id": "Realtime", "settings": []},
+        {"id": "Funnel", "settings": [
+            {"setting_id": "funnel_steps", "required": True, "label": "Funnel steps"},
+        ]},
     ]
     has_report_types = True
 
@@ -285,6 +289,143 @@ class TestRegistration:
 
         conn = make_ga4_connector(_D())
         assert conn._token_refresher is not None
+
+
+REALTIME_REPORT = {
+    "rows": [
+        {"dimensionValues": [{"value": "US"}], "metricValues": [{"value": "12"}]},
+        {"dimensionValues": [{"value": "IN"}], "metricValues": [{"value": "7"}]},
+    ],
+}
+
+FUNNEL_REPORT = {
+    "funnelTable": {
+        "dimensionHeaders": [{"name": "funnelStepName"}],
+        "metricHeaders": [{"name": "activeUsers"}, {"name": "completionRate"}],
+        "rows": [
+            {"dimensionValues": [{"value": "View"}],
+             "metricValues": [{"value": "1000"}, {"value": "1"}]},
+            {"dimensionValues": [{"value": "Purchase"}],
+             "metricValues": [{"value": "150"}, {"value": "0.15"}]},
+        ],
+    },
+}
+
+
+class TestRealtimeReport:
+    def _spec(self, fields=("country", "activeUsers"), accounts=("440705731",)):
+        from terno_dbi.connectors.api.model.types import DateRange
+        return QuerySpec(
+            accounts=list(accounts), fields=list(fields),
+            date_range=DateRange("2026-08-01", "2026-08-01"),
+            report_type="Realtime",
+        )
+
+    def test_uses_the_curated_realtime_catalogue(self):
+        conn = GA4Connector(_DS())
+        ids = {f.id for f in conn.list_fields("Realtime")}
+        assert "minutesAgo" in ids
+        assert "activeUsers" in ids
+        # Standard-report-only fields must not leak in.
+        assert "sessions" not in ids
+
+    def test_calls_run_realtime_report_endpoint(self):
+        seen = {}
+
+        def http(method, url, token, body=None):
+            seen["url"] = url
+            seen["body"] = body
+            return REALTIME_REPORT
+
+        conn = GA4Connector(_DS(), http=http)
+        result = conn.query(self._spec())
+        assert ":runRealtimeReport" in seen["url"]
+        assert "dateRanges" not in seen["body"]     # realtime has no date range
+        assert result.row_count == 2
+        assert result.rows[0] == {"country": "US", "activeUsers": 12}
+
+    def test_unknown_realtime_field_is_rejected(self):
+        conn = GA4Connector(_DS(), http=lambda *a, **k: REALTIME_REPORT)
+        with pytest.raises(ApiError) as exc:
+            conn.query(self._spec(fields=("sessions",)))
+        assert exc.value.code == ErrorCode.INVALID_FIELD
+
+    def test_no_metric_defaults_to_active_users(self):
+        captured = {}
+
+        def http(method, url, token, body=None):
+            captured["body"] = body
+            return REALTIME_REPORT
+
+        conn = GA4Connector(_DS(), http=http)
+        conn.query(self._spec(fields=("country",)))
+        assert captured["body"]["metrics"] == [{"name": "activeUsers"}]
+
+
+class TestFunnelReport:
+    def _spec(self, steps, accounts=("440705731",)):
+        from terno_dbi.connectors.api.model.types import DateRange
+        return QuerySpec(
+            accounts=list(accounts), fields=[],
+            date_range=DateRange("2026-08-01", "2026-08-31"),
+            report_type="Funnel",
+            settings={"funnel_steps": steps},
+        )
+
+    def test_calls_the_v1alpha_funnel_endpoint_with_event_filters(self):
+        seen = {}
+
+        def http(method, url, token, body=None):
+            seen["url"] = url
+            seen["body"] = body
+            return FUNNEL_REPORT
+
+        conn = GA4Connector(_DS(), http=http)
+        steps = [
+            {"name": "View", "event_name": "page_view"},
+            {"name": "Purchase", "event_name": "purchase"},
+        ]
+        conn.query(self._spec(steps))
+        assert "v1alpha" in seen["url"] and ":runFunnelReport" in seen["url"]
+        step_bodies = seen["body"]["funnel"]["steps"]
+        assert step_bodies[0]["name"] == "View"
+        assert (step_bodies[0]["filterExpression"]["funnelEventFilter"]["eventName"]
+                == "page_view")
+        assert step_bodies[1]["name"] == "Purchase"
+
+    def test_parses_rows_from_response_headers(self):
+        conn = GA4Connector(_DS(), http=lambda *a, **k: FUNNEL_REPORT)
+        steps = [
+            {"name": "View", "event_name": "page_view"},
+            {"name": "Purchase", "event_name": "purchase"},
+        ]
+        result = conn.query(self._spec(steps))
+        assert result.row_count == 2
+        assert result.rows[0] == {
+            "funnelStepName": "View", "activeUsers": 1000, "completionRate": 1,
+        }
+        assert result.requested_field_ids == [
+            "funnelStepName", "activeUsers", "completionRate"]
+
+    def test_missing_funnel_steps_is_rejected(self):
+        # Caught generically by settings validation (before the connector
+        # runs), since the catalog declares funnel_steps as required.
+        conn = GA4Connector(_DS(), http=lambda *a, **k: FUNNEL_REPORT)
+        with pytest.raises(ApiError) as exc:
+            conn.query(self._spec(None))
+        assert exc.value.code == ErrorCode.MISSING_SETTING
+
+    def test_single_step_is_rejected(self):
+        conn = GA4Connector(_DS(), http=lambda *a, **k: FUNNEL_REPORT)
+        with pytest.raises(ApiError) as exc:
+            conn.query(self._spec([{"name": "View", "event_name": "page_view"}]))
+        assert exc.value.code == ErrorCode.INVALID_SETTING
+
+    def test_step_missing_event_name_is_rejected(self):
+        conn = GA4Connector(_DS(), http=lambda *a, **k: FUNNEL_REPORT)
+        with pytest.raises(ApiError) as exc:
+            conn.query(self._spec([{"name": "View"}, {"name": "Buy"}]))
+        assert exc.value.code == ErrorCode.INVALID_SETTING
 
 
 class TestPerPropertyMetadata:

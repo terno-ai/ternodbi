@@ -206,6 +206,15 @@ class TestDataQuery:
             "GA4")
         assert _json(resp)["success"] is False
 
+    def test_null_max_rows_does_not_500(self, env):
+        # An explicit null/0 max_rows must default cleanly, not raise TypeError
+        # (int(None)) and escape as an unhandled 500.
+        body = self._body(["111"])
+        body["max_rows"] = None
+        resp = api_views.api_data_query(
+            _req("POST", env["token"], body), "GA4")
+        assert _json(resp)["query_id"].startswith("q_")
+
 
 @pytest.mark.django_db
 class TestDatasourceResolution:
