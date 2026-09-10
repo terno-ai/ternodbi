@@ -219,7 +219,7 @@ class DataSource(models.Model):
         snowflake = "snowflake", _("Snowflake")
 
     display_name = models.CharField(max_length=40, default='Datasource 1', unique=True)
-    type = models.CharField(max_length=20, choices=DBType,
+    type = models.CharField(max_length=64, choices=DBType,
                             default=DBType.default)
     is_erp = models.BooleanField(
         default=False,
