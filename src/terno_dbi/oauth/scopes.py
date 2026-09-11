@@ -45,6 +45,7 @@ TOOL_SCOPES: Dict[str, Optional[str]] = {
     "connect_datasource": ADMIN_WRITE,
     # --- query service (no @require_scope on the views; gated here) ---
     "list_datasources": QUERY_READ,
+    "list_connectors": QUERY_READ,
     "list_tables": QUERY_READ,
     "list_table_columns": QUERY_READ,
     "get_sample_data": QUERY_READ,

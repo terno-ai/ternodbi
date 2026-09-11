@@ -18,6 +18,7 @@ urlpatterns = [
     path("organisation/prompt/", views.get_org_prompt, name="get_org_prompt"),
     path("organisation/prompt/grep/", views.grep_org_prompt, name="grep_org_prompt"),
     path("datasources/", views.list_datasources, name="list_datasources"),
+    path("connectors/", views.list_connectors, name="list_connectors"),
     path("datasources/<str:datasource_identifier>/tables/", views.list_tables, name="list_tables"),
     path("datasources/<str:datasource_identifier>/tables/<str:table_identifier>/columns/",
          views.list_table_columns, name="list_table_columns"),

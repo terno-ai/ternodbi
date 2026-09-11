@@ -53,47 +53,95 @@ def _root_domain() -> Optional[str]:
     return None
 
 
+def _workspace_origin(org_subdomain: Optional[str]) -> Optional[str]:
+    """The absolute origin of this organisation's Terno workspace.
+
+    Two deployment shapes:
+      * Multi-tenant (ENABLE_SUBDOMAIN true): each org lives at
+        `https://<subdomain>.<root>`, so the subdomain is required.
+      * Single-host (ENABLE_SUBDOMAIN false): every org is
+        served from one host, so we use MAIN_DOMAIN verbatim (keeping its own
+        scheme, e.g. `http://127.0.0.1:8000`) with no subdomain. The `/connect`
+        endpoint resolves the org from the session there, not the host.
+
+    Returns None when the origin cannot be determined, so callers emit prose
+    rather than a broken link.
+    """
+    try:
+        from django.conf import settings
+    except Exception:
+        return None
+
+    if getattr(settings, "ENABLE_SUBDOMAIN", True):
+        if not org_subdomain:
+            return None
+        root = _root_domain()
+        if not root:
+            logger.warning(
+                "Cannot build a workspace link: neither MAIN_DOMAIN nor "
+                "TERNO_ROOT_DOMAIN is set."
+            )
+            return None
+        return f"https://{org_subdomain}.{root}"
+
+    # Single-host: MAIN_DOMAIN as an absolute origin (bare host defaults to https).
+    for name in ("MAIN_DOMAIN", "TERNO_ROOT_DOMAIN"):
+        value = (getattr(settings, name, None) or "").strip().rstrip("/")
+        if value:
+            return value if "://" in value else f"https://{value}"
+    logger.warning(
+        "Cannot build a workspace link: MAIN_DOMAIN is not set."
+    )
+    return None
+
+
 def datasource_setup_url(org_subdomain: Optional[str]) -> Optional[str]:
     """A link to the Datasources page of this organisation's Terno workspace.
 
-    Returns None when the organisation or root domain is unknown, so callers can
-    fall back to naming the app rather than emitting a broken URL — a dead link on
-    this path is worse than prose, because the user clicks it and gives up.
+    Returns None when the origin is unknown, so callers can fall back to naming
+    the app rather than emitting a broken URL — a dead link on this path is worse
+    than prose, because the user clicks it and gives up.
     """
-    if not org_subdomain:
+    origin = _workspace_origin(org_subdomain)
+    if not origin:
         return None
-    root = _root_domain()
-    if not root:
-        logger.warning(
-            "Cannot build a datasource setup link: neither MAIN_DOMAIN nor "
-            "TERNO_ROOT_DOMAIN is set."
-        )
-        return None
-    return f"https://{org_subdomain}.{root}{_datasource_admin_path()}"
+    return f"{origin}{_datasource_admin_path()}"
+
+
+def _manual_connect_base() -> str:
+    """Frontend path that opens a manual connector's credentials modal.
+
+    Deployment-configurable (TERNO_MANUAL_CONNECT_PATH) because it is a route in
+    the host app's UI, not something ternodbi owns; the connector key is appended
+    as the final segment (e.g. `/data-connectors/datasource/mysql`).
+    """
+    try:
+        from django.conf import settings
+        raw = getattr(settings, "TERNO_MANUAL_CONNECT_PATH", None)
+    except Exception:
+        raw = None
+    path = (raw or "/data-connectors/datasource").strip().rstrip("/")
+    return path if path.startswith("/") else f"/{path}"
 
 
 def connect_url(org_subdomain: Optional[str], catalog) -> Optional[str]:
-    """Build a link that starts the connect flow for a catalog entry.
+    """Build a link that connects (or reconnects) a catalog entry.
 
-    The URL identifies what to connect; the browser session identifies the user.
-    It grants no access and contains no credentials, so the same link can be used
-    for both initial connections and reconnects.
-
-    The `/connect` endpoint dispatches by the connector's `auth_type`, so the link
-    does not need to know whether the connector uses OAuth or manual credentials.
+    OAuth connectors get the backend `/connect?connector=<key>` endpoint, which
+    redirects straight to the provider's consent screen — one click. Manual
+    (database) connectors instead get the host app's credentials modal
+    (`/data-connectors/datasource/<key>`), so the user lands on the secure form
+    rather than the bare Django admin. Neither URL carries a credential.
     """
-    if not org_subdomain or catalog is None:
+    if catalog is None:
         return None
-    root = _root_domain()
-    if not root:
-        logger.warning(
-            "Cannot build a connect link: neither MAIN_DOMAIN nor "
-            "TERNO_ROOT_DOMAIN is set."
-        )
+    origin = _workspace_origin(org_subdomain)
+    if not origin:
         return None
-
     key = quote(catalog.key, safe="")
-    return f"https://{org_subdomain}.{root}/connect?connector={key}"
+    if getattr(catalog, "auth_type", None) == "manual":
+        return f"{origin}{_manual_connect_base()}/{key}"
+    return f"{origin}/connect?connector={key}"
 
 
 def setup_handoff(org_subdomain: Optional[str], reason: str) -> dict:

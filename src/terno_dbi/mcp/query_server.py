@@ -40,19 +40,41 @@ _API_TOOL_NAMES = frozenset({
     "get_today", "list_accounts", "list_fields", "data_query", "get_query_results",
 })
 
-# list_datasources' reviewed (stable) description. The richer, api-aware wording
-# below is shown only when the API tools are enabled, so the frozen manifest is
-# byte-for-byte unchanged while the tools are off.
+# Keep list_datasources' reviewed description unchanged.
+# The API-aware description is used only when API tools are enabled.
 _LIST_DATASOURCES_DESC_STABLE = "List all configured database connections"
+
+# Connector catalogue tools follow the same feature gate as API tools.
+# Enable with TERNO_ENABLE_CONNECTOR_TOOLS after the updated listing is approved.
+_CONNECTOR_TOOL_NAMES = frozenset({"list_connectors"})
+
+
+def _flag_on(name: str) -> bool:
+    from django.conf import settings
+    val = getattr(settings, name, None)
+    if val is None:
+        val = os.environ.get(name, "")
+    return str(val).strip().lower() in ("1", "true", "yes", "on")
 
 
 def _api_mcp_tools_enabled() -> bool:
     """Whether the API-source MCP tools are exposed on this server. Off by default."""
-    from django.conf import settings
-    val = getattr(settings, "TERNO_ENABLE_API_MCP_TOOLS", None)
-    if val is None:
-        val = os.environ.get("TERNO_ENABLE_API_MCP_TOOLS", "")
-    return str(val).strip().lower() in ("1", "true", "yes", "on")
+    return _flag_on("TERNO_ENABLE_API_MCP_TOOLS")
+
+
+def _connector_tools_enabled() -> bool:
+    """Whether the connector-catalogue tool is exposed. Off by default."""
+    return _flag_on("TERNO_ENABLE_CONNECTOR_TOOLS")
+
+
+def _gated_off_tool_names() -> frozenset:
+    """Tool names to strip from the manifest given the current flags."""
+    names = set()
+    if not _api_mcp_tools_enabled():
+        names |= _API_TOOL_NAMES
+    if not _connector_tools_enabled():
+        names |= _CONNECTOR_TOOL_NAMES
+    return frozenset(names)
 
 
 def own_tools() -> List[Tool]:
@@ -60,12 +82,11 @@ def own_tools() -> List[Tool]:
 
     Separate from `list_tools` so the merged hosted server can compose both
     registries rather than carrying a third copy of these definitions. The
-    API-source tools are advertised only when TERNO_ENABLE_API_MCP_TOOLS is on.
+    API-source tools are advertised only when TERNO_ENABLE_API_MCP_TOOLS is on,
+    and list_connectors only when TERNO_ENABLE_CONNECTOR_TOOLS is on.
     """
-    tools = _all_own_tools()
-    if not _api_mcp_tools_enabled():
-        tools = [t for t in tools if t.name not in _API_TOOL_NAMES]
-    return tools
+    gated_off = _gated_off_tool_names()
+    return [t for t in _all_own_tools() if t.name not in gated_off]
 
 
 def _all_own_tools() -> List[Tool]:
@@ -131,6 +152,24 @@ def _all_own_tools() -> List[Tool]:
                 )
                 if _api_mcp_tools_enabled()
                 else _LIST_DATASOURCES_DESC_STABLE
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        ),
+        Tool(
+            name="list_connectors",
+            description=(
+                "List every connector this organisation can use, to recommend "
+                "and connect a source. Each entry has a `status` "
+                "(connected/not_connected/needs_reconnect), an `auth_type` "
+                "('oauth' opens the provider's consent screen; 'manual' opens a "
+                "secure credentials form), and a `connect_url` to show the user "
+                "as a clickable link. `can_connect` says whether the caller may "
+                "complete a connection. Never ask for a password or connection "
+                "string in the conversation."
             ),
             inputSchema={
                 "type": "object",
@@ -432,9 +471,9 @@ def _dispatch(name: str, arguments: Dict[str, Any]):
     try:
         result = None
 
-        # Defence in depth: a gated API tool is not advertised, but a client
-        # could still call it by name. When off, treat it as non-existent.
-        if name in _API_TOOL_NAMES and not _api_mcp_tools_enabled():
+        # Defence in depth: a gated tool is not advertised, but a client could
+        # still call it by name. When off, treat it as non-existent.
+        if name in _gated_off_tool_names():
             return as_error_result(f"Unknown tool: {name}")
 
         if name == "terno_guide":
@@ -475,6 +514,12 @@ def _dispatch(name: str, arguments: Dict[str, Any]):
                     if entry.get("family", "database") == "database"
                 ]
                 result = {"datasources": dbs, "count": len(dbs)}
+
+        elif name == "list_connectors":
+            payload = client.list_connectors()
+            result = {
+                key: value for key, value in payload.items() if key != "status"
+            }
 
         elif name == "list_tables":
             datasource = arguments["datasource"]

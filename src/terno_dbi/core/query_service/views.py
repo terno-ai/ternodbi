@@ -232,6 +232,94 @@ def _datasource_notes(connected, available):
     return notes
 
 
+def _connector_status(ds) -> str:
+    """The connection state a connector card shows for this organisation."""
+    if ds is None:
+        return "not_connected"
+    if getattr(ds, "needs_reconnect", False):
+        return "needs_reconnect"
+    return "connected"
+
+
+@require_service_auth()
+@require_http_methods(["GET"])
+def list_connectors(request):
+    """Every connector this organisation can use, with a one-click connect link.
+
+    The catalogue an agent needs to *recommend* a source: each entry carries its
+    connection `status`, its `auth_type` (`oauth` -> the link opens the
+    provider's consent screen; `manual` -> it opens a secure credentials form),
+    and a `connect_url`. The single `/connect?connector=<key>` endpoint dispatches
+    on auth_type, so the same link works for OAuth and manual connectors and for
+    both first connections and reconnects. Credentials are never collected in the
+    conversation.
+
+    `can_connect` reflects whether the caller may complete a connection
+    (org-admin, `admin:write`). When false, the agent should still show the
+    options but tell the user to ask an admin.
+    """
+    org = getattr(request, "token_organisation", None)
+    org_subdomain = getattr(org, "subdomain", None)
+    token = getattr(request, "service_token", None)
+    can_connect = bool(token and token.has_scope("admin:write"))
+
+    # One row per connector for this org, preferring a connected instance.
+    ds_by_key = {}
+    if org is not None:
+        for ds in (models.DataSource.objects
+                   .filter(organisation=org, catalog__isnull=False)
+                   .select_related("catalog")):
+            key = ds.catalog.key
+            prev = ds_by_key.get(key)
+            if prev is None or ds.auth_status == models.DataSource.AuthStatus.CONNECTED:
+                ds_by_key[key] = ds
+
+    connectors = []
+    for catalog in models.ConnectorCatalog.objects.filter(enabled=True):
+        ds = ds_by_key.get(catalog.key)
+        entry = {
+            "key": catalog.key,
+            "name": catalog.name,
+            "description": catalog.summary,
+            "provider": catalog.provider,
+            "category": catalog.category,
+            "family": catalog.family,          # 'database' | 'api'
+            "auth_type": catalog.auth_type,    # 'oauth' | 'manual'
+            "status": _connector_status(ds),
+        }
+        if ds is not None:
+            entry["datasource_id"] = ds.id
+        url = connect_url(org_subdomain, catalog)
+        if url:
+            entry["connect_url"] = url
+        if catalog.icon_url:
+            entry["icon_url"] = catalog.icon_url
+        if catalog.most_popular:
+            entry["most_popular"] = True
+        if catalog.scopes_label:
+            entry["scopes_label"] = catalog.scopes_label
+        connectors.append(entry)
+
+    notes = [
+        "Recommend connectors relevant to the user's goal and show each "
+        "`connect_url` as a clickable Markdown link. auth_type 'oauth' opens the "
+        "provider's consent screen (one click); 'manual' opens a secure "
+        "credentials form — never ask for a password or connection string here.",
+    ]
+    if not can_connect:
+        notes.append(
+            "can_connect is false: you may show the options, but tell the user "
+            "an organisation admin must complete the connection."
+        )
+
+    return JsonResponse({
+        "status": "success",
+        "connectors": connectors,
+        "count": len(connectors),
+        "can_connect": can_connect,
+        "notes": notes,
+    })
+
 
 @require_service_auth()
 @require_http_methods(["GET"])

@@ -110,6 +110,13 @@ class TernoDBIClient:
         response = self._http.get(url, headers=self._get_headers())
         return self._handle_response(response)
 
+    def list_connectors(self) -> Dict:
+        """The connector catalogue: every source this org can use, with a
+        `connect_url` and `status` per connector plus `can_connect`."""
+        url = f"{self.base_url}/api/query/connectors/"
+        response = self._http.get(url, headers=self._get_headers())
+        return self._handle_response(response)
+
     # -- API-source (marketing/analytics) tools -----------------------------
 
     def get_today(self, timezone: Optional[str] = None) -> Dict:

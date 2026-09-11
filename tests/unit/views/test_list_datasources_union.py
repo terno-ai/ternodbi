@@ -121,7 +121,9 @@ class TestConnectedBlock:
         payload = _call(_token_for(user, [postgres_ds], postgres_ds.organisation))
         entry = payload["datasources"][0]
 
-        assert entry["reconnect_url"].startswith("https://acme.app.terno.ai/connect")
+        assert entry["reconnect_url"].startswith(
+            "https://acme.app.terno.ai/data-connectors/datasource/"
+        )
         assert entry["auth_error"] == "refresh token revoked"
         assert any("reconnect" in n.lower() for n in payload["notes"])
 
@@ -161,11 +163,13 @@ class TestAvailableBlock:
 
         # Stateless and unsigned: the URL names what to connect, the session
         # names who. Nothing here is a credential.
+        # OAuth -> the backend /connect endpoint (redirects to provider consent).
         assert by_key["googleanalytics4"]["connect_url"] == (
             "https://acme.app.terno.ai/connect?connector=googleanalytics4"
         )
+        # Manual -> the host app's credentials modal, not /connect (Django admin).
         assert by_key["mysql"]["connect_url"] == (
-            "https://acme.app.terno.ai/connect?connector=mysql"
+            "https://acme.app.terno.ai/data-connectors/datasource/mysql"
         )
 
     def test_connected_api_source_is_not_re_offered(
