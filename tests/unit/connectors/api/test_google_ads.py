@@ -44,6 +44,16 @@ SEARCH = {
 }
 
 
+# A GoogleAdsField RESOURCE row for `campaign`, as the field service returns it.
+FIELDS_CAMPAIGN = {
+    "results": [{
+        "name": "campaign",
+        "metrics": ["metrics.clicks", "metrics.cost_micros", "metrics.ctr"],
+        "segments": ["segments.date"],
+    }],
+}
+
+
 def _mock_http(routes):
     def http(method, url, token, body=None):
         assert token == "tok"
@@ -56,6 +66,55 @@ def _mock_http(routes):
 
 def _connector(routes):
     return GoogleAdsConnector(_DS(), http=_mock_http(routes))
+
+
+class TestDynamicFieldDiscovery:
+    # A GoogleAdsField RESOURCE row: metrics/segments list the compatible fields.
+    FIELDS = {
+        "results": [{
+            "name": "campaign",
+            "metrics": ["metrics.clicks", "metrics.video_view_rate",
+                        "metrics.average_cpv", "metrics.cost_micros"],
+            "segments": ["segments.date", "segments.ad_network_type"],
+        }],
+    }
+
+    def test_list_fields_uses_field_service_and_covers_everything(self):
+        conn = _connector({("POST", "googleAdsFields:search"): self.FIELDS})
+        by_id = {f.id: f for f in conn.list_fields("Campaign")}
+        # Discovered metrics/segments are present...
+        assert "metrics.video_view_rate" in by_id
+        assert "segments.ad_network_type" in by_id
+        # ...curated attributes still there...
+        assert "campaign.name" in by_id
+        # ...video_view_rate flagged non-aggregatable, average_cpv monetary...
+        assert by_id["metrics.video_view_rate"].is_non_aggregatable is True
+        assert by_id["metrics.average_cpv"].is_monetary is True
+        # ...and a metric the field service did not list is absent.
+        assert "metrics.impressions" not in by_id
+
+    def test_falls_back_to_curated_when_discovery_fails(self):
+        # No googleAdsFields route -> the mock raises -> curated fallback.
+        conn = _connector({})
+        ids = {f.id for f in conn.list_fields("Campaign")}
+        assert "metrics.impressions" in ids   # from the curated set
+        assert "campaign.name" in ids
+
+    def test_discovered_micros_metric_is_divided_on_query(self):
+        conn = _connector({
+            ("POST", "googleAdsFields:search"): self.FIELDS,
+            ("POST", "googleAds:search"): {"results": [
+                {"campaign": {"name": "V"},
+                 "metrics": {"averageCpv": "250000"}}]},
+        })
+        spec = QuerySpec(
+            accounts=["1112223333"],
+            fields=["campaign.name", "metrics.average_cpv"],
+            date_range=DateRange("2026-08-01", "2026-08-31"),
+            report_type="Campaign",
+        )
+        result = conn.query(spec)
+        assert result.rows[0]["metrics.average_cpv"] == 0.25   # micros -> currency
 
 
 class TestListAccounts:
@@ -89,6 +148,31 @@ class TestListFields:
         ids = {f.id for f in conn.list_fields("NotAReport")}
         assert "campaign.name" in ids
 
+    def test_video_and_impression_share_metrics_are_covered(self):
+        conn = _connector({})
+        by_id = {f.id: f for f in conn.list_fields("Campaign")}
+        # TrueView / video coverage that was previously missing.
+        assert "metrics.video_view_rate" in by_id
+        assert by_id["metrics.video_view_rate"].is_non_aggregatable is True
+        assert "metrics.video_views" in by_id
+        assert "metrics.average_cpv" in by_id
+        # Impression share, conversion rate, view-through.
+        assert "metrics.search_impression_share" in by_id
+        assert "metrics.conversions_from_interactions_rate" in by_id
+        assert "metrics.view_through_conversions" in by_id
+
+    def test_non_suffixed_micros_metrics_are_flagged_monetary(self):
+        conn = _connector({})
+        by_id = {f.id: f for f in conn.list_fields("Campaign")}
+        # These are in micros despite having no _micros suffix — must be monetary.
+        for fid in ("metrics.average_cpv", "metrics.cost_per_conversion",
+                    "metrics.average_cpm"):
+            assert by_id[fid].is_monetary is True
+        # conversions_value is already in currency and must NOT be micros-divided.
+        from terno_dbi.connectors.api.sources.google_ads import _MICROS_FIELDS
+        assert "metrics.conversions_value" not in _MICROS_FIELDS
+        assert "metrics.average_cpv" in _MICROS_FIELDS
+
 
 class TestRunReport:
     def _spec(self, fields=("segments.date", "campaign.name", "metrics.clicks"),
@@ -105,6 +189,8 @@ class TestRunReport:
         def http(method, url, token, body=None):
             if "listAccessibleCustomers" in url:
                 return ACCESSIBLE
+            if "googleAdsFields:search" in url:
+                return FIELDS_CAMPAIGN
             captured["body"] = body
             captured["url"] = url
             return SEARCH
@@ -164,6 +250,8 @@ class TestRunReport:
         seen = {}
 
         def http(method, url, token, body=None):
+            if "googleAdsFields:search" in url:
+                return FIELDS_CAMPAIGN
             seen["url"] = url
             return SEARCH
 
@@ -193,6 +281,8 @@ class TestPartialSuccess:
         def http(method, url, token, body=None):
             if "listAccessibleCustomers" in url:
                 return ACCESSIBLE
+            if "googleAdsFields:search" in url:
+                return FIELDS_CAMPAIGN
             if f"customers/{bad}/" in url:
                 # Simulate CUSTOMER_NOT_ENABLED (a manager/deactivated account).
                 raise ApiError(ErrorCode.UPSTREAM_ERROR,
