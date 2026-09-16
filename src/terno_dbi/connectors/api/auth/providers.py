@@ -67,6 +67,18 @@ _META = OAuthProvider(
 )
 
 
+_HUBSPOT = OAuthProvider(
+    name="hubspot",
+    authorization_url="https://app.hubspot.com/oauth/authorize",
+    token_url="https://api.hubapi.com/oauth/v1/token",
+    scope="crm.objects.contacts.read crm.objects.companies.read "
+          "crm.objects.deals.read",
+    client_id_env="TERNO_HUBSPOT_CLIENT_ID",
+    client_secret_env="TERNO_HUBSPOT_CLIENT_SECRET",
+    use_pkce=False,
+)
+
+
 def _google_with_scope(scope: str) -> OAuthProvider:
     from dataclasses import replace
     return replace(_GOOGLE, scope=scope)
@@ -85,6 +97,7 @@ _PROVIDERS: Dict[str, OAuthProvider] = {
     "google_ads": _google_with_scope(
         "https://www.googleapis.com/auth/adwords"),
     "meta_ads": _META,
+    "hubspot": _HUBSPOT,
 }
 
 
