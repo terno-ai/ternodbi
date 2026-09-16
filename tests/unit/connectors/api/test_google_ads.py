@@ -202,30 +202,34 @@ class TestSegmentMetricCompatibility:
         conn.query(self._spec(["segments.date", "metrics.clicks"]))
         assert any("googleAds:search" in u for u in calls)   # reached the query
 
-    def test_incompatible_metric_metric_pair_is_caught(self):
-        # cost_micros and video_view_rate_in_feed don't list each other.
+    def test_metric_metric_pairs_are_never_flagged(self):
+        # A metric's selectable_with lists segments/attributes, NOT other metrics,
+        # so two metrics must never be judged incompatible (would false-positive
+        # on ordinary combos like cost + a video rate). No segment selected here.
         compat = {"results": [
-            {"name": "metrics.cost_micros", "selectableWith": ["metrics.clicks"]},
-            {"name": "metrics.video_view_rate_in_feed",
-             "selectableWith": ["metrics.clicks"]},
+            {"name": "metrics.cost_micros", "selectableWith": ["segments.date"]},
+            {"name": "metrics.video_view_rate",
+             "selectableWith": ["segments.device"]},
         ]}
         discover = {"results": [{
             "name": "campaign",
-            "metrics": ["metrics.cost_micros", "metrics.video_view_rate_in_feed"],
+            "metrics": ["metrics.cost_micros", "metrics.video_view_rate"],
             "segments": [],
         }]}
+        reached = []
 
         def http(method, url, token, body=None):
             if "googleAdsFields:search" in url:
                 q = (body or {}).get("query", "")
                 return compat if "selectable_with" in q else discover
+            reached.append(url)
             return {"results": []}
 
         conn = GoogleAdsConnector(_DS(), http=http)
-        with pytest.raises(ApiError) as exc:
-            conn.query(self._spec(
-                ["metrics.cost_micros", "metrics.video_view_rate_in_feed"]))
-        assert exc.value.code == ErrorCode.INVALID_FILTER
+        # cost + a video rate together, no segment -> must NOT be blocked.
+        conn.query(self._spec(
+            ["metrics.cost_micros", "metrics.video_view_rate"]))
+        assert any("googleAds:search" in u for u in reached)
 
     def test_common_metric_pair_with_unknown_metadata_is_not_flagged(self):
         # Field service returns nothing for these -> unknown -> must NOT block.

@@ -515,46 +515,44 @@ class GoogleAdsConnector(ApiConnector):
                 self._selectable_cache.setdefault(n, None)
         return {n: self._selectable_cache.get(n) for n in names}
 
-    def _check_compatibility(self, fields: List[str]) -> None:
-        """Pre-validate that the selected fields can be selected together.
+    def _check_compatibility(self, segments: List[str], metrics: List[str]) -> None:
+        """Pre-validate metric↔segment combinations against `selectable_with`.
 
-        Google's `selectable_with` lists, per field, the resources, segments and
-        metrics it can co-select with — so it covers both metric↔segment (e.g.
-        in-feed TrueView rates with `segments.date`) and the rarer metric↔metric
-        conflicts. Catching them here turns Google's cryptic 400 into an
-        actionable message.
+        Google rejects some metric+segment pairs (e.g. in-feed TrueView rates with
+        `segments.date`) with a cryptic 400; catching it here turns that into an
+        actionable message. Only metric↔segment is checked — a metric's
+        `selectable_with` enumerates its compatible *segments/attributes*, not
+        other metrics, so a metric↔metric comparison would false-positive on
+        ordinary combinations (e.g. cost with a video rate) and is deliberately
+        not attempted.
 
-        Best-effort and false-positive-safe: only segments/metrics are checked,
-        a pair is flagged only when *both* fields have a non-empty compatibility
-        set and neither lists the other, and any metadata-lookup failure is
-        skipped so a hiccup never blocks a valid query.
+        Best-effort and false-positive-safe: a pair is flagged only when *both*
+        fields have a non-empty compatibility set and neither lists the other,
+        and any metadata-lookup failure is skipped so a hiccup never blocks a
+        valid query.
         """
-        checkable = [f for f in fields
-                     if f.startswith("segments.") or f.startswith("metrics.")]
-        if len(checkable) < 2:
+        if not (segments and metrics):
             return
         try:
-            compat = self._selectable_with(checkable)
+            compat = self._selectable_with([*segments, *metrics])
         except Exception as exc:   # noqa: BLE001
             logger.warning("Google Ads compatibility check skipped: %s", exc)
             return
 
         problems: List[tuple] = []
-        for i, a in enumerate(checkable):
-            sw_a = compat.get(a)
-            if not sw_a:                       # unknown or empty -> don't judge
-                continue
-            for b in checkable[i + 1:]:
-                sw_b = compat.get(b)
-                if sw_b and b not in sw_a and a not in sw_b:
-                    problems.append((a, b))
+        for seg in segments:
+            sw_seg = compat.get(seg)
+            for met in metrics:
+                sw_met = compat.get(met)
+                if sw_seg and sw_met and met not in sw_seg and seg not in sw_met:
+                    problems.append((met, seg))
         if problems:
-            pairs = "; ".join(f"'{a}' with '{b}'" for a, b in problems[:6])
+            pairs = "; ".join(f"'{m}' with '{s}'" for m, s in problems[:6])
             raise ApiError(
                 ErrorCode.INVALID_FILTER,
-                "These Google Ads fields can't be selected together: " + pairs +
-                ". Remove one of each pair, or split them into separate queries "
-                "(e.g. query the incompatible field on its own).",
+                "These Google Ads metrics can't be selected with the chosen "
+                "segment: " + pairs + ". Remove the segment for those metrics, "
+                "or split them into separate queries.",
                 retriable=False,
             )
 
@@ -577,7 +575,8 @@ class GoogleAdsConnector(ApiConnector):
             # report's core metrics.
             metrics = [m.id for m in _SHARED_METRICS[:3]]
 
-        self._check_compatibility([*dimensions, *metrics])
+        segments = [d for d in dimensions if d.startswith("segments.")]
+        self._check_compatibility(segments, metrics)
 
         gaql = _build_gaql(
             _RESOURCE[report_type], dimensions, metrics,
