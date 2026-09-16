@@ -363,7 +363,7 @@ _APIS: List[ConnectorSpec] = [
         default_report_type="Contacts",
         rate_limit_per_second=50,
         rate_limit_per_day=500000,
-        default_enabled=True,
+        default_enabled=False,
     ),
 ]
 
