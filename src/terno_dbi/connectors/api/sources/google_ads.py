@@ -19,6 +19,7 @@ Unlike GA4/GSC, Google Ads:
 from __future__ import annotations
 import logging
 import os
+import re
 from typing import Any, Callable, Dict, List, Optional
 from terno_dbi.connectors.api.model.base import ApiConnector
 from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode, invalid_field
@@ -262,10 +263,44 @@ def _prettify(field_id: str) -> str:
     return leaf.replace("_", " ").strip().capitalize() or field_id
 
 
+_MICROS_TOKENS = ("_cpc", "_cpm", "_cpv", "cost_per_", "average_cost")
+
+
 def _is_micros(field_id: str) -> bool:
-    # Suffixed micros are unambiguous; the non-suffixed money metrics
-    # (average_cpc, cost_per_conversion, …) are enumerated in _MICROS_FIELDS.
-    return field_id in _MICROS_FIELDS or field_id.endswith("_micros")
+    # Suffixed micros are unambiguous; the explicit set + the cost-token heuristic
+    # cover the money metrics that carry no `_micros` suffix.
+    if field_id in _MICROS_FIELDS or field_id.endswith("_micros"):
+        return True
+    leaf = field_id.split(".")[-1]
+    return any(tok in leaf for tok in _MICROS_TOKENS)
+
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _validate_dates(start: str, end: str) -> None:
+    """Reject a non-absolute date range with an actionable message.
+
+    GAQL's BETWEEN needs two 'YYYY-MM-DD' literals; a relative token like 'today'
+    reaches the API as an invalid value and returns a cryptic 400. Callers must
+    resolve relative ranges (via get_today) before querying — enforce that here
+    so the error names the real problem.
+    """
+    for label, val in (("start", start), ("end", end)):
+        if not (isinstance(val, str) and _DATE_RE.match(val)):
+            raise ApiError(
+                ErrorCode.INVALID_FILTER,
+                f"date_range.{label} must be an absolute 'YYYY-MM-DD' date, got "
+                f"{val!r}. Resolve relative ranges (e.g. 'today', 'last 30 days') "
+                f"with get_today first.",
+                retriable=False,
+            )
+    if start > end:
+        raise ApiError(
+            ErrorCode.INVALID_FILTER,
+            f"date_range.start ({start}) is after date_range.end ({end}).",
+            retriable=False,
+        )
 
 
 def _dynamic_metric_field(field_id: str) -> Field:
@@ -360,6 +395,9 @@ class GoogleAdsConnector(ApiConnector):
         self._http = http or _default_http
         # Field catalogue per report type, cached for the connector's lifetime.
         self._catalogue_cache: Dict[str, Dict[str, Field]] = {}
+        # Per-field `selectable_with` sets (None = unknown), for compatibility
+        # pre-validation. Cached so repeated queries don't refetch metadata.
+        self._selectable_cache: Dict[str, Optional[set]] = {}
 
     # -- transport ----------------------------------------------------------
 
@@ -456,6 +494,70 @@ class GoogleAdsConnector(ApiConnector):
                            f"empty field metadata for {resource}")
         return metrics, segments
 
+    def _selectable_with(self, names: List[str]) -> Dict[str, Optional[set]]:
+        """`{name: set(selectable_with) | None}` for each field.
+
+        None means the field service did not return metadata for the name, so
+        compatibility for it is unknown and must not be treated as a conflict.
+        Batched and cached; a query only ever looks up the fields it selected.
+        """
+        missing = [n for n in names if n not in self._selectable_cache]
+        if missing:
+            in_list = ", ".join(f"'{n}'" for n in missing)
+            data = self._call(
+                "POST", f"{_BASE}/googleAdsFields:search",
+                {"query": f"SELECT name, selectable_with WHERE name IN ({in_list})"})
+            for row in data.get("results") or []:
+                nm = row.get("name")
+                if nm:
+                    self._selectable_cache[nm] = set(row.get("selectableWith") or [])
+            for n in missing:                      # unresolved -> unknown
+                self._selectable_cache.setdefault(n, None)
+        return {n: self._selectable_cache.get(n) for n in names}
+
+    def _check_compatibility(self, fields: List[str]) -> None:
+        """Pre-validate that the selected fields can be selected together.
+
+        Google's `selectable_with` lists, per field, the resources, segments and
+        metrics it can co-select with — so it covers both metric↔segment (e.g.
+        in-feed TrueView rates with `segments.date`) and the rarer metric↔metric
+        conflicts. Catching them here turns Google's cryptic 400 into an
+        actionable message.
+
+        Best-effort and false-positive-safe: only segments/metrics are checked,
+        a pair is flagged only when *both* fields have a non-empty compatibility
+        set and neither lists the other, and any metadata-lookup failure is
+        skipped so a hiccup never blocks a valid query.
+        """
+        checkable = [f for f in fields
+                     if f.startswith("segments.") or f.startswith("metrics.")]
+        if len(checkable) < 2:
+            return
+        try:
+            compat = self._selectable_with(checkable)
+        except Exception as exc:   # noqa: BLE001
+            logger.warning("Google Ads compatibility check skipped: %s", exc)
+            return
+
+        problems: List[tuple] = []
+        for i, a in enumerate(checkable):
+            sw_a = compat.get(a)
+            if not sw_a:                       # unknown or empty -> don't judge
+                continue
+            for b in checkable[i + 1:]:
+                sw_b = compat.get(b)
+                if sw_b and b not in sw_a and a not in sw_b:
+                    problems.append((a, b))
+        if problems:
+            pairs = "; ".join(f"'{a}' with '{b}'" for a, b in problems[:6])
+            raise ApiError(
+                ErrorCode.INVALID_FILTER,
+                "These Google Ads fields can't be selected together: " + pairs +
+                ". Remove one of each pair, or split them into separate queries "
+                "(e.g. query the incompatible field on its own).",
+                retriable=False,
+            )
+
     # -- query --------------------------------------------------------------
 
     def _run(self, spec: QuerySpec) -> QueryResult:
@@ -466,12 +568,16 @@ class GoogleAdsConnector(ApiConnector):
         if unknown:
             raise invalid_field(unknown[0], list(catalogue.keys()))
 
+        _validate_dates(spec.date_range.start, spec.date_range.end)
+
         dimensions = [f for f in spec.fields if catalogue[f].kind == "dimension"]
         metrics = [f for f in spec.fields if catalogue[f].kind == "metric"]
         if not (dimensions or metrics):
             # A report with no selected fields is a dead end; default to the
             # report's core metrics.
             metrics = [m.id for m in _SHARED_METRICS[:3]]
+
+        self._check_compatibility([*dimensions, *metrics])
 
         gaql = _build_gaql(
             _RESOURCE[report_type], dimensions, metrics,
