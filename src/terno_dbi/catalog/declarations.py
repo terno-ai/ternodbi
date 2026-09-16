@@ -343,10 +343,11 @@ _APIS: List[ConnectorSpec] = [
         category="CRM",
         family=Family.API,
         auth_type=AuthType.OAUTH,
-        description="Contacts, companies and deals from a HubSpot CRM portal — "
-                    "lifecycle stages, pipelines and deal value for revenue and "
-                    "lead analytics.",
-        scopes_label="HubSpot CRM read-only access (contacts, companies, deals)",
+        description="Contacts, companies, deals, tickets and leads from a HubSpot "
+                    "CRM portal — lifecycle stages, pipelines, deal value and "
+                    "record owners for revenue, lead and support analytics.",
+        scopes_label="HubSpot CRM read-only access (contacts, companies, deals, "
+                     "tickets, leads, owners)",
         has_account_list=True,
         has_fields=True,
         is_date_range_required=True,
@@ -356,6 +357,8 @@ _APIS: List[ConnectorSpec] = [
             ReportType("Contacts", "Contacts"),
             ReportType("Companies", "Companies"),
             ReportType("Deals", "Deals"),
+            ReportType("Tickets", "Tickets"),
+            ReportType("Leads", "Leads"),
         ],
         default_report_type="Contacts",
         rate_limit_per_second=50,

@@ -18,6 +18,8 @@ class _Catalog:
         {"id": "Contacts", "settings": []},
         {"id": "Companies", "settings": []},
         {"id": "Deals", "settings": []},
+        {"id": "Tickets", "settings": []},
+        {"id": "Leads", "settings": []},
     ]
     has_report_types = True
 
@@ -143,6 +145,85 @@ class TestRunReport:
         conn = HubSpotConnector(_DS(), http=http)
         result = conn.query(self._spec(fields=("dealname",)))
         assert [r["dealname"] for r in result.rows] == ["A", "B"]
+
+
+OWNERS = {
+    "results": [
+        {"id": "77", "firstName": "Ada", "lastName": "Lovelace",
+         "email": "ada@acme.com"},
+        {"id": "88", "firstName": "", "lastName": "", "email": "ops@acme.com"},
+    ],
+    "paging": {},
+}
+
+TICKETS = {
+    "results": [
+        {"id": "9", "properties": {
+            "subject": "Login broken", "hs_ticket_priority": "HIGH",
+            "createdate": "2026-08-03T10:00:00Z"}},
+    ],
+    "paging": {},
+}
+
+
+class TestNewReports:
+    def _spec(self, fields, report_type):
+        return QuerySpec(
+            accounts=["12345"], fields=list(fields),
+            date_range=DateRange("2026-08-01", "2026-08-31"),
+            report_type=report_type,
+        )
+
+    def test_tickets_report_hits_the_tickets_object(self):
+        seen = {}
+
+        def http(method, url, token, body=None):
+            seen["url"] = url
+            return TICKETS
+
+        conn = HubSpotConnector(_DS(), http=http)
+        result = conn.query(self._spec(("subject", "hs_ticket_priority"), "Tickets"))
+        assert "objects/tickets/search" in seen["url"]
+        assert result.rows[0] == {"subject": "Login broken", "hs_ticket_priority": "HIGH"}
+
+    def test_leads_fields_are_exposed(self):
+        conn = _connector({})
+        lead_fields = {f.id for f in conn.list_fields("Leads")}
+        assert {"hs_lead_name", "hs_lead_type", "hs_lead_label"} <= lead_fields
+
+    def test_owner_name_is_resolved_from_owner_id(self):
+        def http(method, url, token, body=None):
+            if "/owners" in url:
+                return OWNERS
+            if "objects/deals/search" in url:
+                return {"results": [
+                    {"id": "1", "properties": {
+                        "dealname": "Big", "hubspot_owner_id": "77"}},
+                    {"id": "2", "properties": {
+                        "dealname": "Small", "hubspot_owner_id": "88"}},
+                ], "paging": {}}
+            raise AssertionError(f"unexpected {url}")
+
+        conn = HubSpotConnector(_DS(), http=http)
+        result = conn.query(self._spec(("dealname", "hubspot_owner"), "Deals"))
+        assert result.rows[0] == {"dealname": "Big", "hubspot_owner": "Ada Lovelace"}
+        # No first/last name -> falls back to email.
+        assert result.rows[1]["hubspot_owner"] == "ops@acme.com"
+
+    def test_owner_column_requests_the_owner_id_property(self):
+        captured = {}
+
+        def http(method, url, token, body=None):
+            if "/owners" in url:
+                return OWNERS
+            captured["props"] = body["properties"]
+            return {"results": [], "paging": {}}
+
+        conn = HubSpotConnector(_DS(), http=http)
+        conn.query(self._spec(("dealname", "hubspot_owner"), "Deals"))
+        # The synthetic name column is fetched via the real hubspot_owner_id property.
+        assert "hubspot_owner_id" in captured["props"]
+        assert "hubspot_owner" not in captured["props"]
 
 
 class TestAuthMapping:

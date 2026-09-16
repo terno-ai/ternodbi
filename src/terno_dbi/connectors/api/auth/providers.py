@@ -72,7 +72,8 @@ _HUBSPOT = OAuthProvider(
     authorization_url="https://app.hubspot.com/oauth/authorize",
     token_url="https://api.hubapi.com/oauth/v1/token",
     scope="crm.objects.contacts.read crm.objects.companies.read "
-          "crm.objects.deals.read",
+          "crm.objects.deals.read crm.objects.tickets.read "
+          "crm.objects.leads.read crm.objects.owners.read",
     client_id_env="TERNO_HUBSPOT_CLIENT_ID",
     client_secret_env="TERNO_HUBSPOT_CLIENT_SECRET",
     use_pkce=False,

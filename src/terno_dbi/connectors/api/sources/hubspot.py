@@ -6,9 +6,11 @@ Implements the `ApiConnector` interface against the HubSpot CRM API v3:
   returns the one portal (hub) the OAuth token belongs to. HubSpot is single-
   tenant per token, so there is exactly one "account".
 - `list_fields()`   — a *curated* catalogue of properties per report type
-  (contact/company/deal), since a portal can have hundreds of custom properties.
+  (contacts/companies/deals/tickets/leads), since a portal can have hundreds of
+  custom properties.
 - `_run()`          — `POST /crm/v3/objects/{type}/search`, filtered to the
   requested date range on the object's date property, paged to `max_rows`.
+  A record's owner id is resolved to the owner's name via `GET /crm/v3/owners`.
 
 HubSpot differs from the ad connectors:
   * there is one portal per token, not a list of ad accounts;
@@ -34,20 +36,38 @@ _API_BASE = "https://api.hubapi.com"
 _SEARCH_PAGE = 100        # HubSpot search returns at most 100 records per page.
 _SEARCH_MAX_TOTAL = 10000  # HubSpot search will not page beyond 10,000 records.
 
+# "hubspot_owner" is a synthetic name column backed by the real HubSpot property
+# "hubspot_owner_id"; the connector resolves the id to the owner's name.
+_OWNER_NAME = "hubspot_owner"
+_OWNER_ID = "hubspot_owner_id"
+
 # --- report -> CRM object + its date property ------------------------------
 
 _OBJECT_FOR: Dict[str, str] = {
     "Contacts": "contacts",
     "Companies": "companies",
     "Deals": "deals",
+    "Tickets": "tickets",
+    "Leads": "leads",
 }
 # The property each report is filtered and sorted by within the date range.
+# createdate exists on every CRM object.
 _DATE_PROPERTY: Dict[str, str] = {
     "Contacts": "createdate",
     "Companies": "createdate",
     "Deals": "createdate",
+    "Tickets": "createdate",
+    "Leads": "createdate",
 }
 _DEFAULT_REPORT = "Contacts"
+
+# Owner columns shared by every object report (records carry hubspot_owner_id).
+_OWNER_FIELDS: List[Field] = [
+    Field(_OWNER_ID, "Owner ID", "dimension",
+          "Internal id of the record's HubSpot owner."),
+    Field(_OWNER_NAME, "Owner", "dimension",
+          "Name (or email) of the record's HubSpot owner."),
+]
 
 # --- curated property catalogues per report --------------------------------
 
@@ -66,6 +86,7 @@ _CONTACT_FIELDS: List[Field] = [
           data_type="date"),
     Field("lastmodifieddate", "Last modified", "dimension",
           "When the contact was last changed.", data_type="date"),
+    *_OWNER_FIELDS,
 ]
 
 _COMPANY_FIELDS: List[Field] = [
@@ -82,6 +103,7 @@ _COMPANY_FIELDS: List[Field] = [
     Field("annualrevenue", "Annual revenue", "metric",
           "Reported annual revenue.", data_type="number", is_monetary=True,
           is_non_aggregatable=True),
+    *_OWNER_FIELDS,
 ]
 
 _DEAL_FIELDS: List[Field] = [
@@ -98,12 +120,43 @@ _DEAL_FIELDS: List[Field] = [
     Field("amount", "Amount", "metric",
           "Deal value, in the portal's currency.", data_type="number",
           is_monetary=True),
+    *_OWNER_FIELDS,
+]
+
+_TICKET_FIELDS: List[Field] = [
+    Field("subject", "Subject", "dimension", "Ticket subject line."),
+    Field("hs_pipeline", "Pipeline", "dimension",
+          "Support pipeline id (an internal id)."),
+    Field("hs_pipeline_stage", "Stage", "dimension",
+          "Ticket status/stage id within the pipeline (an internal id)."),
+    Field("hs_ticket_priority", "Priority", "dimension",
+          "LOW, MEDIUM, or HIGH."),
+    Field("hs_ticket_category", "Category", "dimension",
+          "Ticket category, when set."),
+    Field("createdate", "Created", "dimension", "When the ticket was created.",
+          data_type="date"),
+    Field("hs_lastmodifieddate", "Last modified", "dimension",
+          "When the ticket was last changed.", data_type="date"),
+    *_OWNER_FIELDS,
+]
+
+_LEAD_FIELDS: List[Field] = [
+    Field("hs_lead_name", "Lead name", "dimension", "The full name of the lead."),
+    Field("hs_lead_type", "Lead type", "dimension",
+          "Lead type category (e.g. NEW BUSINESS)."),
+    Field("hs_lead_label", "Lead label", "dimension",
+          "Current lead status/label (e.g. WARM)."),
+    Field("createdate", "Created", "dimension", "When the lead was created.",
+          data_type="date"),
+    *_OWNER_FIELDS,
 ]
 
 _FIELDS_FOR: Dict[str, List[Field]] = {
     "Contacts": _CONTACT_FIELDS,
     "Companies": _COMPANY_FIELDS,
     "Deals": _DEAL_FIELDS,
+    "Tickets": _TICKET_FIELDS,
+    "Leads": _LEAD_FIELDS,
 }
 
 
@@ -191,6 +244,38 @@ class HubSpotConnector(ApiConnector):
 
     # -- query --------------------------------------------------------------
 
+    def _owner_map(self) -> Dict[str, str]:
+        """`{owner_id: "First Last"}` for the portal, for resolving owner names.
+
+        Best-effort: if owners cannot be read (e.g. the scope was declined) the
+        map is empty and the connector falls back to the raw owner id rather
+        than failing the whole query over a secondary enrichment.
+        """
+        mapping: Dict[str, str] = {}
+        url = f"{_API_BASE}/crm/v3/owners/"
+        after: Optional[str] = None
+        try:
+            while True:
+                params: Dict[str, Any] = {"limit": 500}
+                if after:
+                    params["after"] = after
+                data = self._call("GET", url, params)
+                for owner in data.get("results", []):
+                    oid = owner.get("id")
+                    if oid is None:
+                        continue
+                    name = " ".join(
+                        p for p in (owner.get("firstName"), owner.get("lastName"))
+                        if p
+                    ).strip()
+                    mapping[str(oid)] = name or owner.get("email") or str(oid)
+                after = (((data.get("paging") or {}).get("next") or {}).get("after"))
+                if not after:
+                    break
+        except ApiError as exc:
+            logger.warning("HubSpot owner lookup failed: %s", exc.message)
+        return mapping
+
     def _run(self, spec: QuerySpec) -> QueryResult:
         report_type = spec.report_type if spec.report_type in _OBJECT_FOR else _DEFAULT_REPORT
         object_type = _OBJECT_FOR[report_type]
@@ -200,8 +285,16 @@ class HubSpotConnector(ApiConnector):
         if unknown:
             raise invalid_field(unknown[0], list(catalogue.keys()))
 
-        # Properties to return: the caller's fields, or the full curated set.
-        properties = list(spec.fields) or list(catalogue.keys())
+        # The fields the caller asked for (or the full curated set).
+        requested = list(spec.fields) or list(catalogue.keys())
+        # Real HubSpot property names to request: the synthetic owner-name column
+        # is backed by the hubspot_owner_id property.
+        api_props: List[str] = []
+        for f in requested:
+            prop = _OWNER_ID if f == _OWNER_NAME else f
+            if prop not in api_props:
+                api_props.append(prop)
+
         date_prop = _DATE_PROPERTY[report_type]
         start_ms, end_ms = _day_bounds_ms(spec.date_range.start, spec.date_range.end)
 
@@ -213,9 +306,11 @@ class HubSpotConnector(ApiConnector):
                 "value": start_ms,
                 "highValue": end_ms,
             }]}],
-            "properties": properties,
+            "properties": api_props,
             "sorts": [{"propertyName": date_prop, "direction": "DESCENDING"}],
         }
+
+        owner_map = self._owner_map() if _OWNER_NAME in requested else {}
 
         max_total = min(spec.max_rows, _SEARCH_MAX_TOTAL)
         rows: List[Dict[str, Any]] = []
@@ -230,16 +325,21 @@ class HubSpotConnector(ApiConnector):
             results = data.get("results", [])
             for obj in results:
                 props = obj.get("properties") or {}
-                rows.append({
-                    name: _coerce(name, props.get(name), catalogue)
-                    for name in properties
-                })
+                record: Dict[str, Any] = {}
+                for f in requested:
+                    if f == _OWNER_NAME:
+                        oid = props.get(_OWNER_ID)
+                        record[f] = (owner_map.get(str(oid), oid)
+                                     if oid is not None else None)
+                    else:
+                        record[f] = _coerce(f, props.get(f), catalogue)
+                rows.append(record)
             after = (((data.get("paging") or {}).get("next") or {}).get("after"))
             if not after or not results:
                 break
 
         return QueryResult(
-            requested_field_ids=properties,
+            requested_field_ids=requested,
             rows=rows[:max_total],
             row_count=len(rows[:max_total]),
             notes=[f"Records are filtered by '{date_prop}' within the selected "
