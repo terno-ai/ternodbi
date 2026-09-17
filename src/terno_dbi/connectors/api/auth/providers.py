@@ -93,8 +93,7 @@ _PROVIDERS: Dict[str, OAuthProvider] = {
     "youtube": _google_with_scope(
         "https://www.googleapis.com/auth/yt-analytics.readonly "
         "https://www.googleapis.com/auth/yt-analytics-monetary.readonly "
-        "https://www.googleapis.com/auth/youtube.readonly "
-        "https://www.googleapis.com/auth/youtube.channel-memberships.creator"),
+        "https://www.googleapis.com/auth/youtube.readonly"),
     "google_search_console": _google_with_scope(
         "https://www.googleapis.com/auth/webmasters.readonly"),
     "google_ads": _google_with_scope(
