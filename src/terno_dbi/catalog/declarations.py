@@ -252,7 +252,8 @@ _APIS: List[ConnectorSpec] = [
         auth_type=AuthType.OAUTH,
         description="Channel and video performance, demographics, traffic "
                     "sources and ad performance for YouTube channels.",
-        scopes_label="YouTube Analytics and channel read-only access",
+        scopes_label="YouTube Analytics (incl. revenue), channel and "
+                     "memberships read-only access",
         has_account_list=True,
         has_fields=True,
         is_date_range_required=True,
