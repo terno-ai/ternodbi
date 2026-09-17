@@ -56,6 +56,18 @@ _GOOGLE = OAuthProvider(
     },
 )
 
+_LINKEDIN = OAuthProvider(
+    name="linkedin",
+    authorization_url="https://www.linkedin.com/oauth/v2/authorization",
+    token_url="https://www.linkedin.com/oauth/v2/accessToken",
+    scope="r_ads r_ads_reporting",
+    client_id_env="TERNO_LINKEDIN_CLIENT_ID",
+    client_secret_env="TERNO_LINKEDIN_CLIENT_SECRET",
+    # LinkedIn's authorization-code flow authenticates with the client secret;
+    # it does not accept a PKCE challenge on this endpoint.
+    use_pkce=False,
+)
+
 _META = OAuthProvider(
     name="meta",
     authorization_url="https://www.facebook.com/v25.0/dialog/oauth",
@@ -86,7 +98,19 @@ _PROVIDERS: Dict[str, OAuthProvider] = {
         "https://www.googleapis.com/auth/webmasters.readonly"),
     "google_ads": _google_with_scope(
         "https://www.googleapis.com/auth/adwords"),
+    # Read-only over the whole drive: file properties, the shared-drive list
+    # (which the narrower metadata scope cannot serve), and file contents.
+    "google_drive": _google_with_scope(
+        "https://www.googleapis.com/auth/drive.readonly"),
+    # Two scopes, because the split is real: the Sheets API can read a
+    # spreadsheet but cannot *find* one, so discovery goes through Drive. Only
+    # file metadata is needed for that, so the narrower Drive scope is used —
+    # spreadsheet contents come from the Sheets scope.
+    "google_sheets": _google_with_scope(
+        "https://www.googleapis.com/auth/spreadsheets.readonly "
+        "https://www.googleapis.com/auth/drive.metadata.readonly"),
     "meta_ads": _META,
+    "linkedin_ads": _LINKEDIN,
 }
 
 
