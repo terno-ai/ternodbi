@@ -80,6 +80,17 @@ _HUBSPOT = OAuthProvider(
 )
 
 
+_AMAZON_ADS = OAuthProvider(
+    name="amazon_ads",
+    authorization_url="https://www.amazon.com/ap/oa",
+    token_url="https://api.amazon.com/auth/o2/token",
+    scope="advertising::campaign_management",
+    client_id_env="TERNO_AMAZON_ADS_CLIENT_ID",
+    client_secret_env="TERNO_AMAZON_ADS_CLIENT_SECRET",
+    use_pkce=False,
+)
+
+
 def _google_with_scope(scope: str) -> OAuthProvider:
     from dataclasses import replace
     return replace(_GOOGLE, scope=scope)
@@ -100,6 +111,7 @@ _PROVIDERS: Dict[str, OAuthProvider] = {
         "https://www.googleapis.com/auth/adwords"),
     "meta_ads": _META,
     "hubspot": _HUBSPOT,
+    "amazon_ads": _AMAZON_ADS,
 }
 
 

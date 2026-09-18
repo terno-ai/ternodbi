@@ -366,6 +366,37 @@ _APIS: List[ConnectorSpec] = [
         rate_limit_per_day=500000,
         default_enabled=True,
     ),
+    ConnectorSpec(
+        key="amazon_ads",
+        display_name="Amazon Ads",
+        provider="Amazon",
+        category="Advertising",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Sponsored Products, Brands and Display performance from "
+                    "Amazon Ads — campaigns, targeting, search terms and product "
+                    "reports with spend, sales, ACOS and ROAS.",
+        scopes_label="Amazon Ads read access (Sponsored Products, Brands, Display)",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=True,
+        account_label_singular="Profile",
+        account_label_plural="Profiles",
+        report_types=[
+            ReportType("spCampaigns", "Sponsored Products — Campaigns"),
+            ReportType("spTargeting", "Sponsored Products — Targeting"),
+            ReportType("spSearchTerm", "Sponsored Products — Search terms"),
+            ReportType("spAdvertisedProduct", "Sponsored Products — Advertised product"),
+            ReportType("spPurchasedProduct", "Sponsored Products — Purchased product"),
+            ReportType("sbCampaigns", "Sponsored Brands — Campaigns"),
+            ReportType("sdCampaigns", "Sponsored Display — Campaigns"),
+        ],
+        default_report_type="spCampaigns",
+        # Reporting is async (one create + a few status polls per query)
+        rate_limit_per_second=50,
+        rate_limit_per_day=500000,
+        default_enabled=True,
+    ),
 ]
 
 
