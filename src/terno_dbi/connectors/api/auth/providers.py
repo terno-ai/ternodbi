@@ -91,6 +91,17 @@ _AMAZON_ADS = OAuthProvider(
 )
 
 
+_MICROSOFT = OAuthProvider(
+    name="microsoft",
+    authorization_url="https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+    token_url="https://login.microsoftonline.com/common/oauth2/v2.0/token",
+    scope="https://ads.microsoft.com/msads.manage offline_access",
+    client_id_env="TERNO_MICROSOFT_ADS_CLIENT_ID",
+    client_secret_env="TERNO_MICROSOFT_ADS_CLIENT_SECRET",
+    use_pkce=True,
+)
+
+
 def _google_with_scope(scope: str) -> OAuthProvider:
     from dataclasses import replace
     return replace(_GOOGLE, scope=scope)
@@ -110,6 +121,7 @@ _PROVIDERS: Dict[str, OAuthProvider] = {
     "google_ads": _google_with_scope(
         "https://www.googleapis.com/auth/adwords"),
     "meta_ads": _META,
+    "microsoft_ads": _MICROSOFT,
     "hubspot": _HUBSPOT,
     "amazon_ads": _AMAZON_ADS,
 }

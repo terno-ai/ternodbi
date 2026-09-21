@@ -338,6 +338,32 @@ _APIS: List[ConnectorSpec] = [
         default_enabled=True,   # Developer token configured
     ),
     ConnectorSpec(
+        key="microsoft_ads",
+        display_name="Microsoft Advertising",
+        provider="Microsoft",
+        category="Advertising",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Campaign, ad group, keyword and search-term performance "
+                    "from Microsoft Advertising (Bing) accounts.",
+        scopes_label="Microsoft Advertising read access",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=True,
+        account_label_singular="Ad account",
+        account_label_plural="Ad accounts",
+        report_types=[
+            ReportType("Campaign", "Campaign performance"),
+            ReportType("AdGroup", "Ad group performance"),
+            ReportType("Keyword", "Keyword performance"),
+            ReportType("SearchTerm", "Search terms"),
+        ],
+        default_report_type="Campaign",
+        rate_limit_per_second=50,
+        rate_limit_per_day=50000,
+        default_enabled=False,
+    ),
+    ConnectorSpec(
         key="hubspot",
         display_name="HubSpot",
         provider="HubSpot",

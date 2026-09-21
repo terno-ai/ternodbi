@@ -13,6 +13,9 @@ from terno_dbi.connectors.api.sources.google_ads import (
 from terno_dbi.connectors.api.sources.meta_ads import (
     MetaAdsConnector, make_meta_ads_connector,
 )
+from terno_dbi.connectors.api.sources.microsoft_ads import (
+    MicrosoftAdsConnector, make_microsoft_ads_connector,
+)
 from terno_dbi.connectors.api.sources.youtube import (
     YouTubeConnector, make_youtube_connector,
 )
@@ -22,5 +25,6 @@ __all__ = [
     "GSCConnector", "make_gsc_connector",
     "GoogleAdsConnector", "make_google_ads_connector",
     "MetaAdsConnector", "make_meta_ads_connector",
+    "MicrosoftAdsConnector", "make_microsoft_ads_connector",
     "YouTubeConnector", "make_youtube_connector",
 ]
