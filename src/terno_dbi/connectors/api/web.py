@@ -141,6 +141,7 @@ def connect(request):
             redirect_uri=_callback_uri(request),
             organisation=org,
             return_to=return_to,
+            instance=request.GET.get("shop", ""),
         )
     except ApiError as exc:
         return HttpResponse(exc.message, status=400)

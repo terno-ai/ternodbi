@@ -423,6 +423,43 @@ _APIS: List[ConnectorSpec] = [
         rate_limit_per_day=500000,
         default_enabled=True,
     ),
+    ConnectorSpec(
+        key="shopify",
+        display_name="Shopify",
+        provider="Shopify",
+        category="Ecommerce",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Orders, products and customers from a Shopify store — sales, "
+                    "discounts, taxes, inventory and customer lifetime value for "
+                    "ecommerce and revenue analytics.",
+        scopes_label="Shopify read access (orders, draft orders, line items, "
+                     "products, variants, collections, customers, discounts, "
+                     "abandoned checkouts)",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=True,
+        account_label_singular="Store",
+        account_label_plural="Stores",
+        report_types=[
+            ReportType("Orders", "Orders"),
+            ReportType("OrderLineItems", "Order line items (best sellers)"),
+            ReportType("DraftOrders", "Draft orders"),
+            ReportType("AbandonedCheckouts", "Abandoned checkouts"),
+            ReportType("Products", "Products"),
+            ReportType("ProductVariants", "Product variants",
+                       is_date_range_required=False),
+            ReportType("Collections", "Collections",
+                       is_date_range_required=False),
+            ReportType("Customers", "Customers"),
+            ReportType("Discounts", "Discount codes",
+                       is_date_range_required=False),
+        ],
+        default_report_type="Orders",
+        rate_limit_per_second=4,     # Shopify GraphQL is cost-based; keep modest
+        rate_limit_per_day=100000,
+        default_enabled=True,    # Shopify app configured
+    ),
 ]
 
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import logging
+import re
 import secrets as _secrets
 import time
 from datetime import timedelta
@@ -46,12 +47,16 @@ def start_authorization(
     organisation=None,
     data_source=None,
     return_to: str = "",
+    instance: str = "",
 ) -> Dict[str, Any]:
     """Begin a connect flow. Returns `{authorization_url, state}`.
 
     Raises `ApiError` if the connector has no configured provider, so the caller
     can tell the user "this deployment isn't set up for X" rather than sending
     them to a broken consent screen.
+
+    `instance` is the per-store host for providers whose URLs are templated
+    (Shopify) — validated and required for those, ignored for the rest.
     """
 
     from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
@@ -71,6 +76,11 @@ def start_authorization(
             f"Set {provider.client_id_env} and {provider.client_secret_env}.",
         )
 
+    instance = _validated_instance(provider, connector_key, instance)
+    authorization_url = (provider.authorization_url.format(instance=instance)
+                         if provider.requires_instance
+                         else provider.authorization_url)
+
     verifier, challenge = _pkce_pair() if provider.use_pkce else ("", "")
     state = _secrets.token_urlsafe(32)
 
@@ -82,6 +92,7 @@ def start_authorization(
         organisation=organisation,
         data_source=data_source,
         return_to=return_to,
+        instance=instance,
         expires_at=timezone.now() + timedelta(minutes=STATE_TTL_MINUTES),
     )
 
@@ -99,9 +110,32 @@ def start_authorization(
     params.update(provider.extra_authorize_params)
 
     return {
-        "authorization_url": f"{provider.authorization_url}?{urlencode(params)}",
+        "authorization_url": f"{authorization_url}?{urlencode(params)}",
         "state": state,
     }
+
+
+# A Shopify store host: '<store>.myshopify.com'. The instance is templated into a
+# URL we call server-side, so it must be validated strictly (SSRF guard) — only a
+# myshopify.com subdomain is ever allowed.
+_MYSHOPIFY_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,59}\.myshopify\.com$")
+
+
+def _validated_instance(provider, connector_key: str, instance: str) -> str:
+    from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
+    if not provider.requires_instance:
+        return ""
+    shop = (instance or "").strip().lower()
+    # Accept a bare store name too, then normalise to the full host.
+    if shop and "." not in shop:
+        shop = f"{shop}.myshopify.com"
+    if not _MYSHOPIFY_RE.match(shop):
+        raise ApiError(
+            ErrorCode.UPSTREAM_ERROR,
+            f"{connector_key} needs a valid store, e.g. 'your-store.myshopify.com'.",
+            retriable=False,
+        )
+    return shop
 
 
 def _default_post(url: str, data: Dict[str, str]) -> Dict[str, Any]:
@@ -110,11 +144,13 @@ def _default_post(url: str, data: Dict[str, str]) -> Dict[str, Any]:
     return resp.json()
 
 
-def _store_tokens(data_source, token_response: Dict[str, Any]) -> None:
+def _store_tokens(data_source, token_response: Dict[str, Any],
+                  instance: str = "") -> None:
     """Encrypt and persist the token bundle onto the datasource.
 
     Preserves an existing refresh token when the provider omits one on refresh
-    (Google returns it only on the first consent).
+    (Google returns it only on the first consent). `instance` (e.g. a Shopify
+    store domain) is persisted so a per-store connector can build its API URLs.
     """
     from terno_dbi.core.models import DataSource
     existing = decrypt_dict(data_source.connection_json) or {}
@@ -126,6 +162,8 @@ def _store_tokens(data_source, token_response: Dict[str, Any]) -> None:
         bundle["REFRESH_TOKEN"] = token_response["refresh_token"]
     if token_response.get("scope"):
         bundle["GRANTED_SCOPES"] = token_response["scope"]
+    if instance:
+        bundle["INSTANCE"] = instance
     expires_in = token_response.get("expires_in")
     if expires_in:
         bundle["TOKEN_EXPIRES_AT"] = str(time.time() + float(expires_in))
@@ -173,8 +211,11 @@ def complete_authorization(
     if provider.use_pkce and st.code_verifier:
         exchange["code_verifier"] = st.code_verifier
 
+    token_url = (provider.token_url.format(instance=st.instance)
+                 if provider.requires_instance else provider.token_url)
+
     try:
-        token_response = http_post(provider.token_url, exchange)
+        token_response = http_post(token_url, exchange)
     except Exception as exc:   # noqa: BLE001
         logger.warning("Token exchange failed for %s: %s", st.connector_key, exc)
         raise ApiError(
@@ -205,7 +246,7 @@ def complete_authorization(
                 auth_status=DataSource.AuthStatus.NOT_AUTHENTICATED,
             )
 
-    _store_tokens(data_source, token_response)
+    _store_tokens(data_source, token_response, instance=st.instance)
     st.delete()
     return data_source
 

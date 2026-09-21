@@ -25,6 +25,10 @@ class OAuthProvider:
     client_secret_env: str
     use_pkce: bool = True
     extra_authorize_params: Dict[str, str] = field(default_factory=dict)
+    # When True, `authorization_url` and `token_url` are templates containing
+    # `{instance}` (e.g. Shopify's per-store domain) that the flow fills in from
+    # a store name the user supplies before connecting.
+    requires_instance: bool = False
 
     def client_id(self) -> str:
         return os.getenv(self.client_id_env, "").strip()
@@ -102,6 +106,25 @@ _MICROSOFT = OAuthProvider(
 )
 
 
+_SHOPIFY = OAuthProvider(
+    name="shopify",
+    # Per-store URLs: {instance} is filled with '<store>.myshopify.com'.
+    authorization_url="https://{instance}/admin/oauth/authorize",
+    token_url="https://{instance}/admin/oauth/access_token",
+    # NOTE: `read_all_orders` (full order history) is intentionally omitted. It is
+    # a Shopify *protected* scope — the app config rejects it and the OAuth request
+    # fails until Shopify approves the access request for it. Without it, orders are
+    # limited to the last 60 days. Once the app is approved for read_all_orders,
+    # add it back here (and to the app's scope list).
+    scope="read_orders,read_products,read_customers,read_inventory,"
+          "read_locations,read_draft_orders,read_discounts",
+    client_id_env="TERNO_SHOPIFY_CLIENT_ID",
+    client_secret_env="TERNO_SHOPIFY_CLIENT_SECRET",
+    use_pkce=False,
+    requires_instance=True,
+)
+
+
 def _google_with_scope(scope: str) -> OAuthProvider:
     from dataclasses import replace
     return replace(_GOOGLE, scope=scope)
@@ -124,6 +147,7 @@ _PROVIDERS: Dict[str, OAuthProvider] = {
     "microsoft_ads": _MICROSOFT,
     "hubspot": _HUBSPOT,
     "amazon_ads": _AMAZON_ADS,
+    "shopify": _SHOPIFY,
 }
 
 

@@ -980,6 +980,7 @@ class ConnectorOAuthState(models.Model):
         help_text="Set when reconnecting an existing datasource; null on first connect.",
     )
     return_to = models.CharField(max_length=500, blank=True, default="")
+    instance = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
 
