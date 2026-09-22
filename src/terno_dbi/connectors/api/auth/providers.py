@@ -111,13 +111,8 @@ _SHOPIFY = OAuthProvider(
     # Per-store URLs: {instance} is filled with '<store>.myshopify.com'.
     authorization_url="https://{instance}/admin/oauth/authorize",
     token_url="https://{instance}/admin/oauth/access_token",
-    # NOTE: `read_all_orders` (full order history) is intentionally omitted. It is
-    # a Shopify *protected* scope — the app config rejects it and the OAuth request
-    # fails until Shopify approves the access request for it. Without it, orders are
-    # limited to the last 60 days. Once the app is approved for read_all_orders,
-    # add it back here (and to the app's scope list).
-    scope="read_orders,read_products,read_customers,read_inventory,"
-          "read_locations,read_draft_orders,read_discounts",
+    scope="read_orders,read_all_orders,read_products,read_customers,"
+          "read_inventory,read_locations,read_draft_orders,read_discounts",
     client_id_env="TERNO_SHOPIFY_CLIENT_ID",
     client_secret_env="TERNO_SHOPIFY_CLIENT_SECRET",
     use_pkce=False,
