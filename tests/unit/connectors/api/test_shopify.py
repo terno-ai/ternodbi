@@ -75,6 +75,18 @@ class TestListAccounts:
         assert accounts[0].id == "acme.myshopify.com"
         assert accounts[0].currency == "USD"
 
+    def test_falls_back_to_the_store_domain_when_shop_lookup_403s(self):
+        # A 403 reading the Shop object must not break account listing — the
+        # store is already known from the connection's instance domain.
+        def http(method, url, headers, body=None):
+            raise ApiError(ErrorCode.UPSTREAM_ERROR, "Shopify API error (403).")
+        conn = ShopifyConnector(_DS(), http=http)
+        accounts = conn.list_accounts()
+        assert len(accounts) == 1
+        assert accounts[0].id == "acme.myshopify.com"
+        assert accounts[0].name == "acme.myshopify.com"
+        assert accounts[0].currency is None
+
 
 class TestRunReport:
     def _spec(self, fields=("order_name", "total_price"), report_type="Orders"):

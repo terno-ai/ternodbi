@@ -435,14 +435,19 @@ class ShopifyConnector(ApiConnector):
     # -- discovery ----------------------------------------------------------
 
     def list_accounts(self) -> List[Account]:
-        data = self._graphql("{ shop { name currencyCode myshopifyDomain } }")
-        shop = data.get("shop") or {}
-        domain = shop.get("myshopifyDomain") or self._shop()
-        return [Account(
-            id=domain,
-            name=shop.get("name") or domain,
-            currency=shop.get("currencyCode"),
-        )]
+        domain = self._shop()
+        try:
+            data = self._graphql("{ shop { name currencyCode myshopifyDomain } }")
+            shop = data.get("shop") or {}
+            return [Account(
+                id=shop.get("myshopifyDomain") or domain,
+                name=shop.get("name") or domain,
+                currency=shop.get("currencyCode"),
+            )]
+        except ApiError:
+            logger.info("Shopify shop lookup failed; using store domain as the "
+                        "account for %s", domain)
+            return [Account(id=domain, name=domain, currency=None)]
 
     def list_fields(self, report_type: Optional[str] = None) -> List[Field]:
         return list(_report_for(report_type).fields)
