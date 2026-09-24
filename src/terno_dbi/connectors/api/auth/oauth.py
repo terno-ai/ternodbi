@@ -16,6 +16,7 @@ caller — only the resulting datasource is.
 from __future__ import annotations
 import base64
 import hashlib
+import json
 import logging
 import re
 import secrets as _secrets
@@ -144,6 +145,20 @@ def _default_post(url: str, data: Dict[str, str]) -> Dict[str, Any]:
     return resp.json()
 
 
+def _connected_email(token_response: Dict[str, Any]) -> str:
+    id_token = token_response.get("id_token")
+    if not id_token or id_token.count(".") != 2:
+        return ""
+    try:
+        payload_b64 = id_token.split(".")[1]
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(padded).decode())
+        email = claims.get("email") or ""
+        return email if isinstance(email, str) else ""
+    except Exception:
+        return ""
+
+
 def _store_tokens(data_source, token_response: Dict[str, Any],
                   instance: str = "") -> None:
     """Encrypt and persist the token bundle onto the datasource.
@@ -162,6 +177,9 @@ def _store_tokens(data_source, token_response: Dict[str, Any],
         bundle["REFRESH_TOKEN"] = token_response["refresh_token"]
     if token_response.get("scope"):
         bundle["GRANTED_SCOPES"] = token_response["scope"]
+    email = _connected_email(token_response)
+    if email:
+        bundle["CONNECTED_EMAIL"] = email
     if instance:
         bundle["INSTANCE"] = instance
     expires_in = token_response.get("expires_in")

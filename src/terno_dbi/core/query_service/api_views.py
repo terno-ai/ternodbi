@@ -10,11 +10,12 @@ sharing authentication and datasource resolution.
 
 import json
 import logging
+from dataclasses import replace
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from terno_dbi.connectors.api import registry
-from terno_dbi.connectors.api.auth import rbac
+from terno_dbi.connectors.api.auth import account_selection, rbac
 from terno_dbi.connectors.api.dates import get_today
 from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
 from terno_dbi.connectors.api.pipeline.jobs import enqueue_query, get_query_results
@@ -102,10 +103,14 @@ def api_list_accounts(request, datasource_identifier):
 
     permitted = rbac.permitted_accounts(ds, _resolve_roles(request))
     visible = rbac.filter_accounts(accounts, permitted)
+
+    account_selection.sync_account_selections(ds, visible)
+    enabled = account_selection.enabled_account_ids(ds)
+    shown = [a for a in visible if enabled is None or a.id in enabled]
     return JsonResponse({
         "status": "success",
-        "accounts": [a.as_dict() for a in visible],
-        "count": len(visible),
+        "accounts": [a.as_dict() for a in shown],
+        "count": len(shown),
     })
 
 
@@ -209,8 +214,11 @@ def api_data_query(request, datasource_identifier):
     except (json.JSONDecodeError, ValueError) as exc:
         return _err(ApiError(ErrorCode.INVALID_FILTER, str(exc)))
 
-    # Authorisation resolved here, from the token's groups — never the body.
     permitted = rbac.permitted_accounts(ds, _resolve_roles(request))
+    permitted = account_selection.restrict_to_selection(ds, permitted)
+
+    if not spec.accounts and permitted is not None:
+        spec = replace(spec, accounts=sorted(permitted))
 
     try:
         result = enqueue_query(

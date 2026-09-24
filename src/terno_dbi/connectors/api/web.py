@@ -10,12 +10,16 @@ must not be enough to connect a source to another organisation.
 """
 
 from __future__ import annotations
+import json
 import logging
 from django.conf import settings
 from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import redirect
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods
+from terno_dbi.services.secrets import decrypt_dict
+from terno_dbi.connectors.api import registry
+from terno_dbi.connectors.api.auth import account_selection, rbac
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +171,7 @@ def oauth_callback(request):
     # Look up the return target before the state is consumed.
     st = ConnectorOAuthState.objects.filter(state=state).first()
     return_to = st.return_to if st else ""
+    connector_key = st.connector_key if st else ""
 
     try:
         data_source = complete_authorization(state=state, code=code)
@@ -174,11 +179,12 @@ def oauth_callback(request):
         return HttpResponse(exc.message, status=400)
 
     if return_to:
-        # Signal success to the returning page (the connector gallery toasts on
-        # ?connected and reopens). Preserve any existing query string.
         from urllib.parse import quote
         sep = "&" if "?" in return_to else "?"
-        return redirect(f"{return_to}{sep}connected={quote(data_source.display_name)}")
+        suffix = f"connected={quote(data_source.display_name)}"
+        if connector_key:
+            suffix += f"&select_accounts={quote(connector_key)}"
+        return redirect(f"{return_to}{sep}{suffix}")
     return JsonResponse({
         "status": "connected",
         "datasource": data_source.display_name,
@@ -300,9 +306,90 @@ def disconnect_connector(request, connector_key):
     return JsonResponse({"status": "disconnected", "key": connector_key})
 
 
+def _connected_datasource(org, connector_key):
+    from terno_dbi.core.models import DataSource
+
+    rows = list(DataSource.objects.filter(
+        organisation=org, catalog__key=connector_key, catalog__family="api",
+    ).select_related("catalog"))
+    if not rows:
+        return None
+    for ds in rows:
+        if ds.auth_status == DataSource.AuthStatus.CONNECTED:
+            return ds
+    return rows[0]
+
+
+@require_http_methods(["GET", "POST"])
+def connector_accounts(request, connector_key):
+    """Manage which of a connected source's accounts are queryable.
+
+    GET  — list every account the credential can see (within RBAC), each with its
+           `enabled` flag, refreshing the cached set from the provider. This
+           drives the account-picker modal, so it returns *all* accounts, not
+           only the enabled ones.
+    POST — body `{"account_ids": [...]}` turns exactly those accounts on and the
+           rest off.
+
+    Org-admin gated and CSRF-protected, mirroring connect/disconnect: choosing the
+    queryable account set is a management action on a shared connection.
+    """
+
+    from terno_dbi.connectors.api.model.errors import ApiError
+
+    org = _authorised_org(request)
+    if org is None:
+        return HttpResponse("Not permitted.", status=403)
+    if not _is_org_admin(request.user, org):
+        return HttpResponse(
+            "Only organisation admins can manage connector accounts.", status=403)
+
+    ds = _connected_datasource(org, connector_key)
+    if ds is None:
+        return JsonResponse({"error": "Not connected."}, status=404)
+
+    if request.method == "POST":
+        try:
+            body = json.loads(request.body or "{}")
+        except (json.JSONDecodeError, ValueError):
+            return HttpResponseBadRequest("Invalid JSON.")
+        account_ids = body.get("account_ids") or []
+        if not isinstance(account_ids, list):
+            return HttpResponseBadRequest("account_ids must be a list.")
+        count = account_selection.set_enabled_accounts(ds, account_ids)
+        return JsonResponse({"status": "saved", "enabled_count": count})
+
+    try:
+        connector = registry.build_connector(ds)
+        accounts = connector.list_accounts()
+    except ApiError as exc:
+        return JsonResponse({"error": exc.message}, status=400)
+
+    permitted = rbac.permitted_accounts(ds, request.user.groups.all())
+    visible = rbac.filter_accounts(accounts, permitted)
+    rows = account_selection.sync_account_selections(ds, visible)
+    return JsonResponse({
+        "accounts": rows,
+        "count": len(rows),
+        "enabled_count": sum(1 for r in rows if r["enabled"]),
+        "email": _connected_email(ds),
+    })
+
+
+def _connected_email(ds) -> str:
+    try:
+        bundle = decrypt_dict(ds.connection_json) or {}
+    except Exception:   # noqa: BLE001
+        return ""
+    if not isinstance(bundle, dict):
+        return ""
+    return bundle.get("CONNECTED_EMAIL", "") or ""
+
+
 __all__ = [
     "connect",
     "oauth_callback",
     "list_api_connectors",
     "disconnect_connector",
+    "connector_accounts",
 ]

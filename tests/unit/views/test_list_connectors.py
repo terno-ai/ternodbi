@@ -77,6 +77,8 @@ class TestListConnectors:
         assert ga4["status"] == "not_connected"
         assert ga4["connect_url"] == (
             "https://acme.app.terno.ai/connect?connector=googleanalytics4"
+            "&return_to=https%3A%2F%2Facme.app.terno.ai%2Fdata-connectors"
+            "%2Fconnectors%2Fgoogleanalytics4"
         )
 
         pg = by_key["postgres"]

@@ -122,7 +122,7 @@ _SHOPIFY = OAuthProvider(
 
 def _google_with_scope(scope: str) -> OAuthProvider:
     from dataclasses import replace
-    return replace(_GOOGLE, scope=scope)
+    return replace(_GOOGLE, scope=f"openid email {scope}")
 
 
 # Provider per connector key. Scope is the connector's own — read-only wherever
