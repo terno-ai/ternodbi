@@ -22,14 +22,19 @@ requested one. `list_accounts` therefore treats a 403 from `drives.list` as "no
 shared drives on this grant" and still returns My Drive, rather than failing
 discovery outright.
 
-The date range filters `modifiedTime`, which makes a Drive result narrower than
-it looks: a file untouched since before the range is absent, not missing. That
-is easy to read as "this folder holds nothing else", so every result says so in
-its `notes` and names the range that produced it.
+A drive is current state, not a time series, so `date_range` is *not* a filter
+here — every report type declares `is_date_range_required=False` and this
+connector ignores the range, the way the Sheets connector does. Filtering
+`modifiedTime` by whatever range a caller happened to pass is what made a Drive
+query look empty: an agent that supplies "last 30 days" out of habit would see
+a folder of long-settled files as an empty folder. A modification window is
+still available, but only when asked for by name, through the `modified_after`
+and `modified_before` settings.
 """
 
 from __future__ import annotations
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
@@ -47,6 +52,21 @@ _BASE = "https://www.googleapis.com/drive/v3"
 MY_DRIVE = "myDrive"
 
 _FOLDER_MIME = "application/vnd.google-apps.folder"
+
+# Any one of these lets `files.list` see the user's whole corpus. `drive.file`
+# is deliberately absent: it is per-file access to what the app itself created
+# or the user hand-picked in the Google Picker, so `files.list` under it
+# answers 200 with an empty list. That is the failure this connector has to
+# name, because "no error, no files" reads as an empty Drive.
+_DRIVE_READ_SCOPES = frozenset({
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.metadata",
+    "https://www.googleapis.com/auth/drive.metadata.readonly",
+})
+
+# The scope this connector asks for at connect time (see `auth.providers`).
+_PREFERRED_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 
 # Drive caps a page at 1000 regardless of what we ask for.
 _MAX_PAGE_SIZE = 1000
@@ -110,8 +130,9 @@ _FIELDS: List[_DriveField] = [
     _dim("createdTime", "Created", "createdTime",
          "When the file was created (RFC 3339).", data_type="datetime"),
     _dim("modifiedTime", "Last modified", "modifiedTime",
-         "When the file was last modified (RFC 3339). This is the field a "
-         "date range filters on.", data_type="datetime"),
+         "When the file was last modified (RFC 3339). The modified_after / "
+         "modified_before settings filter on this field.",
+         data_type="datetime"),
     _dim("ownerName", "Owner", "owners(displayName,emailAddress)",
          "Display name of the file's first owner.",
          extract=_owner("displayName")),
@@ -254,6 +275,29 @@ def _quote(value: Any) -> str:
     return "'" + text.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _date_literal(value: Any, setting: str, suffix: str) -> str:
+    """A validated `YYYY-MM-DDThh:mm:ss` literal for a `modifiedTime` clause.
+
+    Validated rather than interpolated, because Drive answers a malformed `q`
+    with a bare "Invalid Value" that names only the parameter. An agent that
+    passed `get_today()` whole instead of `get_today()['utc_date']` then gets a
+    400 it cannot act on; this turns that into an error naming the setting and
+    the value.
+    """
+    text = str(value).strip()
+    if not _DATE_RE.match(text):
+        raise ApiError(
+            ErrorCode.INVALID_FILTER,
+            f"{setting} must be a date as YYYY-MM-DD; got {value!r}.",
+            details={"setting": setting, "value": text[:120]},
+            retriable=False,
+        )
+    return f"'{text}T{suffix}'"
+
+
 class GoogleDriveConnector(ApiConnector):
     def __init__(self, datasource, http: Optional[Callable] = None,
                  token_refresher: Optional[Callable] = None):
@@ -280,6 +324,37 @@ class GoogleDriveConnector(ApiConnector):
                 "Google Drive returned an error. Try again.",
             )
 
+    # -- scope --------------------------------------------------------------
+
+    def _require_drive_read(self, feature: str) -> None:
+        """Fail loudly when the grant cannot see the user's files.
+
+        `ApiConnector.require_scope` checks one exact scope; Drive read access
+        comes in four spellings (`drive`, `drive.readonly`, and the two
+        metadata variants), any of which serves `files.list`, so the check is
+        for an intersection rather than a member.
+
+        This matters more here than elsewhere because the wrong grant is not an
+        error at Google: `drive.file` answers `files.list` with 200 and an empty
+        list, since it can only see files this app created or the user picked.
+        Without this check a mis-scoped connection is indistinguishable from an
+        empty Drive. Silent when the granted set is unknown — see
+        `granted_scopes`.
+        """
+        granted = self.granted_scopes()
+        if granted and not (granted & _DRIVE_READ_SCOPES):
+            raise ApiError(
+                ErrorCode.AUTH_EXPIRED,
+                f"{feature} needs the '{_PREFERRED_SCOPE}' permission. This "
+                f"connection was granted only: {', '.join(sorted(granted))}. "
+                f"A 'drive.file' grant can see only files this app created or "
+                f"you picked explicitly, so no files are listable. Reconnect "
+                f"{self.key} and allow Drive read access.",
+                details={"granted": sorted(granted),
+                         "required_any_of": sorted(_DRIVE_READ_SCOPES)},
+                retriable=False,
+            )
+
     # -- discovery ----------------------------------------------------------
 
     def list_accounts(self) -> List[Account]:
@@ -297,6 +372,7 @@ class GoogleDriveConnector(ApiConnector):
         files are. So a 403 here means "no shared drives on this grant", not a
         failure. Any other error is a real fault and propagates.
         """
+        self._require_drive_read("Listing your drives")
         accounts: List[Account] = [Account(
             id=MY_DRIVE, name="My Drive",
             extra={"corpus": "user"},
@@ -328,8 +404,9 @@ class GoogleDriveConnector(ApiConnector):
     def _build_query(self, spec: QuerySpec, report: _Report) -> str:
         """The Drive `q` expression for this request.
 
-        Built from three layers, all ANDed: the report type's own clause, the
-        caller's optional settings, and the date range when one is bounded.
+        Built from two layers, ANDed: the report type's own clause and the
+        caller's optional settings. The query's `date_range` is not one of
+        them — see the module docstring.
         """
         clauses = [report.clause]
         settings = spec.settings or {}
@@ -346,12 +423,20 @@ class GoogleDriveConnector(ApiConnector):
         if mime_type:
             clauses.append(f"mimeType = {_quote(mime_type)}")
 
-        # Drive has no date parameter of its own, so the range becomes a
-        # modifiedTime window. `_range_note` warns that this narrows the answer.
-        clauses.append(
-            f"modifiedTime >= '{spec.date_range.start}T00:00:00' and "
-            f"modifiedTime <= '{spec.date_range.end}T23:59:59'"
-        )
+        # `spec.date_range` is deliberately not read here. A drive is current
+        # state, so a range the caller did not mean as a filter must not remove
+        # files from the answer; a modification window is opt-in by name.
+        after = settings.get("modified_after")
+        if after not in (None, ""):
+            clauses.append(
+                "modifiedTime >= "
+                + _date_literal(after, "modified_after", "00:00:00"))
+
+        before = settings.get("modified_before")
+        if before not in (None, ""):
+            clauses.append(
+                "modifiedTime <= "
+                + _date_literal(before, "modified_before", "23:59:59"))
 
         return " and ".join(clauses)
 
@@ -372,6 +457,7 @@ class GoogleDriveConnector(ApiConnector):
         }
 
     def _run(self, spec: QuerySpec) -> QueryResult:
+        self._require_drive_read("Listing Drive files")
         report = _report_for(spec.report_type)
 
         unknown = [f for f in spec.fields if f not in _BY_ID]
@@ -405,7 +491,7 @@ class GoogleDriveConnector(ApiConnector):
             requested_field_ids=requested,
             rows=rows,
             row_count=len(rows),
-            notes=[_range_note(spec)],
+            notes=_notes(spec),
             warnings=warnings,
         )
 
@@ -441,19 +527,38 @@ class GoogleDriveConnector(ApiConnector):
         return rows
 
 
-def _range_note(spec: QuerySpec) -> str:
-    """State that the result is a window, not the whole drive.
+_NO_DATE_NOTE = (
+    "A drive is current state, not a time series: Google Drive has no date "
+    "dimension, so any date_range supplied was ignored and these rows are the "
+    "drive as it stands now. To restrict by modification time, pass the "
+    "modified_after / modified_before settings instead."
+)
 
-    Drive has no date dimension, so the range becomes a `modifiedTime` filter
-    and an untouched file drops out silently. A caller who asked for "last 30
-    days" out of habit would otherwise read the result as the full contents of
-    a folder, so the omission is made explicit rather than left to be inferred.
+
+def _notes(spec: QuerySpec) -> List[str]:
+    """What the caller has to know to read these rows correctly.
+
+    Either the range was ignored (the usual case, and worth saying so plainly
+    because the caller *did* pass one), or a modification window was asked for
+    by name — in which case the omission it causes is stated instead, since an
+    untouched file drops out of a `modifiedTime` filter silently and a short
+    list otherwise reads as "this folder holds nothing else".
     """
-    return (
-        f"Only files modified between {spec.date_range.start} and "
-        f"{spec.date_range.end} are included. Files last changed outside that "
-        f"window exist but are not listed here — widen date_range to see them."
-    )
+    settings = spec.settings or {}
+    after = settings.get("modified_after") or None
+    before = settings.get("modified_before") or None
+    if not (after or before):
+        return [_NO_DATE_NOTE]
+    window = " and ".join(filter(None, [
+        f"modified on or after {after}" if after else None,
+        f"modified on or before {before}" if before else None,
+    ]))
+    return [
+        f"Only files {window} are included. Files last changed outside that "
+        f"window exist but are not listed here — widen or drop "
+        f"modified_after / modified_before to see them. The query's "
+        f"date_range is not a filter on this source and was ignored."
+    ]
 
 
 def make_google_drive_connector(datasource) -> GoogleDriveConnector:

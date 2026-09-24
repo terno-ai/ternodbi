@@ -126,6 +126,11 @@ def _store_tokens(data_source, token_response: Dict[str, Any]) -> None:
         bundle["REFRESH_TOKEN"] = token_response["refresh_token"]
     if token_response.get("scope"):
         bundle["GRANTED_SCOPES"] = token_response["scope"]
+    # Per-tenant API hosts: Salesforce issues the token from a login host but
+    # serves the API from the org's own instance, named here. Re-read on every
+    # refresh, because an org can be moved between instances.
+    if token_response.get("instance_url"):
+        bundle["INSTANCE_URL"] = token_response["instance_url"]
     expires_in = token_response.get("expires_in")
     if expires_in:
         bundle["TOKEN_EXPIRES_AT"] = str(time.time() + float(expires_in))

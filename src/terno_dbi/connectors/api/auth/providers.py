@@ -12,7 +12,7 @@ such as Google Analytics, YouTube, and Google Ads.
 from __future__ import annotations
 import os
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional, Union
 
 
 @dataclass(frozen=True)
@@ -79,14 +79,46 @@ _META = OAuthProvider(
 )
 
 
+# Salesforce authenticates against login.salesforce.com for production orgs and
+# test.salesforce.com for sandboxes, and an org with a My Domain may use its own
+# host. The endpoint is therefore per-deployment rather than a constant, and is
+# read at call time so a sandbox can be pointed at without a code release.
+_SALESFORCE_LOGIN_ENV = "TERNO_SALESFORCE_LOGIN_URL"
+_SALESFORCE_DEFAULT_LOGIN = "https://login.salesforce.com"
+
+
+def salesforce_login_url() -> str:
+    return ((os.getenv(_SALESFORCE_LOGIN_ENV, "").strip()
+             or _SALESFORCE_DEFAULT_LOGIN).rstrip("/"))
+
+
+def _salesforce() -> OAuthProvider:
+    base = salesforce_login_url()
+    return OAuthProvider(
+        name="salesforce",
+        authorization_url=f"{base}/services/oauth2/authorize",
+        token_url=f"{base}/services/oauth2/token",
+        # `api` is the read/write REST scope — Salesforce has no read-only
+        # variant, so least privilege is enforced by the connected app's profile
+        # and permission set, not here. `refresh_token` is what keeps the source
+        # alive past the org's session timeout; without it the connection dies
+        # in hours.
+        scope="api refresh_token",
+        client_id_env="TERNO_SALESFORCE_CLIENT_ID",
+        client_secret_env="TERNO_SALESFORCE_CLIENT_SECRET",
+        use_pkce=True,
+    )
+
+
 def _google_with_scope(scope: str) -> OAuthProvider:
     from dataclasses import replace
     return replace(_GOOGLE, scope=scope)
 
 
 # Provider per connector key. Scope is the connector's own — read-only wherever
-# possible.
-_PROVIDERS: Dict[str, OAuthProvider] = {
+# possible. A value may be a callable when the provider's endpoints depend on
+# the environment and so must be built per call rather than at import.
+_PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
     "googleanalytics4": _google_with_scope(
         "https://www.googleapis.com/auth/analytics.readonly"),
     "youtube": _google_with_scope(
@@ -111,11 +143,13 @@ _PROVIDERS: Dict[str, OAuthProvider] = {
         "https://www.googleapis.com/auth/drive.metadata.readonly"),
     "meta_ads": _META,
     "linkedin_ads": _LINKEDIN,
+    "salesforce": _salesforce,
 }
 
 
 def get_provider(connector_key: str) -> Optional[OAuthProvider]:
-    return _PROVIDERS.get(connector_key)
+    entry = _PROVIDERS.get(connector_key)
+    return entry() if callable(entry) else entry
 
 
 __all__ = ["OAuthProvider", "get_provider"]

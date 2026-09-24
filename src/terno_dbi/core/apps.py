@@ -59,6 +59,7 @@ def _register_api_connectors():
     from terno_dbi.connectors.api.sources.google_sheets import make_google_sheets_connector
     from terno_dbi.connectors.api.sources.linkedin_ads import make_linkedin_ads_connector
     from terno_dbi.connectors.api.sources.meta_ads import make_meta_ads_connector
+    from terno_dbi.connectors.api.sources.salesforce import make_salesforce_connector
     from terno_dbi.connectors.api.sources.youtube import make_youtube_connector
 
     registry.register("googleanalytics4", make_ga4_connector)
@@ -68,4 +69,5 @@ def _register_api_connectors():
     registry.register("google_sheets", make_google_sheets_connector)
     registry.register("meta_ads", make_meta_ads_connector)
     registry.register("linkedin_ads", make_linkedin_ads_connector)
+    registry.register("salesforce", make_salesforce_connector)
     registry.register("youtube", make_youtube_connector)

@@ -247,6 +247,68 @@ class TestHeaderRowSetting:
         assert exc.value.code == ErrorCode.INVALID_SETTING
 
 
+class TestColumnNameTolerance:
+    """An agent that reads the label off `list_fields` instead of the id is
+    asking for a column that exists; refusing on spelling is the documented
+    id-vs-label trap, so both spellings resolve to the same column."""
+
+    def test_exact_header_text_is_accepted(self):
+        result = _connector().query(_spec(fields=("Customer Name", "Revenue (£)")))
+        # Returned under the canonical ids, whatever spelling was asked for.
+        assert result.rows[0] == {"customer_name": "Acme", "revenue": 1200.5}
+
+    def test_case_insensitive_label_is_accepted(self):
+        result = _connector().query(_spec(fields=("customer name",)))
+        assert result.rows[0] == {"customer_name": "Acme"}
+
+    def test_requested_field_ids_report_canonical_ids_not_labels(self):
+        result = _connector().query(_spec(fields=("Customer Name",)))
+        # The header must describe the rows it ships with.
+        assert result.requested_field_ids == ["customer_name"]
+        assert set(result.rows[0]) == {"customer_name"}
+
+    def test_canonical_id_still_wins(self):
+        result = _connector().query(_spec(fields=("customer_name",)))
+        assert result.rows[0] == {"customer_name": "Acme"}
+
+    def test_a_genuinely_absent_column_is_still_rejected(self):
+        with pytest.raises(ApiError) as exc:
+            _connector().query(_spec(fields=("Nope",)))
+        assert exc.value.code == ErrorCode.INVALID_FIELD
+
+
+class TestFieldsAreTaggedBySpreadsheet:
+    def test_each_column_names_its_sheet(self):
+        """Every spreadsheet has a different schema, so a merged catalogue is
+        meaningless unless each column says which sheet it belongs to."""
+        seen = {}
+
+        def http(method, url, token, params=None):
+            if "/drive/v3/files" in url:
+                return FILES
+            if "sheet1" in url:
+                return {"values": [["Order Date", "Revenue"]]}
+            return {"values": [["Headcount", "Team"]]}
+
+        fields = _connector(http).list_fields("Values")
+        by_group = {}
+        for f in fields:
+            by_group.setdefault(f.group, []).append(f.id)
+        assert by_group["Q3 Budget"] == ["order_date", "revenue"]
+        assert by_group["Headcount"] == ["headcount", "team"]
+
+    def test_same_column_in_two_sheets_is_kept_separately(self):
+        def http(method, url, token, params=None):
+            if "/drive/v3/files" in url:
+                return FILES
+            return {"values": [["Date"]]}
+
+        fields = _connector(http).list_fields("Values")
+        # Collapsing these would hide one sheet's schema behind another's.
+        assert [(f.id, f.group) for f in fields] == [
+            ("date", "Q3 Budget"), ("date", "Headcount")]
+
+
 class TestRunTabs:
     def test_lists_tabs_with_grid_sizes(self):
         result = _connector().query(_spec(report_type="Tabs"))

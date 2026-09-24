@@ -101,11 +101,17 @@ def _slug(header: Any, position: int) -> str:
     return text or f"column_{_column_letter(position).lower()}"
 
 
-def _header_fields(header_row: List[Any]) -> List[Field]:
+def _header_fields(header_row: List[Any],
+                   group: Optional[str] = None) -> List[Field]:
     """Turn a header row into fields, with duplicate ids disambiguated.
 
     Two columns called "Total" would otherwise collide and silently drop one, so
     the second becomes `total_2`. The display name keeps the original text.
+
+    `group` is the spreadsheet's name. It matters because every spreadsheet has
+    a different schema, so a catalogue merged across several is meaningless
+    unless each column says which sheet it belongs to — without it an agent will
+    request one sheet's columns from another and get nothing back.
     """
     fields: List[Field] = []
     seen: Dict[str, int] = {}
@@ -113,11 +119,14 @@ def _header_fields(header_row: List[Any]) -> List[Field]:
         base = _slug(raw, position)
         seen[base] = seen.get(base, 0) + 1
         fid = base if seen[base] == 1 else f"{base}_{seen[base]}"
+        label = str(raw).strip() or _column_letter(position)
         fields.append(Field(
             fid,
-            str(raw).strip() or _column_letter(position),
+            label,
             "dimension",
-            f"Column {_column_letter(position)} of the sheet.",
+            f"Column {_column_letter(position)}"
+            + (f" of '{group}'." if group else " of the sheet."),
+            group=group,
         ))
     return fields
 
@@ -238,7 +247,8 @@ class GoogleSheetsConnector(ApiConnector):
 
     def _headers_for(self, spreadsheet_id: str,
                      tab: Optional[str] = None,
-                     header_row: int = 1) -> List[Field]:
+                     header_row: int = 1,
+                     group: Optional[str] = None) -> List[Field]:
         """The header row of one spreadsheet, as fields.
 
         Reads a single row rather than the sheet: discovery must stay cheap
@@ -258,7 +268,7 @@ class GoogleSheetsConnector(ApiConnector):
             "GET", f"{_SHEETS_BASE}/{spreadsheet_id}/values/{cell_range}",
             {"majorDimension": "ROWS"})
         values = data.get("values") or []
-        fields = _header_fields(values[0] if values else [])
+        fields = _header_fields(values[0] if values else [], group=group)
         self._header_cache[cache_key] = fields
         return fields
 
@@ -278,10 +288,13 @@ class GoogleSheetsConnector(ApiConnector):
         if report_type == _TABS:
             return list(_TAB_FIELDS)
         self.require_scope(_SHEETS_SCOPE, "Reading spreadsheet columns")
-        merged: Dict[str, Field] = {}
-        for account in [a.id for a in self.list_accounts()][:_MAX_HEADER_PROBE]:
-            for field in self._headers_for(account):
-                merged.setdefault(field.id, field)
+        merged: Dict[tuple, Field] = {}
+        for account in self.list_accounts()[:_MAX_HEADER_PROBE]:
+            for field in self._headers_for(account.id, group=account.name):
+                # Keyed by (id, sheet): the same `date` column in two
+                # spreadsheets is two different columns, and collapsing them
+                # would hide one sheet's schema behind another's.
+                merged.setdefault((field.id, field.group), field)
         return list(merged.values())
 
     # -- query --------------------------------------------------------------
@@ -343,27 +356,47 @@ class GoogleSheetsConnector(ApiConnector):
         # inside `fetch`, and this only records what to return.
         requested = list(spec.fields)
 
+        # Which tab each spreadsheet actually answered with. Recorded because a
+        # request that names no tab silently gets the first visible one, and a
+        # spreadsheet with fifteen tabs then looks like it holds four columns.
+        tabs_read: Dict[str, str] = {}
+
         def fetch(account):
             return self._fetch_values(
                 account, cell_range, header_index, requested,
-                max_rows=spec.max_rows, multi=multi)
+                max_rows=spec.max_rows, multi=multi, tabs_read=tabs_read)
 
         rows, warnings = gather_accounts(spec.accounts, fetch)
 
-        # With no fields named the columns are whatever the sheets held; report
-        # the union actually present so a consumer knows the column order.
-        columns = requested or _ordered_keys(rows)
+        # Always report the columns the rows are actually keyed by. A caller may
+        # have asked by label ("Picked By") while the rows carry the canonical
+        # id ("picked_by"); echoing the request back would then describe the
+        # result wrongly. Falls back to the request only when there are no rows
+        # to read the truth from.
+        columns = _ordered_keys(rows) or requested
+        notes = [_NO_DATE_NOTE]
+        if not str((spec.settings or {}).get("sheet_name") or "").strip():
+            named = ", ".join(sorted(set(tabs_read.values())))
+            if named:
+                notes.append(
+                    f"No tab was named, so the first visible one was read "
+                    f"({named}). A spreadsheet can hold many tabs with entirely "
+                    f"different columns — run the 'Tabs' report to list them, "
+                    f"then pass sheet_name to read a specific one."
+                )
         return QueryResult(
             requested_field_ids=columns,
             rows=rows,
             row_count=len(rows),
-            notes=[_NO_DATE_NOTE],
+            notes=notes,
             warnings=warnings,
         )
 
     def _fetch_values(self, spreadsheet_id: str, cell_range: str,
                       header_index: int, requested: List[str], *,
-                      max_rows: int, multi: bool) -> List[Dict[str, Any]]:
+                      max_rows: int, multi: bool,
+                      tabs_read: Optional[Dict[str, str]] = None
+                      ) -> List[Dict[str, Any]]:
         """Read one spreadsheet's range and map its rows to field ids.
 
         `UNFORMATTED_VALUE` returns numbers as numbers, so a currency column
@@ -378,18 +411,34 @@ class GoogleSheetsConnector(ApiConnector):
                 "valueRenderOption": "UNFORMATTED_VALUE",
                 "dateTimeRenderOption": "FORMATTED_STRING",
             })
+        # The response echoes the range it resolved ("Unassigned!A1:ZZ1000"),
+        # which is the only way to learn which tab a tab-less request hit.
+        if tabs_read is not None:
+            resolved = str(data.get("range") or "")
+            if "!" in resolved:
+                tabs_read[spreadsheet_id] = resolved.rsplit("!", 1)[0].strip("'")
+
         values = data.get("values") or []
         if len(values) <= header_index:
             return []
 
         fields = _header_fields(values[header_index])
         by_id = {f.id: position for position, f in enumerate(fields)}
+        lookup = _column_lookup(fields)
 
-        unknown = [f for f in requested if f not in by_id]
-        if unknown:
-            raise invalid_field(unknown[0], list(by_id.keys()))
+        # Resolve every requested name to its canonical id. A caller that read
+        # the *label* off list_fields ("Picked By") rather than the id
+        # ("picked_by") is asking for a column that exists, so answer it —
+        # refusing on spelling is the trap both vendors warn about.
+        columns: List[str] = []
+        for name in requested:
+            resolved = lookup.get(name) or lookup.get(str(name).strip().lower())
+            if resolved is None:
+                raise invalid_field(name, list(by_id.keys()))
+            columns.append(resolved)
+        if not columns:
+            columns = [f.id for f in fields]
 
-        columns = requested or [f.id for f in fields]
         rows: List[Dict[str, Any]] = []
         for raw_row in values[header_index + 1:]:
             if len(rows) >= max_rows:
@@ -461,6 +510,23 @@ _NO_DATE_NOTE = (
     "date dimension, so any date_range supplied was ignored and these rows are "
     "the sheet as it stands now."
 )
+
+
+def _column_lookup(fields: List[Field]) -> Dict[str, str]:
+    """Every accepted spelling of a column -> its canonical id.
+
+    A sheet's columns are named by humans, so the id ("picked_by"), the header
+    text as written ("Picked By") and its lowercased form all have to resolve to
+    the same column. Ids are inserted last so they win any collision with a
+    label — the canonical name must never lose to a coincidence.
+    """
+    lookup: Dict[str, str] = {}
+    for field in fields:
+        lookup.setdefault(field.name, field.id)
+        lookup.setdefault(field.name.strip().lower(), field.id)
+    for field in fields:
+        lookup[field.id] = field.id
+    return lookup
 
 
 def _ordered_keys(rows: List[Dict[str, Any]]) -> List[str]:

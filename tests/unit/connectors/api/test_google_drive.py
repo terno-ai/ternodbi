@@ -14,18 +14,25 @@ from terno_dbi.connectors.api.sources.google_drive import (
     GoogleDriveConnector,
 )
 
+_MODIFIED = [
+    {"setting_id": "modified_after", "required": False},
+    {"setting_id": "modified_before", "required": False},
+]
+
 _REPORTS = [
     {"id": "Files", "settings": [
         {"setting_id": "folder_id", "required": False},
         {"setting_id": "name_contains", "required": False},
         {"setting_id": "mime_type", "required": False},
+        *_MODIFIED,
     ]},
     {"id": "Folders", "settings": [
         {"setting_id": "folder_id", "required": False},
         {"setting_id": "name_contains", "required": False},
+        *_MODIFIED,
     ]},
-    {"id": "SharedWithMe", "settings": []},
-    {"id": "Trashed", "settings": []},
+    {"id": "SharedWithMe", "settings": list(_MODIFIED)},
+    {"id": "Trashed", "settings": list(_MODIFIED)},
 ]
 
 
@@ -256,22 +263,55 @@ class TestQueryBuilding:
         # Unescaped, the literal would end early and the query would 400.
         assert r"name contains 'O\'Brien'" in calls[0]["params"]["q"]
 
-    def test_date_range_filters_modified_time(self):
+    def test_date_range_is_not_a_filter(self):
         conn, calls = _capture()
         conn.query(_spec(date_range=DateRange("2026-08-01", "2026-08-31")))
+        # A drive is current state. Filtering modifiedTime by a range the
+        # caller passed only because the API demands one is what made a folder
+        # of long-settled files look empty.
+        assert "modifiedTime" not in calls[0]["params"]["q"]
+
+    def test_result_says_the_date_range_was_ignored(self):
+        conn = _connector({("GET", "/files"): FILES})
+        result = conn.query(_spec(date_range=DateRange("2026-08-01",
+                                                       "2026-08-31")))
+        note = " ".join(result.notes)
+        assert "ignored" in note
+        assert "modified_after" in note
+
+    def test_modified_settings_filter_modified_time(self):
+        conn, calls = _capture()
+        conn.query(_spec(settings={"modified_after": "2026-08-01",
+                                   "modified_before": "2026-08-31"}))
         q = calls[0]["params"]["q"]
         assert "modifiedTime >= '2026-08-01T00:00:00'" in q
         assert "modifiedTime <= '2026-08-31T23:59:59'" in q
 
-    def test_result_says_the_listing_is_limited_to_the_range(self):
+    def test_one_sided_modified_window_is_allowed(self):
+        conn, calls = _capture()
+        conn.query(_spec(settings={"modified_after": "2026-08-01"}))
+        q = calls[0]["params"]["q"]
+        assert "modifiedTime >= '2026-08-01T00:00:00'" in q
+        assert "modifiedTime <=" not in q
+
+    def test_a_modified_window_says_what_it_omits(self):
         conn = _connector({("GET", "/files"): FILES})
-        result = conn.query(_spec(date_range=DateRange("2026-08-01",
-                                                       "2026-08-31")))
-        # Drive has no date dimension, so the range silently drops untouched
-        # files; a caller must not read the result as the whole folder.
+        result = conn.query(_spec(settings={"modified_after": "2026-08-01"}))
         note = " ".join(result.notes)
-        assert "2026-08-01" in note and "2026-08-31" in note
-        assert "widen date_range" in note
+        assert "2026-08-01" in note
+        assert "modified_after" in note
+
+    def test_a_malformed_modified_date_is_rejected_before_the_call(self):
+        conn, calls = _capture()
+        # What an agent sends when it passes get_today() whole instead of
+        # get_today()['utc_date']. Drive answers that with a bare
+        # "Invalid Value" naming only `q`, which is unactionable.
+        with pytest.raises(ApiError) as exc:
+            conn.query(_spec(settings={
+                "modified_before": {"utc_date": "2026-09-17"}}))
+        assert exc.value.code == ErrorCode.INVALID_FILTER
+        assert "modified_before" in exc.value.message
+        assert calls == []
 
 
 class TestCorpusSelection:
@@ -369,6 +409,55 @@ class TestAuthMapping:
         with pytest.raises(ApiError) as exc:
             conn.list_accounts()
         assert exc.value.code == ErrorCode.AUTH_EXPIRED
+
+
+class TestScopeGuard:
+    """A `drive.file` grant is the quiet failure: Google answers `files.list`
+    with 200 and an empty list, so a mis-scoped connection is indistinguishable
+    from an empty Drive unless the connector says so."""
+
+    @staticmethod
+    def _with_scopes(scopes):
+        class _Scoped(_DS):
+            connection_json = {"ACCESS_TOKEN": "tok", "GRANTED_SCOPES": scopes}
+        calls = []
+        conn = GoogleDriveConnector(
+            _Scoped(), http=lambda *a, **k: calls.append(a) or FILES)
+        return conn, calls
+
+    def test_drive_file_only_is_rejected_with_an_actionable_message(self):
+        conn, calls = self._with_scopes(
+            "https://www.googleapis.com/auth/drive.file")
+        with pytest.raises(ApiError) as exc:
+            conn.list_accounts()
+        assert exc.value.code == ErrorCode.AUTH_EXPIRED
+        assert "drive.file" in exc.value.message
+        assert "drive.readonly" in exc.value.message
+        assert calls == []
+
+    def test_a_query_is_refused_on_the_same_grant(self):
+        conn, calls = self._with_scopes(
+            "https://www.googleapis.com/auth/drive.file")
+        with pytest.raises(ApiError) as exc:
+            conn.query(_spec())
+        assert exc.value.code == ErrorCode.AUTH_EXPIRED
+        assert calls == []
+
+    @pytest.mark.parametrize("scope", [
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/drive.metadata.readonly",
+    ])
+    def test_any_read_scope_is_accepted(self, scope):
+        # Four spellings serve files.list; requiring one exact string would
+        # lock out a grant that works.
+        conn, _ = self._with_scopes(scope)
+        assert conn.query(_spec()).row_count == 2
+
+    def test_an_unknown_granted_set_does_not_block(self):
+        # A source connected before scopes were recorded must keep working.
+        conn = _connector({("GET", "/files"): FILES})
+        assert conn.query(_spec()).row_count == 2
 
 
 class TestTokenRefreshOnProviderCall:

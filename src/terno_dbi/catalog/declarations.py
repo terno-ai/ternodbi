@@ -41,6 +41,23 @@ def _user_password() -> List[FormField]:
     ]
 
 
+def _sf_date_field(help_text: str = "") -> ReportSetting:
+    """The optional `date_field` every Salesforce report accepts.
+
+    Each object has its own idea of "when", and the connector's default is a
+    guess about intent rather than a fact about the org — a report on won deals
+    is dated by CloseDate, one on sales-team activity by CreatedDate. Optional,
+    so the common case needs nothing.
+    """
+    return ReportSetting(
+        "date_field", label="Date field", required=False,
+        help_text=help_text or (
+            "Which date field the date range filters on. Defaults to "
+            "CreatedDate; any date or date/time field on the object is valid, "
+            "including custom ones."),
+    )
+
+
 # --------------------------------------------------------------------------
 # Databases — family=database
 # --------------------------------------------------------------------------
@@ -368,6 +385,62 @@ _APIS: List[ConnectorSpec] = [
         default_enabled=False,   # LinkedIn Marketing API access pending
     ),
     ConnectorSpec(
+        key="salesforce",
+        display_name="Salesforce",
+        provider="Salesforce",
+        category="CRM",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Opportunities, leads, accounts, contacts, cases and "
+                    "campaigns from a Salesforce org — including the org's own "
+                    "custom fields and custom objects.",
+        scopes_label="Salesforce API access on your behalf, limited to what "
+                     "your Salesforce profile and permission sets already allow",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=True,
+        # A connection reaches exactly one org, but the account machinery is
+        # still what the allowlist and currency guard hang off.
+        account_label_singular="Salesforce org",
+        account_label_plural="Salesforce orgs",
+        report_types=[
+            ReportType("Opportunity", "Opportunities",
+                       settings=[_sf_date_field(
+                           "Defaults to CloseDate — when the deal is expected "
+                           "to close, not when it was created. Use CreatedDate "
+                           "to report on when deals were opened.")]),
+            ReportType("Lead", "Leads", settings=[_sf_date_field()]),
+            ReportType("Account", "Accounts", settings=[_sf_date_field()]),
+            ReportType("Contact", "Contacts", settings=[_sf_date_field()]),
+            ReportType("Case", "Cases", settings=[_sf_date_field()]),
+            ReportType("Campaign", "Campaigns", settings=[_sf_date_field()]),
+            ReportType(
+                "Custom", "Any other object",
+                settings=[
+                    ReportSetting(
+                        "object", label="Object API name",
+                        help_text="The API name of the Salesforce object to "
+                                  "read, e.g. 'Quote', 'Task' or a custom "
+                                  "object such as 'Project__c'. Custom objects "
+                                  "end in '__c'.",
+                    ),
+                    _sf_date_field(
+                        "Defaults to CreatedDate. If the object has no such "
+                        "field, the date range is not applied and every row is "
+                        "returned — the result says so in its notes."),
+                ],
+            ),
+        ],
+        default_report_type="Opportunity",
+        # Salesforce meters a daily API allocation per org (edition-dependent,
+        # commonly 15k-100k calls) shared with every other integration, and
+        # publishes no per-second rate. The per-day guard is deliberately below
+        # a typical allocation so this connector cannot exhaust it alone.
+        rate_limit_per_second=10,
+        rate_limit_per_day=10000,
+        default_enabled=False,   # needs a Connected App per deployment
+    ),
+    ConnectorSpec(
         key="google_drive",
         display_name="Google Drive",
         provider="Google",
@@ -380,9 +453,11 @@ _APIS: List[ConnectorSpec] = [
                      "properties, never file contents)",
         has_account_list=True,
         has_fields=True,
-        # The date range filters `modifiedTime`, so a query returns only files
-        # touched inside it. The report types below declare their own exception
-        # for when that flag is honoured per report type.
+        # A drive is current state, not a time series: the connector has no date
+        # dimension and ignores the range — a modification window is opt-in via
+        # the modified_after / modified_before settings. Declared True because
+        # the query API still requires a date_range on every API source; the
+        # per-report flags below record the truth.
         is_date_range_required=True,
         account_label_singular="Drive",
         account_label_plural="Drives",
@@ -406,6 +481,20 @@ _APIS: List[ConnectorSpec] = [
                                   "'application/pdf' or "
                                   "'application/vnd.google-apps.document'.",
                     ),
+                    ReportSetting(
+                        "modified_after", label="Modified on or after",
+                        required=False,
+                        help_text="YYYY-MM-DD. Only files changed on or after "
+                                  "this date. Omit to list the drive as it "
+                                  "stands — the query's date_range is not a "
+                                  "filter on this source.",
+                    ),
+                    ReportSetting(
+                        "modified_before", label="Modified on or before",
+                        required=False,
+                        help_text="YYYY-MM-DD. Only files changed on or before "
+                                  "this date.",
+                    ),
                 ],
             ),
             ReportType(
@@ -418,6 +507,20 @@ _APIS: List[ConnectorSpec] = [
                     ReportSetting(
                         "name_contains", label="Name contains", required=False,
                     ),
+                    ReportSetting(
+                        "modified_after", label="Modified on or after",
+                        required=False,
+                        help_text="YYYY-MM-DD. Only files changed on or after "
+                                  "this date. Omit to list the drive as it "
+                                  "stands — the query's date_range is not a "
+                                  "filter on this source.",
+                    ),
+                    ReportSetting(
+                        "modified_before", label="Modified on or before",
+                        required=False,
+                        help_text="YYYY-MM-DD. Only files changed on or before "
+                                  "this date.",
+                    ),
                 ],
             ),
             ReportType(
@@ -429,6 +532,20 @@ _APIS: List[ConnectorSpec] = [
                     ReportSetting(
                         "mime_type", label="MIME type", required=False,
                     ),
+                    ReportSetting(
+                        "modified_after", label="Modified on or after",
+                        required=False,
+                        help_text="YYYY-MM-DD. Only files changed on or after "
+                                  "this date. Omit to list the drive as it "
+                                  "stands — the query's date_range is not a "
+                                  "filter on this source.",
+                    ),
+                    ReportSetting(
+                        "modified_before", label="Modified on or before",
+                        required=False,
+                        help_text="YYYY-MM-DD. Only files changed on or before "
+                                  "this date.",
+                    ),
                 ],
             ),
             ReportType(
@@ -436,6 +553,20 @@ _APIS: List[ConnectorSpec] = [
                 settings=[
                     ReportSetting(
                         "name_contains", label="Name contains", required=False,
+                    ),
+                    ReportSetting(
+                        "modified_after", label="Modified on or after",
+                        required=False,
+                        help_text="YYYY-MM-DD. Only files changed on or after "
+                                  "this date. Omit to list the drive as it "
+                                  "stands — the query's date_range is not a "
+                                  "filter on this source.",
+                    ),
+                    ReportSetting(
+                        "modified_before", label="Modified on or before",
+                        required=False,
+                        help_text="YYYY-MM-DD. Only files changed on or before "
+                                  "this date.",
                     ),
                 ],
             ),
