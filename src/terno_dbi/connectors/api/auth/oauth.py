@@ -228,6 +228,7 @@ def complete_authorization(
     }
     if provider.use_pkce and st.code_verifier:
         exchange["code_verifier"] = st.code_verifier
+    exchange.update(provider.extra_token_params)   # e.g. Shopify `expiring=1`
 
     token_url = (provider.token_url.format(instance=st.instance)
                  if provider.requires_instance else provider.token_url)
@@ -330,19 +331,28 @@ def refresh_access_token(
         raise ApiError(ErrorCode.AUTH_EXPIRED,
                        f"{data_source.type} needs reconnecting.")
 
+    # Per-store providers (Shopify) template their token URL with the connected
+    # store domain, kept in the token bundle as INSTANCE.
+    instance = tokens.get("INSTANCE", "") or ""
+    token_url = (provider.token_url.format(instance=instance)
+                 if provider.requires_instance else provider.token_url)
+
+    body = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": provider.client_id(),
+        "client_secret": provider.client_secret(),
+    }
+    body.update(provider.extra_token_params)   # e.g. Shopify `expiring=1`
+
     try:
-        token_response = http_post(provider.token_url, {
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "client_id": provider.client_id(),
-            "client_secret": provider.client_secret(),
-        })
+        token_response = http_post(token_url, body)
     except Exception as exc:   # noqa: BLE001
         _mark_expired(data_source, "Token refresh failed; reconnect the source.")
         raise ApiError(ErrorCode.AUTH_EXPIRED,
                        f"{data_source.type} needs reconnecting.") from exc
 
-    _store_tokens(data_source, token_response)
+    _store_tokens(data_source, token_response, instance=instance)
     from terno_dbi.services.secrets import decrypt_dict as _d
     return _d(data_source.connection_json)
 

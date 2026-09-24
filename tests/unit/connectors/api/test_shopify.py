@@ -278,10 +278,10 @@ class TestRegistration:
         from terno_dbi.connectors.api import registry
         assert registry.is_supported("shopify")
 
-    def test_factory_has_no_refresher(self):
+    def test_factory_wires_a_refresher(self):
         from terno_dbi.connectors.api.sources.shopify import make_shopify_connector
         conn = make_shopify_connector(_DS())
-        assert conn._token_refresher is None   # offline token never refreshes
+        assert callable(conn._token_refresher)
 
 
 class TestPerStoreOAuth:
@@ -303,3 +303,10 @@ class TestPerStoreOAuth:
         from terno_dbi.connectors.api.auth.providers import get_provider
         # A non-instance provider always yields "" and never rejects.
         assert _validated_instance(get_provider("meta_ads"), "meta_ads", "x") == ""
+
+    def test_requests_an_expiring_offline_token(self):
+        # Non-expiring offline tokens are rejected by the Admin API; the exchange
+        # must send expiring=1 so Shopify returns a refreshable token.
+        from terno_dbi.connectors.api.auth.providers import get_provider
+        assert get_provider("shopify").extra_token_params == {"expiring": "1"}
+        assert get_provider("google_ads").extra_token_params == {}

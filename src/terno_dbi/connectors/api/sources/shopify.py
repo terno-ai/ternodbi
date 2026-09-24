@@ -8,8 +8,9 @@ Shopify differs from the other connectors:
 - **GraphQL Admin API only** — the REST Admin API is legacy; new apps must use
   GraphQL. `_run` runs a fixed GraphQL query per report type, paginates with the
   cursor, and projects each node to the requested columns.
-- **Offline access token is permanent** — there is no refresh, so the connector
-  is built with `token_refresher=None`.
+- **Expiring offline access token** — the Admin API no longer accepts
+  non-expiring offline tokens, so the connection uses an expiring one (1-hour
+  access token + refresh token) and refreshes like the other OAuth connectors.
 - Auth is the `X-Shopify-Access-Token` header (not a bearer).
 - Money is already in the shop currency (a decimal string), not micros.
 
@@ -551,10 +552,13 @@ def _coerce(field_id, raw, report: _Report):
 def make_shopify_connector(datasource) -> ShopifyConnector:
     """Build a Shopify connector.
 
-    Shopify offline access tokens do not expire, so no `token_refresher` is
-    wired — `access_token()` simply reads the stored token.
+    Shopify's Admin API no longer accepts non-expiring offline tokens, so the
+    connection uses an *expiring* offline token (1-hour access token + refresh
+    token). The refresher renews it before each call, exactly like the other
+    OAuth connectors.
     """
-    return ShopifyConnector(datasource, token_refresher=None)
+    from terno_dbi.connectors.api.auth.oauth import make_ensure_token
+    return ShopifyConnector(datasource, token_refresher=make_ensure_token(datasource))
 
 
 __all__ = ["ShopifyConnector", "make_shopify_connector"]

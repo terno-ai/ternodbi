@@ -25,6 +25,10 @@ class OAuthProvider:
     client_secret_env: str
     use_pkce: bool = True
     extra_authorize_params: Dict[str, str] = field(default_factory=dict)
+    # Extra fields added to the token-exchange (and refresh) POST body. Shopify
+    # uses `expiring=1` here to request an expiring offline token — non-expiring
+    # offline tokens are no longer accepted by the Admin API.
+    extra_token_params: Dict[str, str] = field(default_factory=dict)
     # When True, `authorization_url` and `token_url` are templates containing
     # `{instance}` (e.g. Shopify's per-store domain) that the flow fills in from
     # a store name the user supplies before connecting.
@@ -117,6 +121,9 @@ _SHOPIFY = OAuthProvider(
     client_secret_env="TERNO_SHOPIFY_CLIENT_SECRET",
     use_pkce=False,
     requires_instance=True,
+    # Request an expiring offline token (with a refresh_token); the Admin API no
+    # longer accepts non-expiring offline tokens.
+    extra_token_params={"expiring": "1"},
 )
 
 
