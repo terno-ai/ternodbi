@@ -382,7 +382,7 @@ _APIS: List[ConnectorSpec] = [
         # real, so a runaway agent is stopped before the app-wide quota is.
         rate_limit_per_second=25,
         rate_limit_per_day=50000,
-        default_enabled=False,   # LinkedIn Marketing API access pending
+        default_enabled=True,   # LinkedIn Marketing API access pending
     ),
     ConnectorSpec(
         key="salesforce",
@@ -438,7 +438,7 @@ _APIS: List[ConnectorSpec] = [
         # a typical allocation so this connector cannot exhaust it alone.
         rate_limit_per_second=10,
         rate_limit_per_day=10000,
-        default_enabled=False,   # needs a Connected App per deployment
+        default_enabled=True,   # needs a Connected App per deployment
     ),
     ConnectorSpec(
         key="google_drive",
