@@ -118,6 +118,46 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
             await call_tool("grep_memory", {"pattern": "search", "datasource_id": 1})
             mock_client.grep_memory.assert_called_with("search", datasource_id=1)
 
+    async def test_call_tool_dispatches_api_source_tools(self):
+        """The marketing/analytics API tools dispatch to their client methods."""
+        with patch('terno_dbi.mcp.query_server.client') as mock_client, \
+             patch('terno_dbi.mcp.query_server._api_mcp_tools_enabled',
+                   return_value=True):
+            mock_client.get_today.return_value = {"today": "2026-01-01"}
+            result = await call_tool("get_today", {"timezone": "UTC"})
+            mock_client.get_today.assert_called_with("UTC")
+            assert result[1]["today"] == "2026-01-01"
+
+            mock_client.list_accounts.return_value = {"accounts": [{"id": "1"}]}
+            await call_tool("list_accounts", {"datasource": "ga"})
+            mock_client.list_accounts.assert_called_with("ga")
+
+            mock_client.list_fields.return_value = {"fields": []}
+            await call_tool("list_fields", {"datasource": "ga", "kind": "metric"})
+            mock_client.list_fields.assert_called_with(
+                "ga", report_type=None, filter=None, kind="metric")
+
+            mock_client.data_query.return_value = {"query_id": "q1"}
+            await call_tool("data_query", {"datasource": "ga", "fields": ["sessions"]})
+            mock_client.data_query.assert_called_with("ga", {"fields": ["sessions"]})
+
+            mock_client.get_query_results.return_value = {"status": "completed"}
+            await call_tool("get_query_results", {"query_id": "q1"})
+            mock_client.get_query_results.assert_called_with("q1")
+
+    async def test_call_tool_unknown_returns_error(self):
+        """An unrecognised tool name yields a tool error, not a crash."""
+        with patch('terno_dbi.mcp.query_server.client'):
+            result = await call_tool("does_not_exist", {})
+            # as_error_result returns a CallToolResult flagged as an error.
+            assert result.isError is True
+
+    async def test_call_tool_exception_is_reported(self):
+        """A client exception surfaces as an error result, not a raise."""
+        with patch('terno_dbi.mcp.query_server.client') as mock_client:
+            mock_client.list_tables.side_effect = RuntimeError("boom")
+            result = await call_tool("list_tables", {"datasource": "ds1"})
+            assert result.isError is True
 
     async def test_call_tool_max_rows(self):
         """Should pass max_rows argument correctly."""
