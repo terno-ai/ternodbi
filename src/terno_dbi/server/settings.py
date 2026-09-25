@@ -70,6 +70,7 @@ TEMPLATES = [
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
         'DIRS': [
             TERNO_DBI_PATH / 'core' / 'frontend' / 'templates',
+            TERNO_DBI_PATH / 'oauth' / 'templates',
         ],
         'APP_DIRS': True,
         'OPTIONS': {

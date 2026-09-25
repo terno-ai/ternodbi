@@ -62,7 +62,10 @@ class TestStart:
             organisation=org,
         )
         qs = parse_qs(urlparse(out["authorization_url"]).query)
-        assert qs["scope"] == ["https://www.googleapis.com/auth/analytics.readonly"]
+        # `openid email` (non-sensitive) are added to record the connecting
+        # account; the connector's own scope stays GA4-only.
+        assert qs["scope"] == [
+            "openid email https://www.googleapis.com/auth/analytics.readonly"]
         assert "include_granted_scopes" not in qs
         for foreign in ("adwords", "webmasters", "youtube"):
             assert foreign not in out["authorization_url"]
@@ -187,3 +190,74 @@ class TestRefresh:
             oauth.refresh_access_token(ds, http_post=lambda u, d: {})
         ds.refresh_from_db()
         assert ds.auth_status == DataSource.AuthStatus.EXPIRED
+
+
+def _id_token(email):
+    import base64 as _b64, json as _json
+    body = _b64.urlsafe_b64encode(_json.dumps({"email": email}).encode()).rstrip(b"=").decode()
+    return f"h.{body}.s"
+
+
+class TestStoreTokensExtras:
+    def test_store_tokens_persists_connected_email(self, org, catalog):
+        ds = DataSource.objects.create(
+            display_name="GA4e", type="googleanalytics4", connection_str="",
+            organisation=org,
+            catalog=ConnectorCatalog.objects.get(key="googleanalytics4"),
+        )
+        oauth._store_tokens(ds, {
+            "access_token": "at", "refresh_token": "rt",
+            "id_token": _id_token("who@x.com"), "expires_in": 3600,
+        })
+        bundle = secrets.decrypt_dict(ds.connection_json)
+        assert bundle["CONNECTED_EMAIL"] == "who@x.com"
+        assert ds.auth_status == DataSource.AuthStatus.CONNECTED
+
+    def test_refresh_without_id_token_keeps_existing_email(self, org, catalog):
+        ds = DataSource.objects.create(
+            display_name="GA4f", type="googleanalytics4", connection_str="",
+            organisation=org,
+            catalog=ConnectorCatalog.objects.get(key="googleanalytics4"),
+        )
+        ds.connection_json = secrets.encrypt_dict({"CONNECTED_EMAIL": "keep@x.com"})
+        ds.save()
+        oauth._store_tokens(ds, {"access_token": "at2"})   # refresh: no id_token
+        assert secrets.decrypt_dict(ds.connection_json)["CONNECTED_EMAIL"] == "keep@x.com"
+
+
+class TestUniqueName:
+    def test_appends_a_suffix_on_collision(self, org, catalog):
+        cat = ConnectorCatalog.objects.get(key="googleanalytics4")
+        DataSource.objects.create(
+            display_name=cat.name, type="googleanalytics4", connection_str="",
+            organisation=org, catalog=cat)
+        assert oauth._unique_name(cat, org) == f"{cat.name} 2"
+
+
+class TestPostProcess:
+    def test_non_meta_is_a_passthrough(self):
+        tr = {"access_token": "a"}
+        assert oauth._post_process("google_ads", None, tr) is tr
+
+    def test_meta_exchanges_for_a_long_lived_token(self, monkeypatch):
+        from terno_dbi.connectors.api.auth.providers import get_provider
+
+        class _Resp:
+            def raise_for_status(self): pass
+            def json(self): return {"access_token": "long-lived"}
+
+        monkeypatch.setattr(oauth.requests, "get", lambda *a, **k: _Resp())
+        out = oauth._post_process("meta_ads", get_provider("meta_ads"),
+                                  {"access_token": "short"})
+        assert out["access_token"] == "long-lived"
+
+    def test_meta_exchange_failure_falls_back(self, monkeypatch):
+        from terno_dbi.connectors.api.auth.providers import get_provider
+
+        def _boom(*a, **k):
+            raise RuntimeError("network down")
+
+        monkeypatch.setattr(oauth.requests, "get", _boom)
+        out = oauth._post_process("meta_ads", get_provider("meta_ads"),
+                                  {"access_token": "short"})
+        assert out["access_token"] == "short"     # original kept

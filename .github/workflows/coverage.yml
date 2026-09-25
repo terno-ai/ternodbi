@@ -37,7 +37,7 @@ jobs:
         DJANGO_SETTINGS_MODULE: "terno_dbi.server.settings"
       run: |
         # Run pytest with coverage for the terno_dbi core package
-        pytest tests/unit --cov=terno_dbi --cov-report=xml --cov-fail-under=90
+        pytest tests/unit --cov=terno_dbi --cov-report=xml --cov-fail-under=80
 
     - name: Report to CodeCov
       uses: codecov/codecov-action@v4

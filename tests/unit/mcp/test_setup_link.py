@@ -22,12 +22,24 @@ class _ManualCatalog:
     auth_type = "manual"
 
 
+_OAUTH_MT = (
+    "https://navin1.app.ternoapp.com/connect?connector=google_ads"
+    "&return_to=https%3A%2F%2Fnavin1.app.ternoapp.com%2Fdata-connectors"
+    "%2Fconnectors%2Fgoogle-ads"
+)
+_OAUTH_SINGLE = (
+    "http://127.0.0.1:8000/connect?connector=google_ads"
+    "&return_to=http%3A%2F%2F127.0.0.1%3A8000%2Fdata-connectors"
+    "%2Fconnectors%2Fgoogle-ads"
+)
+
+
 class TestAuthTypeShape:
     @override_settings(ENABLE_SUBDOMAIN=True, MAIN_DOMAIN="app.ternoapp.com")
     def test_oauth_uses_connect_endpoint(self):
-        assert connect_url("navin1", _Catalog()) == (
-            "https://navin1.app.ternoapp.com/connect?connector=google_ads"
-        )
+        # OAuth link carries a return_to back to the connector's detail page, so
+        # the host app finishes in-app (connected state + account picker).
+        assert connect_url("navin1", _Catalog()) == _OAUTH_MT
 
     @override_settings(ENABLE_SUBDOMAIN=True, MAIN_DOMAIN="app.ternoapp.com")
     def test_manual_uses_the_credentials_modal(self):
@@ -52,9 +64,7 @@ class TestAuthTypeShape:
 class TestMultiTenant:
     @override_settings(ENABLE_SUBDOMAIN=True, MAIN_DOMAIN="app.ternoapp.com")
     def test_uses_the_org_subdomain(self):
-        assert connect_url("navin1", _Catalog()) == (
-            "https://navin1.app.ternoapp.com/connect?connector=google_ads"
-        )
+        assert connect_url("navin1", _Catalog()) == _OAUTH_MT
 
     @override_settings(ENABLE_SUBDOMAIN=True, MAIN_DOMAIN="app.ternoapp.com")
     def test_no_subdomain_yields_no_link(self):
@@ -66,20 +76,18 @@ class TestSingleHost:
     @override_settings(ENABLE_SUBDOMAIN=False, MAIN_DOMAIN="http://127.0.0.1:8000")
     def test_uses_main_domain_verbatim_with_scheme(self):
         # Local: one host, no subdomain, keep http scheme.
-        assert connect_url(None, _Catalog()) == (
-            "http://127.0.0.1:8000/connect?connector=google_ads"
-        )
+        assert connect_url(None, _Catalog()) == _OAUTH_SINGLE
 
     @override_settings(ENABLE_SUBDOMAIN=False, MAIN_DOMAIN="http://127.0.0.1:8000")
     def test_subdomain_is_ignored_on_single_host(self):
-        assert connect_url("navin1", _Catalog()) == (
-            "http://127.0.0.1:8000/connect?connector=google_ads"
-        )
+        assert connect_url("navin1", _Catalog()) == _OAUTH_SINGLE
 
     @override_settings(ENABLE_SUBDOMAIN=False, MAIN_DOMAIN="terno.example.com")
     def test_bare_host_defaults_to_https(self):
         assert connect_url(None, _Catalog()) == (
             "https://terno.example.com/connect?connector=google_ads"
+            "&return_to=https%3A%2F%2Fterno.example.com%2Fdata-connectors"
+            "%2Fconnectors%2Fgoogle-ads"
         )
 
     @override_settings(ENABLE_SUBDOMAIN=False, MAIN_DOMAIN="http://127.0.0.1:8000")
@@ -87,6 +95,20 @@ class TestSingleHost:
         url = datasource_setup_url(None)
         assert url is not None
         assert url.startswith("http://127.0.0.1:8000/")
+
+
+class TestReturnPath:
+    @override_settings(ENABLE_SUBDOMAIN=False, MAIN_DOMAIN="http://127.0.0.1:8000")
+    def test_oauth_link_carries_a_return_to_detail_page(self):
+        url = connect_url(None, _Catalog())
+        assert "return_to=" in url
+        assert "%2Fdata-connectors%2Fconnectors%2Fgoogle-ads" in url
+
+    @override_settings(ENABLE_SUBDOMAIN=False, MAIN_DOMAIN="http://127.0.0.1:8000",
+                       TERNO_CONNECTORS_RETURN_PATH="/custom/conn")
+    def test_return_path_is_configurable(self):
+        url = connect_url(None, _Catalog())
+        assert "%2Fcustom%2Fconn%2Fgoogle-ads" in url
 
 
 class TestUnconfigured:

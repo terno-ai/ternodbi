@@ -124,14 +124,37 @@ def _manual_connect_base() -> str:
     return path if path.startswith("/") else f"/{path}"
 
 
+def _connectors_return_path(connector_key: str) -> str:
+    """Frontend path of a connector's detail view, e.g.
+    `/data-connectors/connectors/google-ads`.
+
+    The OAuth callback returns the user here so the host app can finish the flow
+    in-app — show the connected state and open the account picker. Configurable
+    (TERNO_CONNECTORS_RETURN_PATH) because it is a route the host app owns; the
+    connector key (underscores → hyphens, matching the app's slug) is appended.
+    """
+    try:
+        from django.conf import settings
+        raw = getattr(settings, "TERNO_CONNECTORS_RETURN_PATH", None)
+    except Exception:
+        raw = None
+    base = (raw or "/data-connectors/connectors").strip().rstrip("/")
+    base = base if base.startswith("/") else f"/{base}"
+    slug = connector_key.replace("_", "-")
+    return f"{base}/{slug}"
+
+
 def connect_url(org_subdomain: Optional[str], catalog) -> Optional[str]:
     """Build a link that connects (or reconnects) a catalog entry.
 
     OAuth connectors get the backend `/connect?connector=<key>` endpoint, which
-    redirects straight to the provider's consent screen — one click. Manual
-    (database) connectors instead get the host app's credentials modal
-    (`/data-connectors/datasource/<key>`), so the user lands on the secure form
-    rather than the bare Django admin. Neither URL carries a credential.
+    redirects straight to the provider's consent screen — one click. A
+    `return_to` sends the user back to the connector's detail page afterwards, so
+    the host app finishes in-app (connected state, account picker) instead of the
+    bare success page. Manual (database) connectors instead get the host app's
+    credentials modal (`/data-connectors/datasource/<key>`), so the user lands on
+    the secure form rather than the bare Django admin. Neither URL carries a
+    credential.
     """
     if catalog is None:
         return None
@@ -141,7 +164,8 @@ def connect_url(org_subdomain: Optional[str], catalog) -> Optional[str]:
     key = quote(catalog.key, safe="")
     if getattr(catalog, "auth_type", None) == "manual":
         return f"{origin}{_manual_connect_base()}/{key}"
-    return f"{origin}/connect?connector={key}"
+    return_to = quote(f"{origin}{_connectors_return_path(catalog.key)}", safe="")
+    return f"{origin}/connect?connector={key}&return_to={return_to}"
 
 
 def setup_handoff(org_subdomain: Optional[str], reason: str) -> dict:

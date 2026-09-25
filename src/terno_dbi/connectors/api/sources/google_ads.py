@@ -19,6 +19,7 @@ Unlike GA4/GSC, Google Ads:
 from __future__ import annotations
 import logging
 import os
+import re
 from typing import Any, Callable, Dict, List, Optional
 from terno_dbi.connectors.api.model.base import ApiConnector
 from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode, invalid_field
@@ -40,30 +41,144 @@ _RESOURCE: Dict[str, str] = {
 _DEFAULT_REPORT = "Campaign"
 
 _SHARED_METRICS: List[Field] = [
+    # -- delivery & cost ----------------------------------------------------
     Field("metrics.impressions", "Impressions", "metric",
           "Times an ad was shown.", data_type="integer"),
     Field("metrics.clicks", "Clicks", "metric", "Ad clicks.",
           data_type="integer"),
-    Field("metrics.cost_micros", "Cost", "metric",
-          "Spend for the row (converted from micros).", data_type="number",
-          is_monetary=True),
-    Field("metrics.conversions", "Conversions", "metric",
-          "Attributed conversions.", data_type="number"),
-    Field("metrics.conversions_value", "Conversion value", "metric",
-          "Total value of conversions.", data_type="number", is_monetary=True),
+    Field("metrics.interactions", "Interactions", "metric",
+          "Primary interactions (clicks, video views, etc.).",
+          data_type="integer"),
+    Field("metrics.interaction_rate", "Interaction rate", "metric",
+          "Interactions / impressions.", data_type="number",
+          is_non_aggregatable=True),
     Field("metrics.ctr", "CTR", "metric",
           "Click-through rate (clicks / impressions).", data_type="number",
           is_non_aggregatable=True),
+    Field("metrics.cost_micros", "Cost", "metric",
+          "Spend for the row (converted from micros).", data_type="number",
+          is_monetary=True),
     Field("metrics.average_cpc", "Avg. CPC", "metric",
           "Average cost per click (converted from micros).", data_type="number",
           is_monetary=True, is_non_aggregatable=True),
+    Field("metrics.average_cpm", "Avg. CPM", "metric",
+          "Average cost per thousand impressions (from micros).",
+          data_type="number", is_monetary=True, is_non_aggregatable=True),
+    Field("metrics.average_cost", "Avg. cost", "metric",
+          "Average cost per interaction (from micros).", data_type="number",
+          is_monetary=True, is_non_aggregatable=True),
+    # -- conversions --------------------------------------------------------
+    Field("metrics.conversions", "Conversions", "metric",
+          "Attributed conversions.", data_type="number"),
+    Field("metrics.conversions_value", "Conversion value", "metric",
+          "Total value of conversions (already in currency).",
+          data_type="number", is_monetary=True),
+    Field("metrics.all_conversions", "All conversions", "metric",
+          "Conversions incl. those not counted in 'Conversions'.",
+          data_type="number"),
+    Field("metrics.all_conversions_value", "All conversion value", "metric",
+          "Value of all conversions (in currency).", data_type="number",
+          is_monetary=True),
+    Field("metrics.conversions_from_interactions_rate", "Conversion rate",
+          "metric", "Conversions / interactions.", data_type="number",
+          is_non_aggregatable=True),
+    Field("metrics.cost_per_conversion", "Cost / conversion", "metric",
+          "Average cost per conversion (from micros).", data_type="number",
+          is_monetary=True, is_non_aggregatable=True),
+    Field("metrics.cost_per_all_conversions", "Cost / all conversions", "metric",
+          "Average cost per all-conversion (from micros).", data_type="number",
+          is_monetary=True, is_non_aggregatable=True),
+    Field("metrics.value_per_conversion", "Value / conversion", "metric",
+          "Average value per conversion (in currency).", data_type="number",
+          is_monetary=True, is_non_aggregatable=True),
+    Field("metrics.value_per_all_conversions", "Value / all conversions",
+          "metric", "Average value per all-conversion (in currency).",
+          data_type="number", is_monetary=True, is_non_aggregatable=True),
+    Field("metrics.view_through_conversions", "View-through conversions",
+          "metric", "Conversions from impressions (no click).",
+          data_type="integer"),
+    # -- video / TrueView ---------------------------------------------------
+    Field("metrics.video_views", "Video views", "metric",
+          "Number of video-ad views.", data_type="integer"),
+    Field("metrics.video_view_rate", "Video view rate", "metric",
+          "TrueView view rate (video views / impressions).", data_type="number",
+          is_non_aggregatable=True),
+    Field("metrics.average_cpv", "Avg. CPV", "metric",
+          "Average cost per video view (from micros).", data_type="number",
+          is_monetary=True, is_non_aggregatable=True),
+    Field("metrics.video_quartile_p25_rate", "Video played 25%", "metric",
+          "Share who watched to 25%.", data_type="number",
+          is_non_aggregatable=True),
+    Field("metrics.video_quartile_p50_rate", "Video played 50%", "metric",
+          "Share who watched to 50%.", data_type="number",
+          is_non_aggregatable=True),
+    Field("metrics.video_quartile_p75_rate", "Video played 75%", "metric",
+          "Share who watched to 75%.", data_type="number",
+          is_non_aggregatable=True),
+    Field("metrics.video_quartile_p100_rate", "Video played 100%", "metric",
+          "Share who watched to 100%.", data_type="number",
+          is_non_aggregatable=True),
+    # -- engagement ---------------------------------------------------------
+    Field("metrics.engagements", "Engagements", "metric",
+          "Ad engagements.", data_type="integer"),
+    Field("metrics.engagement_rate", "Engagement rate", "metric",
+          "Engagements / impressions.", data_type="number",
+          is_non_aggregatable=True),
+    # -- impression share (campaign/ad-group level) -------------------------
+    Field("metrics.search_impression_share", "Search impr. share", "metric",
+          "Impressions received / eligible (0-1).", data_type="number",
+          is_non_aggregatable=True),
+    Field("metrics.search_budget_lost_impression_share",
+          "Search lost IS (budget)", "metric",
+          "Share of impressions lost to budget.", data_type="number",
+          is_non_aggregatable=True),
+    Field("metrics.search_rank_lost_impression_share",
+          "Search lost IS (rank)", "metric",
+          "Share of impressions lost to Ad Rank.", data_type="number",
+          is_non_aggregatable=True),
+    Field("metrics.search_top_impression_share", "Search top IS", "metric",
+          "Share of impressions in top location.", data_type="number",
+          is_non_aggregatable=True),
+    Field("metrics.search_absolute_top_impression_share",
+          "Search abs. top IS", "metric",
+          "Share of impressions in the very first position.",
+          data_type="number", is_non_aggregatable=True),
+    # -- viewability (Active View) ------------------------------------------
+    Field("metrics.active_view_impressions", "Viewable impressions", "metric",
+          "Active View measurable & viewable impressions.",
+          data_type="integer"),
+    Field("metrics.active_view_ctr", "Active View CTR", "metric",
+          "Clicks / viewable impressions.", data_type="number",
+          is_non_aggregatable=True),
+    Field("metrics.active_view_viewability", "Viewability", "metric",
+          "Viewable / measurable impressions.", data_type="number",
+          is_non_aggregatable=True),
+    Field("metrics.active_view_cpm", "Active View CPM", "metric",
+          "Cost per thousand viewable impressions (from micros).",
+          data_type="number", is_monetary=True, is_non_aggregatable=True),
 ]
 
 _SHARED_SEGMENTS: List[Field] = [
     Field("segments.date", "Date", "dimension", "Day the stat occurred.",
           data_type="date"),
+    Field("segments.day_of_week", "Day of week", "dimension",
+          "MONDAY … SUNDAY."),
+    Field("segments.week", "Week", "dimension",
+          "Monday of the week the stat occurred.", data_type="date"),
+    Field("segments.month", "Month", "dimension",
+          "First day of the month.", data_type="date"),
+    Field("segments.quarter", "Quarter", "dimension",
+          "First day of the quarter.", data_type="date"),
+    Field("segments.year", "Year", "dimension", "Year of the stat.",
+          data_type="integer"),
+    Field("segments.hour", "Hour", "dimension", "Hour of day (0-23).",
+          data_type="integer"),
     Field("segments.device", "Device", "dimension",
           "Device class: MOBILE, DESKTOP, TABLET, CONNECTED_TV."),
+    Field("segments.ad_network_type", "Network", "dimension",
+          "SEARCH, SEARCH_PARTNERS, CONTENT, YOUTUBE_*, MIXED."),
+    Field("segments.click_type", "Click type", "dimension",
+          "The type of click (e.g. headline, sitelink)."),
 ]
 
 _REPORT_DIMENSIONS: Dict[str, List[Field]] = {
@@ -93,13 +208,123 @@ _REPORT_DIMENSIONS: Dict[str, List[Field]] = {
 }
 
 # Fields delivered in micros (currency * 1e6); divided back to currency on parse.
-_MICROS_FIELDS = frozenset({"metrics.cost_micros", "metrics.average_cpc"})
+# Google Ads returns these money metrics in micros with no naming convention to
+# detect them by, so the set is explicit. `conversions_value`, `value_per_*` and
+# the other monetary fields are already in currency and must NOT be listed here.
+_MICROS_FIELDS = frozenset({
+    "metrics.cost_micros",
+    "metrics.average_cpc",
+    "metrics.average_cpm",
+    "metrics.average_cost",
+    "metrics.average_cpv",
+    "metrics.cost_per_conversion",
+    "metrics.cost_per_all_conversions",
+    "metrics.active_view_cpm",
+})
 
 
-def _fields_for(report_type: Optional[str]) -> Dict[str, Field]:
+# Monetary fields already in the account currency (NOT micros) — flagged as money
+# but never divided. Dynamically-discovered fields use this for the monetary flag.
+_CURRENCY_FIELDS = frozenset({
+    "metrics.conversions_value",
+    "metrics.all_conversions_value",
+    "metrics.value_per_conversion",
+    "metrics.value_per_all_conversions",
+    "metrics.current_model_attributed_conversions_value",
+})
+
+# Segment fields that carry a date; everything else defaults to string/integer.
+_DATE_SEGMENTS = frozenset({
+    "segments.date", "segments.week", "segments.month", "segments.quarter",
+})
+_INTEGER_SEGMENTS = frozenset({"segments.hour", "segments.year"})
+
+# Curated Field objects keyed by id — used to give a discovered field a nice
+# label/description/flags when we have one, and as the static fallback catalogue.
+_CURATED_BY_ID: Dict[str, Field] = {
+    f.id: f for f in (*_SHARED_METRICS, *_SHARED_SEGMENTS)
+}
+
+# Substrings that mark a metric as a ratio/average (never summable across rows).
+_RATIO_TOKENS = ("rate", "average", "_per_", "share", "percent", "ctr",
+                 "cpc", "cpm", "cpv", "viewability")
+
+
+def _static_fields_for(report_type: Optional[str]) -> Dict[str, Field]:
+    """The curated catalogue — the fallback when field discovery is unavailable."""
     rt = report_type if report_type in _RESOURCE else _DEFAULT_REPORT
     fields = [*_REPORT_DIMENSIONS[rt], *_SHARED_SEGMENTS, *_SHARED_METRICS]
     return {f.id: f for f in fields}
+
+
+def _prettify(field_id: str) -> str:
+    """'metrics.video_view_rate' -> 'Video view rate' for a discovered field."""
+    leaf = field_id.split(".")[-1]
+    return leaf.replace("_", " ").strip().capitalize() or field_id
+
+
+_MICROS_TOKENS = ("_cpc", "_cpm", "_cpv", "cost_per_", "average_cost")
+
+
+def _is_micros(field_id: str) -> bool:
+    # Suffixed micros are unambiguous; the explicit set + the cost-token heuristic
+    # cover the money metrics that carry no `_micros` suffix.
+    if field_id in _MICROS_FIELDS or field_id.endswith("_micros"):
+        return True
+    leaf = field_id.split(".")[-1]
+    return any(tok in leaf for tok in _MICROS_TOKENS)
+
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _validate_dates(start: str, end: str) -> None:
+    """Reject a non-absolute date range with an actionable message.
+
+    GAQL's BETWEEN needs two 'YYYY-MM-DD' literals; a relative token like 'today'
+    reaches the API as an invalid value and returns a cryptic 400. Callers must
+    resolve relative ranges (via get_today) before querying — enforce that here
+    so the error names the real problem.
+    """
+    for label, val in (("start", start), ("end", end)):
+        if not (isinstance(val, str) and _DATE_RE.match(val)):
+            raise ApiError(
+                ErrorCode.INVALID_FILTER,
+                f"date_range.{label} must be an absolute 'YYYY-MM-DD' date, got "
+                f"{val!r}. Resolve relative ranges (e.g. 'today', 'last 30 days') "
+                f"with get_today first.",
+                retriable=False,
+            )
+    if start > end:
+        raise ApiError(
+            ErrorCode.INVALID_FILTER,
+            f"date_range.start ({start}) is after date_range.end ({end}).",
+            retriable=False,
+        )
+
+
+def _dynamic_metric_field(field_id: str) -> Field:
+    if field_id in _CURATED_BY_ID:
+        return _CURATED_BY_ID[field_id]
+    leaf = field_id.split(".")[-1]
+    monetary = _is_micros(field_id) or field_id in _CURRENCY_FIELDS
+    non_agg = any(tok in leaf for tok in _RATIO_TOKENS)
+    return Field(field_id, _prettify(field_id), "metric", "",
+                 data_type="number", is_monetary=monetary,
+                 is_non_aggregatable=non_agg)
+
+
+def _dynamic_segment_field(field_id: str) -> Field:
+    if field_id in _CURATED_BY_ID:
+        return _CURATED_BY_ID[field_id]
+    if field_id in _DATE_SEGMENTS:
+        data_type = "date"
+    elif field_id in _INTEGER_SEGMENTS:
+        data_type = "integer"
+    else:
+        data_type = "string"
+    return Field(field_id, _prettify(field_id), "dimension", "",
+                 data_type=data_type)
 
 
 def _default_http(method: str, url: str, token: str,
@@ -168,6 +393,11 @@ class GoogleAdsConnector(ApiConnector):
                  token_refresher: Optional[Callable] = None):
         super().__init__(datasource, token_refresher=token_refresher)
         self._http = http or _default_http
+        # Field catalogue per report type, cached for the connector's lifetime.
+        self._catalogue_cache: Dict[str, Dict[str, Field]] = {}
+        # Per-field `selectable_with` sets (None = unknown), for compatibility
+        # pre-validation. Cached so repeated queries don't refetch metadata.
+        self._selectable_cache: Dict[str, Optional[set]] = {}
 
     # -- transport ----------------------------------------------------------
 
@@ -207,17 +437,136 @@ class GoogleAdsConnector(ApiConnector):
         return accounts
 
     def list_fields(self, report_type: Optional[str] = None) -> List[Field]:
-        return list(_fields_for(report_type).values())
+        return list(self._resource_catalogue(report_type).values())
+
+    def _resource_catalogue(self, report_type: Optional[str]) -> Dict[str, Field]:
+        """The field catalogue for a report's resource.
+
+        Metrics and segments are discovered live from GoogleAdsFieldService so
+        coverage tracks the API (every metric selectable with the resource — video
+        /TrueView, impression share, etc. — with no maintenance). The resource's
+        identifying attributes stay curated (stable and few). If discovery fails
+        for any reason, the whole catalogue falls back to the curated static set,
+        so the connector never goes dark over a metadata hiccup.
+        """
+        rt = report_type if report_type in _RESOURCE else _DEFAULT_REPORT
+        cached = self._catalogue_cache.get(rt)
+        if cached is not None:
+            return cached
+        try:
+            metric_names, segment_names = self._discover_fields(_RESOURCE[rt])
+        except Exception as exc:   # noqa: BLE001
+            logger.warning(
+                "Google Ads field discovery failed for %s (%s); using the "
+                "curated catalogue.", _RESOURCE[rt], exc)
+            catalogue = _static_fields_for(rt)
+            self._catalogue_cache[rt] = catalogue
+            return catalogue
+
+        # Attributes stay curated; metrics/segments come from discovery.
+        catalogue: Dict[str, Field] = {f.id: f for f in _REPORT_DIMENSIONS[rt]}
+        for name in segment_names:
+            catalogue[name] = _dynamic_segment_field(name)
+        for name in metric_names:
+            catalogue[name] = _dynamic_metric_field(name)
+        self._catalogue_cache[rt] = catalogue
+        return catalogue
+
+    def _discover_fields(self, resource: str) -> tuple:
+        """`(metric_names, segment_names)` selectable with a resource.
+
+        A GoogleAdsField RESOURCE row carries the full list of metric and segment
+        field names selectable with it — so this is exactly the compatible set,
+        not a guess.
+        """
+        data = self._call(
+            "POST", f"{_BASE}/googleAdsFields:search",
+            {"query": f"SELECT name, metrics, segments WHERE name = '{resource}'"})
+        results = data.get("results") or []
+        if not results:
+            raise ApiError(ErrorCode.UPSTREAM_ERROR,
+                           f"no field metadata for {resource}")
+        row = results[0]
+        metrics = list(row.get("metrics") or [])
+        segments = list(row.get("segments") or [])
+        if not metrics and not segments:
+            raise ApiError(ErrorCode.UPSTREAM_ERROR,
+                           f"empty field metadata for {resource}")
+        return metrics, segments
+
+    def _selectable_with(self, names: List[str]) -> Dict[str, Optional[set]]:
+        """`{name: set(selectable_with) | None}` for each field.
+
+        None means the field service did not return metadata for the name, so
+        compatibility for it is unknown and must not be treated as a conflict.
+        Batched and cached; a query only ever looks up the fields it selected.
+        """
+        missing = [n for n in names if n not in self._selectable_cache]
+        if missing:
+            in_list = ", ".join(f"'{n}'" for n in missing)
+            data = self._call(
+                "POST", f"{_BASE}/googleAdsFields:search",
+                {"query": f"SELECT name, selectable_with WHERE name IN ({in_list})"})
+            for row in data.get("results") or []:
+                nm = row.get("name")
+                if nm:
+                    self._selectable_cache[nm] = set(row.get("selectableWith") or [])
+            for n in missing:                      # unresolved -> unknown
+                self._selectable_cache.setdefault(n, None)
+        return {n: self._selectable_cache.get(n) for n in names}
+
+    def _check_compatibility(self, segments: List[str], metrics: List[str]) -> None:
+        """Pre-validate metric↔segment combinations against `selectable_with`.
+
+        Google rejects some metric+segment pairs (e.g. in-feed TrueView rates with
+        `segments.date`) with a cryptic 400; catching it here turns that into an
+        actionable message. Only metric↔segment is checked — a metric's
+        `selectable_with` enumerates its compatible *segments/attributes*, not
+        other metrics, so a metric↔metric comparison would false-positive on
+        ordinary combinations (e.g. cost with a video rate) and is deliberately
+        not attempted.
+
+        Best-effort and false-positive-safe: a pair is flagged only when *both*
+        fields have a non-empty compatibility set and neither lists the other,
+        and any metadata-lookup failure is skipped so a hiccup never blocks a
+        valid query.
+        """
+        if not (segments and metrics):
+            return
+        try:
+            compat = self._selectable_with([*segments, *metrics])
+        except Exception as exc:   # noqa: BLE001
+            logger.warning("Google Ads compatibility check skipped: %s", exc)
+            return
+
+        problems: List[tuple] = []
+        for seg in segments:
+            sw_seg = compat.get(seg)
+            for met in metrics:
+                sw_met = compat.get(met)
+                if sw_seg and sw_met and met not in sw_seg and seg not in sw_met:
+                    problems.append((met, seg))
+        if problems:
+            pairs = "; ".join(f"'{m}' with '{s}'" for m, s in problems[:6])
+            raise ApiError(
+                ErrorCode.INVALID_FILTER,
+                "These Google Ads metrics can't be selected with the chosen "
+                "segment: " + pairs + ". Remove the segment for those metrics, "
+                "or split them into separate queries.",
+                retriable=False,
+            )
 
     # -- query --------------------------------------------------------------
 
     def _run(self, spec: QuerySpec) -> QueryResult:
         report_type = spec.report_type if spec.report_type in _RESOURCE else _DEFAULT_REPORT
-        catalogue = _fields_for(report_type)
+        catalogue = self._resource_catalogue(report_type)
 
         unknown = [f for f in spec.fields if f not in catalogue]
         if unknown:
             raise invalid_field(unknown[0], list(catalogue.keys()))
+
+        _validate_dates(spec.date_range.start, spec.date_range.end)
 
         dimensions = [f for f in spec.fields if catalogue[f].kind == "dimension"]
         metrics = [f for f in spec.fields if catalogue[f].kind == "metric"]
@@ -225,6 +574,9 @@ class GoogleAdsConnector(ApiConnector):
             # A report with no selected fields is a dead end; default to the
             # report's core metrics.
             metrics = [m.id for m in _SHARED_METRICS[:3]]
+
+        segments = [d for d in dimensions if d.startswith("segments.")]
+        self._check_compatibility(segments, metrics)
 
         gaql = _build_gaql(
             _RESOURCE[report_type], dimensions, metrics,
@@ -309,7 +661,7 @@ def _parse_results(data, dimensions, metrics, catalogue, account, *,
 def _coerce(field_id, raw, catalogue):
     if raw is None:
         return None
-    if field_id in _MICROS_FIELDS:
+    if _is_micros(field_id):
         try:
             return float(raw) / 1_000_000
         except (TypeError, ValueError):

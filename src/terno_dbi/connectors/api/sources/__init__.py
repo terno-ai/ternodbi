@@ -22,6 +22,9 @@ from terno_dbi.connectors.api.sources.linkedin_ads import (
 from terno_dbi.connectors.api.sources.meta_ads import (
     MetaAdsConnector, make_meta_ads_connector,
 )
+from terno_dbi.connectors.api.sources.microsoft_ads import (
+    MicrosoftAdsConnector, make_microsoft_ads_connector,
+)
 from terno_dbi.connectors.api.sources.salesforce import (
     SalesforceConnector, make_salesforce_connector,
 )
@@ -37,6 +40,7 @@ __all__ = [
     "GoogleSheetsConnector", "make_google_sheets_connector",
     "LinkedInAdsConnector", "make_linkedin_ads_connector",
     "MetaAdsConnector", "make_meta_ads_connector",
+    "MicrosoftAdsConnector", "make_microsoft_ads_connector",
     "SalesforceConnector", "make_salesforce_connector",
     "YouTubeConnector", "make_youtube_connector",
 ]

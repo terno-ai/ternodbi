@@ -25,6 +25,14 @@ class OAuthProvider:
     client_secret_env: str
     use_pkce: bool = True
     extra_authorize_params: Dict[str, str] = field(default_factory=dict)
+    # Extra fields added to the token-exchange (and refresh) POST body. Shopify
+    # uses `expiring=1` here to request an expiring offline token — non-expiring
+    # offline tokens are no longer accepted by the Admin API.
+    extra_token_params: Dict[str, str] = field(default_factory=dict)
+    # When True, `authorization_url` and `token_url` are templates containing
+    # `{instance}` (e.g. Shopify's per-store domain) that the flow fills in from
+    # a store name the user supplies before connecting.
+    requires_instance: bool = False
 
     def client_id(self) -> str:
         return os.getenv(self.client_id_env, "").strip()
@@ -110,9 +118,61 @@ def _salesforce() -> OAuthProvider:
     )
 
 
+_HUBSPOT = OAuthProvider(
+    name="hubspot",
+    authorization_url="https://app.hubspot.com/oauth/authorize",
+    token_url="https://api.hubapi.com/oauth/v1/token",
+    scope="crm.objects.contacts.read crm.objects.companies.read "
+          "crm.objects.deals.read crm.objects.tickets.read "
+          "crm.objects.leads.read crm.objects.owners.read",
+    client_id_env="TERNO_HUBSPOT_CLIENT_ID",
+    client_secret_env="TERNO_HUBSPOT_CLIENT_SECRET",
+    use_pkce=False,
+)
+
+
+_AMAZON_ADS = OAuthProvider(
+    name="amazon_ads",
+    authorization_url="https://www.amazon.com/ap/oa",
+    token_url="https://api.amazon.com/auth/o2/token",
+    scope="advertising::campaign_management",
+    client_id_env="TERNO_AMAZON_ADS_CLIENT_ID",
+    client_secret_env="TERNO_AMAZON_ADS_CLIENT_SECRET",
+    use_pkce=False,
+)
+
+
+_MICROSOFT = OAuthProvider(
+    name="microsoft",
+    authorization_url="https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+    token_url="https://login.microsoftonline.com/common/oauth2/v2.0/token",
+    scope="https://ads.microsoft.com/msads.manage offline_access",
+    client_id_env="TERNO_MICROSOFT_ADS_CLIENT_ID",
+    client_secret_env="TERNO_MICROSOFT_ADS_CLIENT_SECRET",
+    use_pkce=True,
+)
+
+
+_SHOPIFY = OAuthProvider(
+    name="shopify",
+    # Per-store URLs: {instance} is filled with '<store>.myshopify.com'.
+    authorization_url="https://{instance}/admin/oauth/authorize",
+    token_url="https://{instance}/admin/oauth/access_token",
+    scope="read_orders,read_all_orders,read_products,read_customers,"
+          "read_inventory,read_locations,read_draft_orders,read_discounts",
+    client_id_env="TERNO_SHOPIFY_CLIENT_ID",
+    client_secret_env="TERNO_SHOPIFY_CLIENT_SECRET",
+    use_pkce=False,
+    requires_instance=True,
+    # Request an expiring offline token (with a refresh_token); the Admin API no
+    # longer accepts non-expiring offline tokens.
+    extra_token_params={"expiring": "1"},
+)
+
+
 def _google_with_scope(scope: str) -> OAuthProvider:
     from dataclasses import replace
-    return replace(_GOOGLE, scope=scope)
+    return replace(_GOOGLE, scope=f"openid email {scope}")
 
 
 # Provider per connector key. Scope is the connector's own — read-only wherever
@@ -124,8 +184,7 @@ _PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
     "youtube": _google_with_scope(
         "https://www.googleapis.com/auth/yt-analytics.readonly "
         "https://www.googleapis.com/auth/yt-analytics-monetary.readonly "
-        "https://www.googleapis.com/auth/youtube.readonly "
-        "https://www.googleapis.com/auth/youtube.channel-memberships.creator"),
+        "https://www.googleapis.com/auth/youtube.readonly"),
     "google_search_console": _google_with_scope(
         "https://www.googleapis.com/auth/webmasters.readonly"),
     "google_ads": _google_with_scope(
@@ -144,6 +203,10 @@ _PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
     "meta_ads": _META,
     "linkedin_ads": _LINKEDIN,
     "salesforce": _salesforce,
+    "microsoft_ads": _MICROSOFT,
+    "hubspot": _HUBSPOT,
+    "amazon_ads": _AMAZON_ADS,
+    "shopify": _SHOPIFY,
 }
 
 

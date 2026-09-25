@@ -21,4 +21,6 @@ urlpatterns = [
     path("connectors/api/", web.list_api_connectors, name="list_api_connectors"),
     path("connectors/api/<slug:connector_key>/disconnect/",
          web.disconnect_connector, name="disconnect_connector"),
+    path("connectors/api/<slug:connector_key>/accounts/",
+         web.connector_accounts, name="connector_accounts"),
 ]

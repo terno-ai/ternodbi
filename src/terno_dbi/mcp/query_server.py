@@ -399,7 +399,12 @@ Returns columns and data rows. Use max_rows to limit the number of rows returned
             description=(
                 "Query an API datasource (GA4, Meta, Google Ads…). Returns a "
                 "query_id; poll get_query_results with it. Resolve relative "
-                "dates with get_today first. List dimensions before metrics."
+                "dates with get_today first. List dimensions before metrics. "
+                "Never fabricate data: report only values this query returns — "
+                "do not invent, estimate, or extrapolate a number, name, or "
+                "date, and report an empty result as empty rather than filling "
+                "it in. Use only field ids from list_fields (never display "
+                "names or guessed ids) and only account ids from list_accounts."
             ),
             inputSchema={
                 "type": "object",

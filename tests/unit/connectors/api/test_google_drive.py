@@ -489,6 +489,9 @@ class TestRegistration:
         assert provider is not None
         # `drive.metadata.readonly` cannot serve `drives.list`, so shared drives
         # are invisible on it; `drive.readonly` is the narrowest scope that
-        # covers every call this connector makes, contents included.
-        assert provider.scope == "https://www.googleapis.com/auth/drive.readonly"
+        # covers every call this connector makes, contents included. The
+        # `openid email` prefix is every Google provider's, for CONNECTED_EMAIL.
+        assert provider.scope == (
+            "openid email https://www.googleapis.com/auth/drive.readonly")
         assert provider.scope.endswith("drive.readonly")
+        assert "drive.metadata.readonly" not in provider.scope

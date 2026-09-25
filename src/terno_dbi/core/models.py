@@ -980,6 +980,7 @@ class ConnectorOAuthState(models.Model):
         help_text="Set when reconnecting an existing datasource; null on first connect.",
     )
     return_to = models.CharField(max_length=500, blank=True, default="")
+    instance = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
 
@@ -1029,3 +1030,27 @@ class GroupAccountAllowlist(models.Model):
 
     def __str__(self):
         return f"{self.group.name} → {self.data_source_id}:{self.account_id}"
+
+
+class ConnectorAccountSelection(models.Model):
+    data_source = models.ForeignKey(
+        DataSource, on_delete=models.CASCADE, related_name="account_selections",
+    )
+    account_id = models.CharField(max_length=255)
+    account_name = models.CharField(max_length=255, blank=True)
+    enabled = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "terno_connector_account_selection"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["data_source", "account_id"],
+                name="uniq_datasource_account_selection",
+            ),
+        ]
+        indexes = [models.Index(fields=["data_source"])]
+
+    def __str__(self):
+        state = "on" if self.enabled else "off"
+        return f"{self.data_source_id}:{self.account_id} ({state})"
