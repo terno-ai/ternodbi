@@ -443,16 +443,22 @@ class TestScopeGuard:
         assert exc.value.code == ErrorCode.AUTH_EXPIRED
         assert calls == []
 
+    def test_drive_readonly_is_accepted(self):
+        conn, _ = self._with_scopes(
+            "https://www.googleapis.com/auth/drive.readonly")
+        assert conn.query(_spec()).row_count == 2
+
     @pytest.mark.parametrize("scope", [
         "https://www.googleapis.com/auth/drive",
-        "https://www.googleapis.com/auth/drive.readonly",
         "https://www.googleapis.com/auth/drive.metadata.readonly",
     ])
-    def test_any_read_scope_is_accepted(self, scope):
-        # Four spellings serve files.list; requiring one exact string would
-        # lock out a grant that works.
-        conn, _ = self._with_scopes(scope)
-        assert conn.query(_spec()).row_count == 2
+    def test_other_drive_scopes_are_refused(self, scope):
+        # Only the scope this connector requests is accepted.
+        conn, calls = self._with_scopes(scope)
+        with pytest.raises(ApiError) as exc:
+            conn.query(_spec())
+        assert exc.value.code == ErrorCode.AUTH_EXPIRED
+        assert calls == []
 
     def test_an_unknown_granted_set_does_not_block(self):
         # A source connected before scopes were recorded must keep working.

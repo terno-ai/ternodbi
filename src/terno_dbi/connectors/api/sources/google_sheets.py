@@ -14,7 +14,7 @@ borrowed call to Drive:
   `spreadsheets.get` for the `Tabs` report.
 
 Two scopes, because the split is real: `spreadsheets.readonly` reads the cells,
-`drive.metadata.readonly` finds the files. A user who grants only one of them
+`drive.readonly` finds the files. A user who grants only one of them
 gets a clear error naming the missing permission rather than a bare 403 — see
 `require_scope`.
 
@@ -40,7 +40,7 @@ _DRIVE_BASE = "https://www.googleapis.com/drive/v3"
 _SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet"
 
 _SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly"
-_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.metadata.readonly"
+_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 
 # Column ZZ is 702 columns — past any sheet used as a table, and far cheaper to
 # request than the 18,278-column maximum.

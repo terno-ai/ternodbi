@@ -53,20 +53,7 @@ MY_DRIVE = "myDrive"
 
 _FOLDER_MIME = "application/vnd.google-apps.folder"
 
-# Any one of these lets `files.list` see the user's whole corpus. `drive.file`
-# is deliberately absent: it is per-file access to what the app itself created
-# or the user hand-picked in the Google Picker, so `files.list` under it
-# answers 200 with an empty list. That is the failure this connector has to
-# name, because "no error, no files" reads as an empty Drive.
-_DRIVE_READ_SCOPES = frozenset({
-    "https://www.googleapis.com/auth/drive",
-    "https://www.googleapis.com/auth/drive.readonly",
-    "https://www.googleapis.com/auth/drive.metadata",
-    "https://www.googleapis.com/auth/drive.metadata.readonly",
-})
-
-# The scope this connector asks for at connect time (see `auth.providers`).
-_PREFERRED_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 
 # Drive caps a page at 1000 regardless of what we ask for.
 _MAX_PAGE_SIZE = 1000
@@ -329,29 +316,24 @@ class GoogleDriveConnector(ApiConnector):
     def _require_drive_read(self, feature: str) -> None:
         """Fail loudly when the grant cannot see the user's files.
 
-        `ApiConnector.require_scope` checks one exact scope; Drive read access
-        comes in four spellings (`drive`, `drive.readonly`, and the two
-        metadata variants), any of which serves `files.list`, so the check is
-        for an intersection rather than a member.
-
-        This matters more here than elsewhere because the wrong grant is not an
-        error at Google: `drive.file` answers `files.list` with 200 and an empty
+        Unlike `ApiConnector.require_scope`, the message explains `drive.file`,
+        because the wrong grant is not an error at Google: `drive.file` answers `files.list` with 200 and an empty
         list, since it can only see files this app created or the user picked.
         Without this check a mis-scoped connection is indistinguishable from an
         empty Drive. Silent when the granted set is unknown — see
         `granted_scopes`.
         """
         granted = self.granted_scopes()
-        if granted and not (granted & _DRIVE_READ_SCOPES):
+        if granted and _DRIVE_SCOPE not in granted:
             raise ApiError(
                 ErrorCode.AUTH_EXPIRED,
-                f"{feature} needs the '{_PREFERRED_SCOPE}' permission. This "
+                f"{feature} needs the '{_DRIVE_SCOPE}' permission. This "
                 f"connection was granted only: {', '.join(sorted(granted))}. "
                 f"A 'drive.file' grant can see only files this app created or "
                 f"you picked explicitly, so no files are listable. Reconnect "
                 f"{self.key} and allow Drive read access.",
                 details={"granted": sorted(granted),
-                         "required_any_of": sorted(_DRIVE_READ_SCOPES)},
+                         "required": _DRIVE_SCOPE},
                 retriable=False,
             )
 
@@ -364,11 +346,11 @@ class GoogleDriveConnector(ApiConnector):
         and is where most files live. Shared drives are additive, and a
         deployment with none simply gets the one entry.
 
-        `drives.list` needs a broader grant than the rest of this connector:
-        Google serves it only to `drive` or `drive.readonly`, both *restricted*
-        scopes, while `files.list` is happy with `drive.metadata.readonly`. On a
-        metadata-only grant it answers 403, which must not take discovery down
-        with it — My Drive is still fully queryable, and that is where most
+        `drives.list` needs a broader grant than `files.list`: Google serves it
+        only to `drive` or `drive.readonly`, while `files.list` is happy with
+        `drive.metadata.readonly`. A connection whose granted set is unknown may
+        still hold a metadata-only grant, and there it answers 403, which must
+        not take discovery down with it — My Drive is still fully queryable, and that is where most
         files are. So a 403 here means "no shared drives on this grant", not a
         failure. Any other error is a real fault and propagates.
         """

@@ -194,12 +194,11 @@ _PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
     "google_drive": _google_with_scope(
         "https://www.googleapis.com/auth/drive.readonly"),
     # Two scopes, because the split is real: the Sheets API can read a
-    # spreadsheet but cannot *find* one, so discovery goes through Drive. Only
-    # file metadata is needed for that, so the narrower Drive scope is used —
-    # spreadsheet contents come from the Sheets scope.
+    # spreadsheet but cannot *find* one, so discovery goes through Drive.
+    # Spreadsheet contents come from the Sheets scope.
     "google_sheets": _google_with_scope(
         "https://www.googleapis.com/auth/spreadsheets.readonly "
-        "https://www.googleapis.com/auth/drive.metadata.readonly"),
+        "https://www.googleapis.com/auth/drive.readonly"),
     "meta_ads": _META,
     "linkedin_ads": _LINKEDIN,
     "salesforce": _salesforce,

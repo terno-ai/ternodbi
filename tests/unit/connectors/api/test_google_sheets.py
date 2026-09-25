@@ -12,7 +12,7 @@ from terno_dbi.connectors.api.model.types import DateRange, QuerySpec
 from terno_dbi.connectors.api.sources.google_sheets import GoogleSheetsConnector
 
 _SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly"
-_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.metadata.readonly"
+_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 
 
 class _Catalog:
@@ -351,7 +351,7 @@ class TestGranularConsent:
         with pytest.raises(ApiError) as exc:
             conn.list_accounts()
         assert exc.value.code == ErrorCode.AUTH_EXPIRED
-        assert "drive.metadata.readonly" in exc.value.message
+        assert "drive.readonly" in exc.value.message
 
     def test_missing_sheets_scope_names_the_permission(self):
         conn = _connector(ds=self._ds_with(_DRIVE_SCOPE))
