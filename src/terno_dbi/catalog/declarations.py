@@ -41,6 +41,23 @@ def _user_password() -> List[FormField]:
     ]
 
 
+def _sf_date_field(help_text: str = "") -> ReportSetting:
+    """The optional `date_field` every Salesforce report accepts.
+
+    Each object has its own idea of "when", and the connector's default is a
+    guess about intent rather than a fact about the org — a report on won deals
+    is dated by CloseDate, one on sales-team activity by CreatedDate. Optional,
+    so the common case needs nothing.
+    """
+    return ReportSetting(
+        "date_field", label="Date field", required=False,
+        help_text=help_text or (
+            "Which date field the date range filters on. Defaults to "
+            "CreatedDate; any date or date/time field on the object is valid, "
+            "including custom ones."),
+    )
+
+
 # --------------------------------------------------------------------------
 # Databases — family=database
 # --------------------------------------------------------------------------
@@ -459,6 +476,280 @@ _APIS: List[ConnectorSpec] = [
         rate_limit_per_second=4,     # Shopify GraphQL is cost-based; keep modest
         rate_limit_per_day=100000,
         default_enabled=True,    # Shopify app configured
+    ),
+    ConnectorSpec(
+        key="linkedin_ads",
+        display_name="LinkedIn Ads",
+        provider="LinkedIn",
+        category="Advertising",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Campaign, campaign group and creative performance from "
+                    "LinkedIn sponsored ad accounts — spend, impressions, "
+                    "clicks, engagements, leads and conversions.",
+        scopes_label="LinkedIn ads and ads reporting read access",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=True,
+        account_label_singular="Ad account",
+        account_label_plural="Ad accounts",
+        report_types=[
+            ReportType("Campaign", "Campaign performance"),
+            ReportType("CampaignGroup", "Campaign group performance"),
+            ReportType("Creative", "Creative performance"),
+            ReportType("Account", "Account totals"),
+        ],
+        default_report_type="Campaign",
+        # LinkedIn applies a daily application quota rather than a published
+        # per-second rate; keep the per-second guard loose and the daily one
+        # real, so a runaway agent is stopped before the app-wide quota is.
+        rate_limit_per_second=25,
+        rate_limit_per_day=50000,
+        default_enabled=True,   # LinkedIn Marketing API access pending
+    ),
+    ConnectorSpec(
+        key="salesforce",
+        display_name="Salesforce",
+        provider="Salesforce",
+        category="CRM",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Opportunities, leads, accounts, contacts, cases and "
+                    "campaigns from a Salesforce org — including the org's own "
+                    "custom fields and custom objects.",
+        scopes_label="Salesforce API access on your behalf, limited to what "
+                     "your Salesforce profile and permission sets already allow",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=True,
+        # A connection reaches exactly one org, but the account machinery is
+        # still what the allowlist and currency guard hang off.
+        account_label_singular="Salesforce org",
+        account_label_plural="Salesforce orgs",
+        report_types=[
+            ReportType("Opportunity", "Opportunities",
+                       settings=[_sf_date_field(
+                           "Defaults to CloseDate — when the deal is expected "
+                           "to close, not when it was created. Use CreatedDate "
+                           "to report on when deals were opened.")]),
+            ReportType("Lead", "Leads", settings=[_sf_date_field()]),
+            ReportType("Account", "Accounts", settings=[_sf_date_field()]),
+            ReportType("Contact", "Contacts", settings=[_sf_date_field()]),
+            ReportType("Case", "Cases", settings=[_sf_date_field()]),
+            ReportType("Campaign", "Campaigns", settings=[_sf_date_field()]),
+            ReportType(
+                "Custom", "Any other object",
+                settings=[
+                    ReportSetting(
+                        "object", label="Object API name",
+                        help_text="The API name of the Salesforce object to "
+                                  "read, e.g. 'Quote', 'Task' or a custom "
+                                  "object such as 'Project__c'. Custom objects "
+                                  "end in '__c'.",
+                    ),
+                    _sf_date_field(
+                        "Defaults to CreatedDate. If the object has no such "
+                        "field, the date range is not applied and every row is "
+                        "returned — the result says so in its notes."),
+                ],
+            ),
+        ],
+        default_report_type="Opportunity",
+        # Salesforce meters a daily API allocation per org (edition-dependent,
+        # commonly 15k-100k calls) shared with every other integration, and
+        # publishes no per-second rate. The per-day guard is deliberately below
+        # a typical allocation so this connector cannot exhaust it alone.
+        rate_limit_per_second=10,
+        rate_limit_per_day=10000,
+        default_enabled=True,   # needs a Connected App per deployment
+    ),
+    ConnectorSpec(
+        key="google_drive",
+        display_name="Google Drive",
+        provider="Google",
+        category="Productivity",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="File and folder metadata from My Drive and shared drives "
+                    "— names, owners, types, sizes and modification times.",
+        scopes_label="Google Drive metadata read-only access (file names and "
+                     "properties, never file contents)",
+        has_account_list=True,
+        has_fields=True,
+        # A drive is current state, not a time series: the connector has no date
+        # dimension and ignores the range — a modification window is opt-in via
+        # the modified_after / modified_before settings. Declared True because
+        # the query API still requires a date_range on every API source; the
+        # per-report flags below record the truth.
+        is_date_range_required=True,
+        account_label_singular="Drive",
+        account_label_plural="Drives",
+        report_types=[
+            ReportType(
+                "Files", "Files", is_date_range_required=False,
+                settings=[
+                    ReportSetting(
+                        "folder_id", label="Folder ID", required=False,
+                        help_text="Restrict to the direct children of one "
+                                  "folder. The ID is the last path segment of "
+                                  "the folder's Drive URL.",
+                    ),
+                    ReportSetting(
+                        "name_contains", label="Name contains", required=False,
+                        help_text="Match files whose name contains this text.",
+                    ),
+                    ReportSetting(
+                        "mime_type", label="MIME type", required=False,
+                        help_text="Restrict to one type, e.g. "
+                                  "'application/pdf' or "
+                                  "'application/vnd.google-apps.document'.",
+                    ),
+                    ReportSetting(
+                        "modified_after", label="Modified on or after",
+                        required=False,
+                        help_text="YYYY-MM-DD. Only files changed on or after "
+                                  "this date. Omit to list the drive as it "
+                                  "stands — the query's date_range is not a "
+                                  "filter on this source.",
+                    ),
+                    ReportSetting(
+                        "modified_before", label="Modified on or before",
+                        required=False,
+                        help_text="YYYY-MM-DD. Only files changed on or before "
+                                  "this date.",
+                    ),
+                ],
+            ),
+            ReportType(
+                "Folders", "Folders", is_date_range_required=False,
+                settings=[
+                    ReportSetting(
+                        "folder_id", label="Parent folder ID", required=False,
+                        help_text="Restrict to sub-folders of this folder.",
+                    ),
+                    ReportSetting(
+                        "name_contains", label="Name contains", required=False,
+                    ),
+                    ReportSetting(
+                        "modified_after", label="Modified on or after",
+                        required=False,
+                        help_text="YYYY-MM-DD. Only files changed on or after "
+                                  "this date. Omit to list the drive as it "
+                                  "stands — the query's date_range is not a "
+                                  "filter on this source.",
+                    ),
+                    ReportSetting(
+                        "modified_before", label="Modified on or before",
+                        required=False,
+                        help_text="YYYY-MM-DD. Only files changed on or before "
+                                  "this date.",
+                    ),
+                ],
+            ),
+            ReportType(
+                "SharedWithMe", "Shared with me", is_date_range_required=False,
+                settings=[
+                    ReportSetting(
+                        "name_contains", label="Name contains", required=False,
+                    ),
+                    ReportSetting(
+                        "mime_type", label="MIME type", required=False,
+                    ),
+                    ReportSetting(
+                        "modified_after", label="Modified on or after",
+                        required=False,
+                        help_text="YYYY-MM-DD. Only files changed on or after "
+                                  "this date. Omit to list the drive as it "
+                                  "stands — the query's date_range is not a "
+                                  "filter on this source.",
+                    ),
+                    ReportSetting(
+                        "modified_before", label="Modified on or before",
+                        required=False,
+                        help_text="YYYY-MM-DD. Only files changed on or before "
+                                  "this date.",
+                    ),
+                ],
+            ),
+            ReportType(
+                "Trashed", "Trash", is_date_range_required=False,
+                settings=[
+                    ReportSetting(
+                        "name_contains", label="Name contains", required=False,
+                    ),
+                    ReportSetting(
+                        "modified_after", label="Modified on or after",
+                        required=False,
+                        help_text="YYYY-MM-DD. Only files changed on or after "
+                                  "this date. Omit to list the drive as it "
+                                  "stands — the query's date_range is not a "
+                                  "filter on this source.",
+                    ),
+                    ReportSetting(
+                        "modified_before", label="Modified on or before",
+                        required=False,
+                        help_text="YYYY-MM-DD. Only files changed on or before "
+                                  "this date.",
+                    ),
+                ],
+            ),
+        ],
+        default_report_type="Files",
+        # Drive's default user quota is ~200 requests/second; stay well under it
+        # so a fan-out across shared drives cannot exhaust the shared OAuth app.
+        rate_limit_per_second=20,
+        rate_limit_per_day=100000,
+        default_enabled=True,
+    ),
+    ConnectorSpec(
+        key="google_sheets",
+        display_name="Google Sheets",
+        provider="Google",
+        category="Productivity",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Read rows from Google Sheets spreadsheets as tabular "
+                    "data, using each sheet's header row as its columns.",
+        scopes_label="Google Sheets read-only access, plus Drive file metadata "
+                     "to find your spreadsheets",
+        has_account_list=True,
+        has_fields=True,
+        # A spreadsheet is current state, not a time series; the connector has
+        # no date dimension and ignores the range. Declared True to match the
+        # other sources until the per-report flags below are honoured.
+        is_date_range_required=True,
+        account_label_singular="Spreadsheet",
+        account_label_plural="Spreadsheets",
+        report_types=[
+            ReportType(
+                "Values", "Sheet rows", is_date_range_required=False,
+                settings=[
+                    ReportSetting(
+                        "sheet_name", label="Tab name", required=False,
+                        help_text="Which tab to read. Defaults to the first "
+                                  "visible tab; run the 'Tabs' report to see "
+                                  "the names.",
+                    ),
+                    ReportSetting(
+                        "header_row", label="Header row", required=False,
+                        help_text="Row number holding the column names. "
+                                  "Defaults to 1.",
+                    ),
+                    ReportSetting(
+                        "range", label="Cell range", required=False,
+                        help_text="An A1 range to read instead of the whole "
+                                  "tab, e.g. 'B2:F500'.",
+                    ),
+                ],
+            ),
+            ReportType("Tabs", "Sheet tabs", is_date_range_required=False),
+        ],
+        default_report_type="Values",
+        # The Sheets read quota is 60 requests/minute/user — far tighter than
+        # the other Google APIs, so this limit is real rather than a safety net.
+        rate_limit_per_second=1,
+        rate_limit_per_day=50000,
+        default_enabled=True,
     ),
 ]
 

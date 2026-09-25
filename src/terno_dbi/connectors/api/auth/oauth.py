@@ -177,6 +177,8 @@ def _store_tokens(data_source, token_response: Dict[str, Any],
         bundle["REFRESH_TOKEN"] = token_response["refresh_token"]
     if token_response.get("scope"):
         bundle["GRANTED_SCOPES"] = token_response["scope"]
+    if token_response.get("instance_url"):
+        bundle["INSTANCE_URL"] = token_response["instance_url"]
     email = _connected_email(token_response)
     if email:
         bundle["CONNECTED_EMAIL"] = email

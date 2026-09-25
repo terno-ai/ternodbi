@@ -12,7 +12,7 @@ such as Google Analytics, YouTube, and Google Ads.
 from __future__ import annotations
 import os
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional, Union
 
 
 @dataclass(frozen=True)
@@ -64,6 +64,18 @@ _GOOGLE = OAuthProvider(
     },
 )
 
+_LINKEDIN = OAuthProvider(
+    name="linkedin",
+    authorization_url="https://www.linkedin.com/oauth/v2/authorization",
+    token_url="https://www.linkedin.com/oauth/v2/accessToken",
+    scope="r_ads r_ads_reporting",
+    client_id_env="TERNO_LINKEDIN_CLIENT_ID",
+    client_secret_env="TERNO_LINKEDIN_CLIENT_SECRET",
+    # LinkedIn's authorization-code flow authenticates with the client secret;
+    # it does not accept a PKCE challenge on this endpoint.
+    use_pkce=False,
+)
+
 _META = OAuthProvider(
     name="meta",
     authorization_url="https://www.facebook.com/v25.0/dialog/oauth",
@@ -73,6 +85,33 @@ _META = OAuthProvider(
     client_secret_env="TERNO_META_APP_SECRET",
     use_pkce=False,   # Meta's flow is not PKCE
 )
+
+
+_SALESFORCE_LOGIN_ENV = "TERNO_SALESFORCE_LOGIN_URL"
+_SALESFORCE_DEFAULT_LOGIN = "https://login.salesforce.com"
+
+
+def salesforce_login_url() -> str:
+    return ((os.getenv(_SALESFORCE_LOGIN_ENV, "").strip()
+             or _SALESFORCE_DEFAULT_LOGIN).rstrip("/"))
+
+
+def _salesforce() -> OAuthProvider:
+    base = salesforce_login_url()
+    return OAuthProvider(
+        name="salesforce",
+        authorization_url=f"{base}/services/oauth2/authorize",
+        token_url=f"{base}/services/oauth2/token",
+        # `api` is the read/write REST scope — Salesforce has no read-only
+        # variant, so least privilege is enforced by the connected app's profile
+        # and permission set, not here. `refresh_token` is what keeps the source
+        # alive past the org's session timeout; without it the connection dies
+        # in hours.
+        scope="api refresh_token",
+        client_id_env="TERNO_SALESFORCE_CLIENT_ID",
+        client_secret_env="TERNO_SALESFORCE_CLIENT_SECRET",
+        use_pkce=True,
+    )
 
 
 _HUBSPOT = OAuthProvider(
@@ -133,8 +172,9 @@ def _google_with_scope(scope: str) -> OAuthProvider:
 
 
 # Provider per connector key. Scope is the connector's own — read-only wherever
-# possible.
-_PROVIDERS: Dict[str, OAuthProvider] = {
+# possible. A value may be a callable when the provider's endpoints depend on
+# the environment and so must be built per call rather than at import.
+_PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
     "googleanalytics4": _google_with_scope(
         "https://www.googleapis.com/auth/analytics.readonly"),
     "youtube": _google_with_scope(
@@ -145,7 +185,19 @@ _PROVIDERS: Dict[str, OAuthProvider] = {
         "https://www.googleapis.com/auth/webmasters.readonly"),
     "google_ads": _google_with_scope(
         "https://www.googleapis.com/auth/adwords"),
+    # Read-only over the whole drive: file properties, the shared-drive list
+    # (which the narrower metadata scope cannot serve), and file contents.
+    "google_drive": _google_with_scope(
+        "https://www.googleapis.com/auth/drive.readonly"),
+    # Two scopes, because the split is real: the Sheets API can read a
+    # spreadsheet but cannot *find* one, so discovery goes through Drive.
+    # Spreadsheet contents come from the Sheets scope.
+    "google_sheets": _google_with_scope(
+        "https://www.googleapis.com/auth/spreadsheets.readonly "
+        "https://www.googleapis.com/auth/drive.readonly"),
     "meta_ads": _META,
+    "linkedin_ads": _LINKEDIN,
+    "salesforce": _salesforce,
     "microsoft_ads": _MICROSOFT,
     "hubspot": _HUBSPOT,
     "amazon_ads": _AMAZON_ADS,
@@ -154,7 +206,8 @@ _PROVIDERS: Dict[str, OAuthProvider] = {
 
 
 def get_provider(connector_key: str) -> Optional[OAuthProvider]:
-    return _PROVIDERS.get(connector_key)
+    entry = _PROVIDERS.get(connector_key)
+    return entry() if callable(entry) else entry
 
 
 __all__ = ["OAuthProvider", "get_provider"]
