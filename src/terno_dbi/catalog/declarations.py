@@ -572,8 +572,8 @@ _APIS: List[ConnectorSpec] = [
         auth_type=AuthType.OAUTH,
         description="File and folder metadata from My Drive and shared drives "
                     "— names, owners, types, sizes and modification times.",
-        scopes_label="Google Drive metadata read-only access (file names and "
-                     "properties, never file contents)",
+        scopes_label="Google Drive read-only access to My Drive and shared "
+                     "drives (never edits or deletes files)",
         has_account_list=True,
         has_fields=True,
         # A drive is current state, not a time series: the connector has no date
@@ -710,8 +710,8 @@ _APIS: List[ConnectorSpec] = [
         auth_type=AuthType.OAUTH,
         description="Read rows from Google Sheets spreadsheets as tabular "
                     "data, using each sheet's header row as its columns.",
-        scopes_label="Google Sheets read-only access, plus Drive file metadata "
-                     "to find your spreadsheets",
+        scopes_label="Google Sheets read-only access, plus Google Drive "
+                     "read-only access to find your spreadsheets",
         has_account_list=True,
         has_fields=True,
         # A spreadsheet is current state, not a time series; the connector has
