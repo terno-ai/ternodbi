@@ -570,8 +570,9 @@ _APIS: List[ConnectorSpec] = [
         category="Productivity",
         family=Family.API,
         auth_type=AuthType.OAUTH,
-        description="File and folder metadata from My Drive and shared drives "
-                    "— names, owners, types, sizes and modification times.",
+        description="Files and folders in My Drive and shared drives — names, "
+                    "owners, types, sizes and modification times — and the "
+                    "text of Docs, Sheets, Slides and plain-text files.",
         scopes_label="Google Drive read-only access to My Drive and shared "
                      "drives (never edits or deletes files)",
         has_account_list=True,
@@ -690,6 +691,23 @@ _APIS: List[ConnectorSpec] = [
                         required=False,
                         help_text="YYYY-MM-DD. Only files changed on or before "
                                   "this date.",
+                    ),
+                ],
+            ),
+            ReportType(
+                "FileContent", "File content", is_date_range_required=False,
+                settings=[
+                    ReportSetting(
+                        "file_id", label="File ID", required=True,
+                        help_text="The file to read — the `id` from the Files "
+                                  "or SharedWithMe report. Query it with the "
+                                  "account that holds it: 'myDrive', or the "
+                                  "shared drive's id.",
+                    ),
+                    ReportSetting(
+                        "max_chars", label="Max characters", required=False,
+                        help_text="Cut the content at this many characters. "
+                                  "Defaults to 50,000; at most 200,000.",
                     ),
                 ],
             ),
