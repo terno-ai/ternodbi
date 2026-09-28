@@ -33,6 +33,10 @@ _REPORTS = [
     ]},
     {"id": "SharedWithMe", "settings": list(_MODIFIED)},
     {"id": "Trashed", "settings": list(_MODIFIED)},
+    {"id": "FileContent", "settings": [
+        {"setting_id": "file_id", "required": True},
+        {"setting_id": "max_chars", "required": False},
+    ]},
 ]
 
 
@@ -501,3 +505,245 @@ class TestRegistration:
             "openid email https://www.googleapis.com/auth/drive.readonly")
         assert provider.scope.endswith("drive.readonly")
         assert "drive.metadata.readonly" not in provider.scope
+
+
+# --- file content ------------------------------------------------------------
+
+_DOC_MIME = "application/vnd.google-apps.document"
+_SHEET_MIME = "application/vnd.google-apps.spreadsheet"
+
+
+def _content_connector(meta, body=b"hello", scopes=None):
+    """A connector whose metadata call answers `meta` and whose download
+    answers `body`, recording every download."""
+    class _Scoped(_DS):
+        connection_json = {"ACCESS_TOKEN": "tok",
+                           **({"GRANTED_SCOPES": scopes} if scopes else {})}
+    downloads = []
+
+    def http(method, url, token, params=None):
+        return meta
+
+    def download(url, token, params, max_bytes):
+        downloads.append({"url": url, "params": params or {}})
+        if isinstance(body, Exception):
+            raise body
+        return body
+
+    return GoogleDriveConnector(_Scoped(), http=http, download=download), downloads
+
+
+def _content_spec(file_id="f1", accounts=(MY_DRIVE,), fields=(), **settings):
+    return _spec(fields=fields, accounts=accounts, report_type="FileContent",
+                 settings={"file_id": file_id, **settings})
+
+
+class TestFileContent:
+    def test_a_google_doc_is_exported_as_plain_text(self):
+        conn, downloads = _content_connector(
+            {"id": "f1", "name": "Plan", "mimeType": _DOC_MIME},
+            body="Q3 plan \u2014 draft".encode())
+        result = conn.query(_content_spec())
+        assert downloads[0]["url"].endswith("/files/f1/export")
+        assert downloads[0]["params"] == {"mimeType": "text/plain"}
+        row = result.rows[0]
+        assert row["content"] == "Q3 plan \u2014 draft"
+        assert row["name"] == "Plan"
+        assert row["truncated"] is False
+
+    def test_a_google_sheet_exports_csv_and_says_only_the_first_tab(self):
+        conn, downloads = _content_connector(
+            {"id": "f1", "name": "Sales", "mimeType": _SHEET_MIME},
+            body=b"Region,Revenue\nEU,10\n")
+        result = conn.query(_content_spec())
+        assert downloads[0]["params"] == {"mimeType": "text/csv"}
+        assert result.rows[0]["content"].startswith("Region,Revenue")
+        assert any("first tab" in n for n in result.notes)
+
+    def test_an_uploaded_text_file_is_downloaded(self):
+        conn, downloads = _content_connector(
+            {"id": "f1", "name": "a.csv", "mimeType": "text/csv", "size": "5"})
+        conn.query(_content_spec())
+        assert downloads[0]["url"].endswith("/files/f1")
+        assert downloads[0]["params"]["alt"] == "media"
+
+    def test_a_utf8_bom_is_stripped(self):
+        conn, _ = _content_connector(
+            {"id": "f1", "mimeType": "text/plain"}, body=b"\xef\xbb\xbfhi")
+        assert conn.query(_content_spec()).rows[0]["content"] == "hi"
+
+    def test_content_is_truncated_at_max_chars(self):
+        conn, _ = _content_connector(
+            {"id": "f1", "mimeType": "text/plain"}, body=b"abcdef")
+        result = conn.query(_content_spec(max_chars="4"))
+        assert result.rows[0]["content"] == "abcd"
+        assert result.rows[0]["truncated"] is True
+        assert result.rows[0]["characters"] == 4
+        assert any("max_chars" in n for n in result.notes)
+
+    @pytest.mark.parametrize("value", ["0", "abc", "999999999"])
+    def test_a_bad_max_chars_is_refused(self, value):
+        conn, downloads = _content_connector(
+            {"id": "f1", "mimeType": "text/plain"})
+        with pytest.raises(ApiError) as exc:
+            conn.query(_content_spec(max_chars=value))
+        assert exc.value.code == ErrorCode.INVALID_SETTING
+        assert downloads == []
+
+    @pytest.mark.parametrize("mime", [
+        "application/pdf",
+        "image/png",
+        "application/vnd.google-apps.folder",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ])
+    def test_a_binary_file_is_refused_without_downloading(self, mime):
+        conn, downloads = _content_connector(
+            {"id": "f1", "name": "x", "mimeType": mime})
+        with pytest.raises(ApiError) as exc:
+            conn.query(_content_spec())
+        assert exc.value.code == ErrorCode.INVALID_SETTING
+        assert mime in exc.value.message
+        assert downloads == []
+
+    def test_binary_bytes_behind_a_text_type_are_refused(self):
+        conn, _ = _content_connector(
+            {"id": "f1", "mimeType": "text/plain"}, body=b"PK\x03\x04\x00\x00")
+        with pytest.raises(ApiError) as exc:
+            conn.query(_content_spec())
+        assert exc.value.code == ErrorCode.INVALID_SETTING
+
+    def test_an_oversized_upload_is_refused_before_downloading(self):
+        conn, downloads = _content_connector(
+            {"id": "f1", "mimeType": "text/plain", "size": str(11 * 1024 * 1024)})
+        with pytest.raises(ApiError) as exc:
+            conn.query(_content_spec())
+        assert "10 MB" in exc.value.message
+        assert downloads == []
+
+    def test_a_shared_drive_file_is_read_with_its_drive_as_account(self):
+        conn, downloads = _content_connector(
+            {"id": "f1", "mimeType": "text/plain", "driveId": "0ABCdef"})
+        conn.query(_content_spec(accounts=("0ABCdef",)))
+        assert len(downloads) == 1
+
+    @pytest.mark.parametrize("drive_id, account", [
+        ("0ABCdef", MY_DRIVE),     # shared-drive file asked for via My Drive
+        (None, "0ABCdef"),         # My Drive file asked for via a shared drive
+        ("0AXYZ12", "0ABCdef"),    # a different shared drive
+    ])
+    def test_a_file_outside_the_account_is_forbidden(self, drive_id, account):
+        # The allowlist is enforced on accounts; a bare file id must not read
+        # past it.
+        meta = {"id": "f1", "mimeType": "text/plain"}
+        if drive_id:
+            meta["driveId"] = drive_id
+        conn, downloads = _content_connector(meta)
+        with pytest.raises(ApiError) as exc:
+            conn.query(_content_spec(accounts=(account,)))
+        assert exc.value.code == ErrorCode.ACCOUNT_FORBIDDEN
+        assert downloads == []
+
+    def test_exactly_one_account_is_required(self):
+        conn, _ = _content_connector({"id": "f1", "mimeType": "text/plain"})
+        with pytest.raises(ApiError) as exc:
+            conn.query(_content_spec(accounts=(MY_DRIVE, "0ABCdef")))
+        assert exc.value.code == ErrorCode.INVALID_SETTING
+
+    @pytest.mark.parametrize("file_id", ["f1/export", "../drives", "a?alt=media"])
+    def test_a_file_id_that_is_not_an_id_is_refused(self, file_id):
+        conn, _ = _content_connector({"id": "f1", "mimeType": "text/plain"})
+        with pytest.raises(ApiError) as exc:
+            conn.query(_content_spec(file_id=file_id))
+        assert exc.value.code == ErrorCode.INVALID_SETTING
+
+    def test_file_id_is_a_required_setting(self):
+        conn, _ = _content_connector({"id": "f1", "mimeType": "text/plain"})
+        with pytest.raises(ApiError) as exc:
+            conn.query(_spec(fields=(), report_type="FileContent"))
+        assert exc.value.code == ErrorCode.MISSING_SETTING
+
+    def test_requested_fields_limit_the_row(self):
+        conn, _ = _content_connector({"id": "f1", "name": "a", "mimeType": "text/plain"})
+        row = conn.query(_content_spec(fields=("name", "content"))).rows[0]
+        assert set(row) == {"name", "content"}
+
+    def test_an_unknown_field_is_refused(self):
+        conn, _ = _content_connector({"id": "f1", "mimeType": "text/plain"})
+        with pytest.raises(ApiError) as exc:
+            conn.query(_content_spec(fields=("size",)))
+        assert exc.value.code == ErrorCode.INVALID_FIELD
+
+    def test_list_fields_is_per_report(self):
+        conn, _ = _content_connector({})
+        assert "content" in {f.id for f in conn.list_fields("FileContent")}
+        assert "content" not in {f.id for f in conn.list_fields("Files")}
+
+    def test_a_drive_file_only_grant_is_refused(self):
+        conn, downloads = _content_connector(
+            {"id": "f1", "mimeType": "text/plain"},
+            scopes="https://www.googleapis.com/auth/drive.file")
+        with pytest.raises(ApiError) as exc:
+            conn.query(_content_spec())
+        assert exc.value.code == ErrorCode.AUTH_EXPIRED
+        assert downloads == []
+
+    def test_a_401_on_download_maps_to_auth_expired(self):
+        from terno_dbi.connectors.api.sources.google_drive import _AuthError
+        conn, _ = _content_connector(
+            {"id": "f1", "mimeType": _DOC_MIME}, body=_AuthError())
+        with pytest.raises(ApiError) as exc:
+            conn.query(_content_spec())
+        assert exc.value.code == ErrorCode.AUTH_EXPIRED
+
+    def test_the_catalog_declares_the_report(self):
+        from terno_dbi.catalog.declarations import DECLARED_CONNECTORS
+        drive = next(c for c in DECLARED_CONNECTORS if c.key == "google_drive")
+        report = next(r for r in drive.report_types if r.id == "FileContent")
+        settings = {s.setting_id: s.required for s in report.settings}
+        assert settings == {"file_id": True, "max_chars": False}
+
+
+class TestDefaultDownload:
+    """The real transport's size ceiling, against a fake `requests`."""
+
+    def _fake_requests(self, monkeypatch, status=200, chunks=(b"ok",)):
+        import sys
+        import types
+
+        class Resp:
+            status_code = status
+            text = ""
+
+            def json(self):
+                return {"error": {"message": "nope"}}
+
+            def iter_content(self, chunk_size):
+                return iter(chunks)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        fake = types.SimpleNamespace(get=lambda *a, **k: Resp())
+        monkeypatch.setitem(sys.modules, "requests", fake)
+
+    def test_bytes_are_joined(self, monkeypatch):
+        from terno_dbi.connectors.api.sources.google_drive import _default_download
+        self._fake_requests(monkeypatch, chunks=(b"ab", b"cd"))
+        assert _default_download("u", "t", None, 10) == b"abcd"
+
+    def test_a_stream_past_the_ceiling_is_abandoned(self, monkeypatch):
+        from terno_dbi.connectors.api.sources.google_drive import _default_download
+        self._fake_requests(monkeypatch, chunks=(b"abcdef", b"ghij"))
+        with pytest.raises(ApiError) as exc:
+            _default_download("u", "t", None, 8)
+        assert exc.value.code == ErrorCode.INVALID_SETTING
+
+    def test_an_error_status_is_surfaced(self, monkeypatch):
+        from terno_dbi.connectors.api.sources.google_drive import _default_download
+        self._fake_requests(monkeypatch, status=403)
+        with pytest.raises(ApiError) as exc:
+            _default_download("u", "t", None, 8)
+        assert exc.value.details["status"] == 403

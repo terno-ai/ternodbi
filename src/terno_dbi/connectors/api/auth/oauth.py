@@ -116,27 +116,49 @@ def start_authorization(
     }
 
 
-# A Shopify store host: '<store>.myshopify.com'. The instance is templated into a
-# URL we call server-side, so it must be validated strictly (SSRF guard) — only a
-# myshopify.com subdomain is ever allowed.
+# Hosts an instance-templated provider may be called at. The instance goes into
+# a URL we request server-side, so each of these is an SSRF guard, not a
+# convenience check — only hosts the provider actually serves are ever allowed.
 _MYSHOPIFY_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,59}\.myshopify\.com$")
+# Salesforce's two login hosts, or any My Domain / sandbox host, e.g.
+# 'acme.develop.my.salesforce.com'.
+_SALESFORCE_DEFAULT_LOGIN = "login.salesforce.com"
+_SALESFORCE_RE = re.compile(r"^(?:login|test)\.salesforce\.com$"
+                            r"|^[a-z0-9][a-z0-9.-]{0,99}\.my\.salesforce\.com$")
 
 
 def _validated_instance(provider, connector_key: str, instance: str) -> str:
     from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
     if not provider.requires_instance:
         return ""
-    shop = (instance or "").strip().lower()
+    host = (instance or "").strip().lower()
+
+    if connector_key == "salesforce":
+        # Most users give nothing: login.salesforce.com works out which org they
+        # belong to, and the token response names the org's API host. A custom
+        # (My Domain) host is only for orgs that block that generic login.
+        host = re.sub(r"^https?://", "", host).split("/", 1)[0]
+        if not host:
+            return _SALESFORCE_DEFAULT_LOGIN
+        if not _SALESFORCE_RE.match(host):
+            raise ApiError(
+                ErrorCode.UPSTREAM_ERROR,
+                f"{connector_key} custom domain must be your org's My Domain, "
+                f"e.g. 'acme.my.salesforce.com'.",
+                retriable=False,
+            )
+        return host
+
     # Accept a bare store name too, then normalise to the full host.
-    if shop and "." not in shop:
-        shop = f"{shop}.myshopify.com"
-    if not _MYSHOPIFY_RE.match(shop):
+    if host and "." not in host:
+        host = f"{host}.myshopify.com"
+    if not _MYSHOPIFY_RE.match(host):
         raise ApiError(
             ErrorCode.UPSTREAM_ERROR,
             f"{connector_key} needs a valid store, e.g. 'your-store.myshopify.com'.",
             retriable=False,
         )
-    return shop
+    return host
 
 
 def _default_post(url: str, data: Dict[str, str]) -> Dict[str, Any]:
@@ -177,9 +199,11 @@ def _store_tokens(data_source, token_response: Dict[str, Any],
         bundle["REFRESH_TOKEN"] = token_response["refresh_token"]
     if token_response.get("scope"):
         bundle["GRANTED_SCOPES"] = token_response["scope"]
-    # Per-tenant API hosts: Salesforce issues the token from a login host but
-    # serves the API from the org's own instance, named here. Re-read on every
-    # refresh, because an org can be moved between instances.
+    # `INSTANCE` (below) is where the *user* said to authenticate; INSTANCE_URL
+    # is where the provider says its API actually lives, and for Salesforce the
+    # two differ: you log in at login.salesforce.com and then query
+    # acme.my.salesforce.com. Only the token response knows the second, and it
+    # is re-read on every refresh because an org can be moved between instances.
     if token_response.get("instance_url"):
         bundle["INSTANCE_URL"] = token_response["instance_url"]
     email = _connected_email(token_response)

@@ -87,35 +87,16 @@ _META = OAuthProvider(
 )
 
 
-# Salesforce authenticates against login.salesforce.com for production orgs and
-# test.salesforce.com for sandboxes, and an org with a My Domain may use its own
-# host. The endpoint is therefore per-deployment rather than a constant, and is
-# read at call time so a sandbox can be pointed at without a code release.
-_SALESFORCE_LOGIN_ENV = "TERNO_SALESFORCE_LOGIN_URL"
-_SALESFORCE_DEFAULT_LOGIN = "https://login.salesforce.com"
-
-
-def salesforce_login_url() -> str:
-    return ((os.getenv(_SALESFORCE_LOGIN_ENV, "").strip()
-             or _SALESFORCE_DEFAULT_LOGIN).rstrip("/"))
-
-
-def _salesforce() -> OAuthProvider:
-    base = salesforce_login_url()
-    return OAuthProvider(
-        name="salesforce",
-        authorization_url=f"{base}/services/oauth2/authorize",
-        token_url=f"{base}/services/oauth2/token",
-        # `api` is the read/write REST scope — Salesforce has no read-only
-        # variant, so least privilege is enforced by the connected app's profile
-        # and permission set, not here. `refresh_token` is what keeps the source
-        # alive past the org's session timeout; without it the connection dies
-        # in hours.
-        scope="api refresh_token",
-        client_id_env="TERNO_SALESFORCE_CLIENT_ID",
-        client_secret_env="TERNO_SALESFORCE_CLIENT_SECRET",
-        use_pkce=True,
-    )
+_SALESFORCE = OAuthProvider(
+    name="salesforce",
+    authorization_url="https://{instance}/services/oauth2/authorize",
+    token_url="https://{instance}/services/oauth2/token",
+    scope="api refresh_token",
+    client_id_env="TERNO_SALESFORCE_CLIENT_ID",
+    client_secret_env="TERNO_SALESFORCE_CLIENT_SECRET",
+    use_pkce=True,
+    requires_instance=True,
+)
 
 
 _HUBSPOT = OAuthProvider(
@@ -201,7 +182,7 @@ _PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
         "https://www.googleapis.com/auth/drive.readonly"),
     "meta_ads": _META,
     "linkedin_ads": _LINKEDIN,
-    "salesforce": _salesforce,
+    "salesforce": _SALESFORCE,
     "microsoft_ads": _MICROSOFT,
     "hubspot": _HUBSPOT,
     "amazon_ads": _AMAZON_ADS,
