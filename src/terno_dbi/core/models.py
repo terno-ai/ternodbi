@@ -1039,6 +1039,7 @@ class ConnectorAccountSelection(models.Model):
     account_id = models.CharField(max_length=255)
     account_name = models.CharField(max_length=255, blank=True)
     enabled = models.BooleanField(default=True)
+    writes_enabled = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -1054,3 +1055,58 @@ class ConnectorAccountSelection(models.Model):
     def __str__(self):
         state = "on" if self.enabled else "off"
         return f"{self.data_source_id}:{self.account_id} ({state})"
+
+
+class ConnectorWriteLog(models.Model):
+    """An append-only audit record of one connector write action.
+
+    Every `execute_action` — success or failure — writes one row, so there is a
+    durable trail of who mutated which external account, with what params, and
+    the before/after state. This is the write counterpart of the token-lifecycle
+    audit trail (which is kept, never deleted, for the same reason). Rows are
+    never updated after creation; the table only grows.
+    """
+
+    class Status(models.TextChoices):
+        SUCCESS = "success", "Success"
+        ERROR = "error", "Error"
+
+    organisation = models.ForeignKey(
+        CoreOrganisation, on_delete=models.CASCADE,
+        related_name="connector_write_logs",
+    )
+    data_source = models.ForeignKey(
+        DataSource, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="write_logs",
+    )
+    # The user the token was minted for — who is authorised, not who created the
+    # token (mirrors ServiceToken.created_for). Nullable so a deleted user does
+    # not erase the audit row.
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="connector_write_logs",
+    )
+    token_name = models.CharField(max_length=255, blank=True)
+    connector_key = models.CharField(max_length=100, blank=True)
+    account_id = models.CharField(max_length=255)
+    action = models.CharField(max_length=100)
+    params = models.JSONField(default=dict, blank=True)
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.SUCCESS)
+    summary = models.CharField(max_length=500, blank=True)
+    before = models.JSONField(null=True, blank=True)
+    after = models.JSONField(null=True, blank=True)
+    error_code = models.CharField(max_length=64, blank=True)
+    error_message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "terno_connector_write_log"
+        indexes = [
+            models.Index(fields=["organisation", "-created_at"]),
+            models.Index(fields=["data_source", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return (f"{self.action} {self.connector_key}:{self.account_id} "
+                f"[{self.status}] @ {self.created_at:%Y-%m-%d %H:%M}")

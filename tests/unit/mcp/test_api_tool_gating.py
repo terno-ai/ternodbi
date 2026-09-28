@@ -87,3 +87,27 @@ class TestGateOn:
     def test_list_datasources_uses_the_richer_description(self):
         assert _list_ds_description() != query_server._LIST_DATASOURCES_DESC_STABLE
         assert "data_query" in _list_ds_description()
+
+
+_WRITE_TOOLS = {"list_actions", "execute_action"}
+
+
+class TestConnectorWriteGate:
+    """execute_action/list_actions ride their own flag, independent of the API
+    flag, so enabling reads never implicitly exposes the write tools."""
+
+    def test_write_tools_hidden_even_when_api_tools_are_on(self, monkeypatch):
+        monkeypatch.setenv("TERNO_ENABLE_API_MCP_TOOLS", "true")
+        monkeypatch.setenv("TERNO_ENABLE_CONNECTOR_WRITE_TOOLS", "")
+        assert _WRITE_TOOLS.isdisjoint(_tool_names())
+
+    def test_write_tool_call_is_rejected_when_gated_off(self, monkeypatch):
+        monkeypatch.setenv("TERNO_ENABLE_CONNECTOR_WRITE_TOOLS", "")
+        result = asyncio.run(query_server.call_tool("execute_action", {}))
+        assert result.isError
+        text = " ".join(b.text for b in result.content).lower()
+        assert "unknown tool" in text
+
+    def test_write_tools_appear_only_when_their_flag_is_on(self, monkeypatch):
+        monkeypatch.setenv("TERNO_ENABLE_CONNECTOR_WRITE_TOOLS", "true")
+        assert _WRITE_TOOLS <= _tool_names()

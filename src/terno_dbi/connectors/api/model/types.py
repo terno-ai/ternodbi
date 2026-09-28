@@ -192,8 +192,68 @@ class QueryResult:
         }
 
 
+@dataclass(frozen=True)
+class Action:
+    """One write action a connector can perform on an account.
+
+    Mirrors the read side's `Field`: `id` is what a caller passes to
+    `execute_action`, `schema` is the JSON Schema for its `params`, and
+    `destructive` marks an action that changes live state in a way that is not
+    trivially reversible (spend-affecting, status changes). Discovery via
+    `list_actions` is read-only; only `execute_action` mutates.
+    """
+
+    id: str
+    name: str
+    description: str
+    schema: Dict[str, Any] = field(default_factory=dict)
+    destructive: bool = True
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "schema": self.schema,
+            "destructive": self.destructive,
+        }
+
+
+@dataclass(frozen=True)
+class ActionResult:
+    """The outcome of an `execute_action` call.
+
+    `before`/`after` carry the entity state around the change so a caller (and
+    the audit log) can see exactly what was mutated — the read-before-write
+    snapshot both incumbents rely on. `summary` is a one-line human description.
+    """
+
+    action: str
+    account: str
+    summary: str
+    before: Optional[Dict[str, Any]] = None
+    after: Optional[Dict[str, Any]] = None
+    details: Dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> Dict[str, Any]:
+        d = {
+            "action": self.action,
+            "account": self.account,
+            "summary": self.summary,
+        }
+        if self.before is not None:
+            d["before"] = self.before
+        if self.after is not None:
+            d["after"] = self.after
+        if self.details:
+            d["details"] = dict(self.details)
+        return d
+
+
 __all__ = [
     "Account",
+    "Action",
+    "ActionResult",
     "Compare",
     "CompareShow",
     "CompareType",

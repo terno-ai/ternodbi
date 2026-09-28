@@ -17,7 +17,14 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
 from terno_dbi.connectors.api.model.settings_validation import validate_settings
-from terno_dbi.connectors.api.model.types import Account, Field, QueryResult, QuerySpec
+from terno_dbi.connectors.api.model.types import (
+    Account,
+    Action,
+    ActionResult,
+    Field,
+    QueryResult,
+    QuerySpec,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +88,34 @@ class ApiConnector(ABC):
     @abstractmethod
     def _run(self, spec: QuerySpec) -> QueryResult:
         """Lower a validated QuerySpec to the provider's request and run it."""
+
+    # -- write actions ------------------------------------------------------
+
+    def list_actions(self) -> List[Action]:
+        """Write actions this connector can perform, with their param schemas.
+
+        Read-only discovery — it mutates nothing. The default is an empty list:
+        a connector is read-only until it opts in by overriding this. Matches the
+        stance of Supermetrics/Windsor, where most connectors expose no writes.
+        """
+        return []
+
+    def execute_action(
+        self, action_id: str, account: str, params: Optional[Dict[str, Any]] = None
+    ) -> ActionResult:
+        """Perform one write action against one account.
+
+        The default refuses: a connector must override this (and `list_actions`)
+        to support writes. Callers reach this only through the pipeline's
+        write-dispatch, which has already enforced the per-account write gate —
+        an individual connector never authorises accounts itself, exactly as with
+        reads (`query`).
+        """
+        raise ApiError(
+            ErrorCode.UNKNOWN_ACTION,
+            f"{self.key} does not support write actions.",
+            retriable=False,
+        )
 
     # -- auth ---------------------------------------------------------------
 

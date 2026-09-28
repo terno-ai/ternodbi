@@ -111,6 +111,50 @@ def test_restrict_is_noop_without_a_selection(org):
     assert sel.restrict_to_selection(ds, None) is None
 
 
+@pytest.mark.django_db
+def test_writes_are_off_by_default_even_when_reads_are_on(org):
+    ds = _ds(org)
+    sel.sync_account_selections(ds, [_Acct("1", "A"), _Acct("2", "B")])
+    assert sel.enabled_account_ids(ds) == {"1", "2"}     # reads default on
+    assert sel.writes_enabled_account_ids(ds) == set()   # writes default off
+
+
+@pytest.mark.django_db
+def test_writes_enabled_is_an_explicit_opt_in(org):
+    ds = _ds(org)
+    sel.sync_account_selections(ds, [_Acct("1", "A"), _Acct("2", "B")])
+    count = sel.set_writes_enabled_accounts(ds, ["1"])
+    assert count == 1
+    assert sel.writes_enabled_account_ids(ds) == {"1"}
+    # Opting into writes must not disturb the independent read flags.
+    assert sel.enabled_account_ids(ds) == {"1", "2"}
+
+
+@pytest.mark.django_db
+def test_set_writes_enabled_ignores_unknown_ids_and_can_clear(org):
+    ds = _ds(org)
+    sel.sync_account_selections(ds, [_Acct("1", "A")])
+    assert sel.set_writes_enabled_accounts(ds, ["1", "999"]) == 1   # 999 has no row
+    assert sel.writes_enabled_account_ids(ds) == {"1"}
+    sel.set_writes_enabled_accounts(ds, [])                          # revoke writes
+    assert sel.writes_enabled_account_ids(ds) == set()
+
+
+@pytest.mark.django_db
+def test_authorise_write_account_denies_until_opted_in(org):
+    from terno_dbi.connectors.api.pipeline.dispatch import authorise_write_account
+    from terno_dbi.connectors.api.model.errors import ApiError
+
+    ds = _ds(org)
+    sel.sync_account_selections(ds, [_Acct("1", "A")])
+    with pytest.raises(ApiError):                # writes off by default -> denied
+        authorise_write_account(ds, "1")
+    sel.set_writes_enabled_accounts(ds, ["1"])
+    authorise_write_account(ds, "1")             # now permitted, no raise
+    with pytest.raises(ApiError):                # a different account still denied
+        authorise_write_account(ds, "2")
+
+
 def test_connected_email_reads_id_token_claim():
     import base64 as _b64, json as _json
     from terno_dbi.connectors.api.auth.oauth import _connected_email

@@ -52,6 +52,7 @@ def sync_account_selections(data_source, accounts) -> List[dict]:
                 "account_id": r.account_id,
                 "account_name": r.account_name,
                 "enabled": r.enabled,
+                "writes_enabled": r.writes_enabled,
             }
             for r in rows
         ),
@@ -72,6 +73,44 @@ def set_enabled_accounts(data_source, account_ids: Iterable[str]) -> int:
         if should:
             enabled_count += 1
     return enabled_count
+
+
+def set_writes_enabled_accounts(data_source, account_ids: Iterable[str]) -> int:
+    """Opt specific accounts into write actions. Absent = writes off.
+
+    Parallel to `set_enabled_accounts` but for the `writes_enabled` flag. An
+    account must already exist as a selection row (created on connect); this only
+    flips the write flag, it does not create rows or affect read `enabled`.
+    """
+    from terno_dbi.core.models import ConnectorAccountSelection
+
+    wanted = {str(a) for a in account_ids}
+    writable_count = 0
+    for row in ConnectorAccountSelection.objects.filter(data_source=data_source):
+        should = row.account_id in wanted
+        if row.writes_enabled != should:
+            row.writes_enabled = should
+            row.save(update_fields=["writes_enabled", "updated_at"])
+        if should:
+            writable_count += 1
+    return writable_count
+
+
+def writes_enabled_account_ids(data_source) -> Set[str]:
+    """The accounts opted into write actions for this connection.
+
+    Unlike `enabled_account_ids`, this never returns None: writes are off by
+    default, so "no rows" and "no account opted in" both mean the empty set —
+    an empty set that denies every write, which is the safe default.
+    """
+    from terno_dbi.core.models import ConnectorAccountSelection
+
+    rows = (
+        ConnectorAccountSelection.objects
+        .filter(data_source=data_source, writes_enabled=True)
+        .values_list("account_id", flat=True)
+    )
+    return set(rows)
 
 
 def enabled_account_ids(data_source) -> Optional[Set[str]]:
@@ -101,6 +140,8 @@ def restrict_to_selection(
 __all__ = [
     "sync_account_selections",
     "set_enabled_accounts",
+    "set_writes_enabled_accounts",
     "enabled_account_ids",
+    "writes_enabled_account_ids",
     "restrict_to_selection",
 ]

@@ -253,6 +253,27 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
             row_count=_COUNT,
         ),
     },
+    "list_actions": {
+        "title": "List write actions",
+        "hints": dict(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True),
+        "output": _out(
+            "The write actions this source supports, each with a JSON schema for its params. "
+            "Discovery only — nothing is changed.",
+            actions=_ROWS,
+            count=_COUNT,
+        ),
+    },
+    "execute_action": {
+        "title": "Perform a write action",
+        "hints": dict(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True),
+        "output": _out(
+            "The outcome of the action, with before/after state where available.",
+            success={"type": "boolean", "description": "Whether the action was applied."},
+            summary={"type": "string", "description": "One-line description of what changed."},
+            before={"type": "object", "additionalProperties": True},
+            after={"type": "object", "additionalProperties": True},
+        ),
+    },
     "get_org_prompt": {
         "title": "Read the organisation prompt",
         "hints": dict(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False),

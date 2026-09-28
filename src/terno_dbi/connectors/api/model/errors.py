@@ -28,6 +28,9 @@ class ErrorCode:
     MIXED_CURRENCY = "MIXED_CURRENCY"
     UPSTREAM_ERROR = "UPSTREAM_ERROR"
     TIMEOUT = "TIMEOUT"
+    # Write actions (execute_action)
+    UNKNOWN_ACTION = "UNKNOWN_ACTION"
+    INVALID_ACTION_PARAMS = "INVALID_ACTION_PARAMS"
 
     # Codes whose cause is transient — retrying later may succeed.
     _RETRIABLE = frozenset({RATE_LIMITED, UPSTREAM_ERROR, TIMEOUT})

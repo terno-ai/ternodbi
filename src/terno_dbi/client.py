@@ -153,6 +153,20 @@ class TernoDBIClient:
         response = self._http.get(url, headers=self._get_headers())
         return self._handle_response(response)
 
+    def list_actions(self, datasource: str) -> Dict:
+        """The write actions a source supports (read-only discovery)."""
+        url = f"{self.base_url}/api/query/datasources/{datasource}/actions/"
+        response = self._http.get(url, headers=self._get_headers())
+        return self._handle_response(response)
+
+    def execute_action(self, datasource: str, action: str, account: str,
+                       params: Optional[Dict] = None) -> Dict:
+        """Perform one write action against one account on a source."""
+        url = f"{self.base_url}/api/query/datasources/{datasource}/actions/execute/"
+        payload = {"action": action, "account": account, "params": params or {}}
+        response = self._http.post(url, json=payload, headers=self._get_headers())
+        return self._handle_response(response)
+
     def create_datasource(self, display_name: str, db_type: str,
                           connection_str: str,
                           connection_json: Optional[Dict] = None,

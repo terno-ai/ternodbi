@@ -46,6 +46,7 @@ def test_only_existing_scope_names_are_declared():
     already built with these names and is enforced across 11 views."""
     assert ALL_SCOPES == {
         "query:read", "query:execute", "admin:read", "admin:write", "admin:sync",
+        "connector:write",
     }
     assert not any(s.startswith("ternodbi:") for s in ALL_SCOPES)
 
@@ -80,6 +81,28 @@ def test_granted_scopes_strips_write_for_a_non_admin():
     requested = {QUERY_READ, ADMIN_WRITE, ADMIN_SYNC}
     assert granted_scopes(requested, can_write=True) == requested
     assert granted_scopes(requested, can_write=False) == {QUERY_READ}
+
+
+def test_connector_write_is_a_write_scope_stripped_from_non_admins():
+    """connector:write mutates external marketing accounts, so a non-admin must
+    never receive it even if the client requested it."""
+    from terno_dbi.oauth.scopes import CONNECTOR_WRITE, WRITE_SCOPES
+
+    assert CONNECTOR_WRITE in WRITE_SCOPES
+    requested = {QUERY_READ, CONNECTOR_WRITE}
+    assert granted_scopes(requested, can_write=True) == requested
+    assert granted_scopes(requested, can_write=False) == {QUERY_READ}
+
+
+def test_execute_action_needs_connector_write_but_list_actions_is_read_only():
+    """Discovery (list_actions) is read; execution (execute_action) mutates."""
+    from terno_dbi.oauth.scopes import CONNECTOR_WRITE
+
+    assert TOOL_SCOPES["execute_action"] == CONNECTOR_WRITE
+    assert TOOL_SCOPES["list_actions"] == QUERY_READ
+    assert tool_is_allowed("execute_action", {CONNECTOR_WRITE})
+    assert not tool_is_allowed("execute_action", {QUERY_READ, ADMIN_WRITE})
+    assert not tool_is_allowed("execute_action", {QUERY_READ})
 
 
 def test_tool_scope_mapping_matches_the_view_decorators():

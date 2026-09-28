@@ -23,6 +23,7 @@ QUERY_EXECUTE = "query:execute"
 ADMIN_READ = "admin:read"
 ADMIN_WRITE = "admin:write"
 ADMIN_SYNC = "admin:sync"
+CONNECTOR_WRITE = "connector:write"
 
 SCOPE_DESCRIPTIONS: Dict[str, str] = {
     QUERY_READ: "View your datasource connections, tables and columns, saved memories, and organisation context",
@@ -30,13 +31,14 @@ SCOPE_DESCRIPTIONS: Dict[str, str] = {
     ADMIN_READ: "Inspect table statistics and sample rows, used to write descriptions",
     ADMIN_WRITE: "Add, edit, and delete datasource connections, table and column metadata, saved memories, and the organisation prompt",
     ADMIN_SYNC: "Refresh schema metadata from your databases",
+    CONNECTOR_WRITE: "Make changes on your connected marketing accounts — for example pause or enable campaigns and adjust budgets on Google Ads",
 }
 
 ALL_SCOPES: FrozenSet[str] = frozenset(SCOPE_DESCRIPTIONS)
 
 DEFAULT_SCOPES: FrozenSet[str] = frozenset({QUERY_READ, QUERY_EXECUTE})
 
-WRITE_SCOPES: FrozenSet[str] = frozenset({ADMIN_WRITE, ADMIN_SYNC})
+WRITE_SCOPES: FrozenSet[str] = frozenset({ADMIN_WRITE, ADMIN_SYNC, CONNECTOR_WRITE})
 CREDENTIAL_TOOLS: FrozenSet[str] = frozenset({"add_datasource", "validate_connection"})
 
 # tool name -> the scope required to use it. None means always available.
@@ -61,6 +63,8 @@ TOOL_SCOPES: Dict[str, Optional[str]] = {
     "list_fields": QUERY_READ,
     "data_query": QUERY_EXECUTE,
     "get_query_results": QUERY_READ,
+    "list_actions": QUERY_READ,
+    "execute_action": CONNECTOR_WRITE,
     # --- admin service (transcribed from @require_scope) ---
     "get_table_info": ADMIN_READ,
     "validate_connection": ADMIN_WRITE,

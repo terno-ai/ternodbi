@@ -23,7 +23,14 @@ import re
 from typing import Any, Callable, Dict, List, Optional
 from terno_dbi.connectors.api.model.base import ApiConnector
 from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode, invalid_field
-from terno_dbi.connectors.api.model.types import Account, Field, QueryResult, QuerySpec
+from terno_dbi.connectors.api.model.types import (
+    Account,
+    Action,
+    ActionResult,
+    Field,
+    QueryResult,
+    QuerySpec,
+)
 from terno_dbi.connectors.api.sources._multi import gather_accounts
 
 logger = logging.getLogger(__name__)
@@ -384,6 +391,65 @@ def _ads_error(resp) -> ApiError:
     )
 
 
+def _id_prop(entity: str) -> Dict[str, Any]:
+    return {"type": "string",
+            "description": f"Numeric {entity} ID (digits only)."}
+
+
+# The write actions this connector exposes. Deliberately narrow and safe: pause
+# /enable and budget changes — the high-value, well-understood verbs both
+# Supermetrics and Windsor lead with. No hard delete: turning something off is
+# `pause_*`, never REMOVED. `enable_*` is called out as spend-starting so a
+# caller (and the confirmation UI) treats it as the deliberate step it is.
+_ACTIONS: List[Action] = [
+    Action(
+        "pause_campaign", "Pause campaign",
+        "Pause a campaign so it stops serving and spending. Reversible with "
+        "enable_campaign.",
+        schema={"type": "object",
+                "properties": {"campaign_id": _id_prop("campaign")},
+                "required": ["campaign_id"], "additionalProperties": False},
+    ),
+    Action(
+        "enable_campaign", "Enable campaign",
+        "Enable (unpause) a campaign so it can serve. This starts spend — treat "
+        "it as a deliberate, separately confirmed step.",
+        schema={"type": "object",
+                "properties": {"campaign_id": _id_prop("campaign")},
+                "required": ["campaign_id"], "additionalProperties": False},
+    ),
+    Action(
+        "set_campaign_budget", "Set campaign budget",
+        "Set a campaign's daily budget, in the account's own currency (e.g. 50 "
+        "means 50.00/day). Affects spend.",
+        schema={"type": "object",
+                "properties": {
+                    "campaign_id": _id_prop("campaign"),
+                    "amount": {"type": "number", "exclusiveMinimum": 0,
+                               "description": "New daily budget in account "
+                                              "currency units, e.g. 50 for 50.00."},
+                },
+                "required": ["campaign_id", "amount"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "pause_ad_group", "Pause ad group",
+        "Pause an ad group so it stops serving. Reversible with enable_ad_group.",
+        schema={"type": "object",
+                "properties": {"ad_group_id": _id_prop("ad group")},
+                "required": ["ad_group_id"], "additionalProperties": False},
+    ),
+    Action(
+        "enable_ad_group", "Enable ad group",
+        "Enable (unpause) an ad group. Starts serving when its campaign is live.",
+        schema={"type": "object",
+                "properties": {"ad_group_id": _id_prop("ad group")},
+                "required": ["ad_group_id"], "additionalProperties": False},
+    ),
+]
+_ACTIONS_BY_ID: Dict[str, Action] = {a.id: a for a in _ACTIONS}
+
+
 class _AuthError(Exception):
     """Internal marker for a 401 from Google, mapped to AUTH_EXPIRED."""
 
@@ -599,6 +665,179 @@ class GoogleAdsConnector(ApiConnector):
             rows=rows,
             row_count=len(rows),
             warnings=warnings,
+        )
+
+    # -- write actions ------------------------------------------------------
+
+    def list_actions(self) -> List[Action]:
+        return list(_ACTIONS)
+
+    def execute_action(
+        self, action_id: str, account: str, params: Optional[Dict[str, Any]] = None
+    ) -> ActionResult:
+        """Perform one write action. Account authorisation happens upstream.
+
+        Read-before-write: every handler first reads the entity's current state
+        (which also validates the id exists) and returns it as `before`, so the
+        change is auditable and a stale target fails cleanly rather than mutating
+        the wrong thing.
+        """
+        params = params or {}
+        if action_id not in _ACTIONS_BY_ID:
+            raise ApiError(
+                ErrorCode.UNKNOWN_ACTION,
+                f"Unknown action {action_id!r}. Call list_actions for the "
+                f"available actions.",
+                retriable=False,
+                details={"action": action_id,
+                         "available": sorted(_ACTIONS_BY_ID)},
+            )
+        cid = self._customer_id(account)
+        if action_id == "pause_campaign":
+            return self._set_campaign_status(cid, account, params, "PAUSED")
+        if action_id == "enable_campaign":
+            return self._set_campaign_status(cid, account, params, "ENABLED")
+        if action_id == "set_campaign_budget":
+            return self._set_campaign_budget(cid, account, params)
+        if action_id == "pause_ad_group":
+            return self._set_ad_group_status(cid, account, params, "PAUSED")
+        if action_id == "enable_ad_group":
+            return self._set_ad_group_status(cid, account, params, "ENABLED")
+        # Unreachable: every id in _ACTIONS_BY_ID is handled above.
+        raise ApiError(ErrorCode.UNKNOWN_ACTION,
+                       f"Action {action_id!r} is declared but not implemented.",
+                       retriable=False)
+
+    def _require_id(self, params: Dict[str, Any], key: str) -> str:
+        raw = params.get(key)
+        if raw is None or not str(raw).strip():
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"Missing required parameter {key!r}.",
+                           retriable=False, details={"param": key})
+        digits = str(raw).strip()
+        if not digits.isdigit():
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"{key!r} must be a numeric id, got {raw!r}.",
+                           retriable=False, details={"param": key})
+        return digits
+
+    def _search_one(self, cid: str, gaql: str) -> Optional[Dict[str, Any]]:
+        data = self._call("POST", f"{_BASE}/customers/{cid}/googleAds:search",
+                          {"query": gaql})
+        results = data.get("results", [])
+        return results[0] if results else None
+
+    def _mutate(self, cid: str, collection: str, operation: Dict[str, Any]) -> Dict[str, Any]:
+        url = f"{_BASE}/customers/{cid}/{collection}:mutate"
+        return self._call("POST", url, {"operations": [operation]})
+
+    def _set_campaign_status(self, cid, account, params, status) -> ActionResult:
+        campaign_id = self._require_id(params, "campaign_id")
+        row = self._search_one(
+            cid,
+            f"SELECT campaign.id, campaign.name, campaign.status "
+            f"FROM campaign WHERE campaign.id = {campaign_id}",
+        )
+        if row is None:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"Campaign {campaign_id} was not found in this account.",
+                           retriable=False, details={"campaign_id": campaign_id})
+        camp = row.get("campaign", {})
+        before = {"id": campaign_id, "name": camp.get("name"),
+                  "status": camp.get("status")}
+        self._mutate(cid, "campaigns", {
+            "updateMask": "status",
+            "update": {
+                "resourceName": f"customers/{cid}/campaigns/{campaign_id}",
+                "status": status,
+            },
+        })
+        after = {**before, "status": status}
+        verb = "paused" if status == "PAUSED" else "enabled"
+        return ActionResult(
+            action=("pause_campaign" if status == "PAUSED" else "enable_campaign"),
+            account=account,
+            summary=f"Campaign {camp.get('name') or campaign_id} {verb}.",
+            before=before, after=after,
+        )
+
+    def _set_ad_group_status(self, cid, account, params, status) -> ActionResult:
+        ad_group_id = self._require_id(params, "ad_group_id")
+        row = self._search_one(
+            cid,
+            f"SELECT ad_group.id, ad_group.name, ad_group.status "
+            f"FROM ad_group WHERE ad_group.id = {ad_group_id}",
+        )
+        if row is None:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"Ad group {ad_group_id} was not found in this account.",
+                           retriable=False, details={"ad_group_id": ad_group_id})
+        ag = row.get("adGroup", {})
+        before = {"id": ad_group_id, "name": ag.get("name"),
+                  "status": ag.get("status")}
+        self._mutate(cid, "adGroups", {
+            "updateMask": "status",
+            "update": {
+                "resourceName": f"customers/{cid}/adGroups/{ad_group_id}",
+                "status": status,
+            },
+        })
+        after = {**before, "status": status}
+        verb = "paused" if status == "PAUSED" else "enabled"
+        return ActionResult(
+            action=("pause_ad_group" if status == "PAUSED" else "enable_ad_group"),
+            account=account,
+            summary=f"Ad group {ag.get('name') or ad_group_id} {verb}.",
+            before=before, after=after,
+        )
+
+    def _set_campaign_budget(self, cid, account, params) -> ActionResult:
+        campaign_id = self._require_id(params, "campaign_id")
+        amount = params.get("amount")
+        if not isinstance(amount, (int, float)) or isinstance(amount, bool) or amount <= 0:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "'amount' must be a positive number (account currency "
+                           "units, e.g. 50 for 50.00).",
+                           retriable=False, details={"param": "amount"})
+        row = self._search_one(
+            cid,
+            f"SELECT campaign.id, campaign.name, campaign.campaign_budget, "
+            f"campaign_budget.amount_micros FROM campaign "
+            f"WHERE campaign.id = {campaign_id}",
+        )
+        if row is None:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"Campaign {campaign_id} was not found in this account.",
+                           retriable=False, details={"campaign_id": campaign_id})
+        budget_res = (row.get("campaign", {}) or {}).get("campaignBudget")
+        if not budget_res:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"Campaign {campaign_id} has no editable budget "
+                           f"(it may use a shared or portfolio budget).",
+                           retriable=False, details={"campaign_id": campaign_id})
+        old_micros = (row.get("campaignBudget", {}) or {}).get("amountMicros")
+        micros = int(round(float(amount) * 1_000_000))
+        self._mutate(cid, "campaignBudgets", {
+            "updateMask": "amount_micros",
+            "update": {"resourceName": budget_res, "amountMicros": micros},
+        })
+
+        def _to_units(m):
+            try:
+                return float(m) / 1_000_000
+            except (TypeError, ValueError):
+                return None
+        before = {"campaign_id": campaign_id,
+                  "name": (row.get("campaign", {}) or {}).get("name"),
+                  "budget_resource": budget_res,
+                  "amount": _to_units(old_micros)}
+        after = {**before, "amount": amount}
+        return ActionResult(
+            action="set_campaign_budget", account=account,
+            summary=(f"Budget for campaign "
+                     f"{(row.get('campaign', {}) or {}).get('name') or campaign_id} "
+                     f"set to {amount}."),
+            before=before, after=after,
         )
 
 

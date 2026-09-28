@@ -507,3 +507,126 @@ class TestRegistration:
         )
         conn = make_google_ads_connector(_DS())
         assert conn._token_refresher is not None
+
+
+def _recording_http(routes):
+    """Like _mock_http but records every (method, url, body) for assertions."""
+    calls = []
+
+    def http(method, url, token, body=None):
+        assert token == "tok"
+        calls.append({"method": method, "url": url, "body": body})
+        for (m, needle), response in routes.items():
+            if method == m and needle in url:
+                return response
+        raise AssertionError(f"unexpected call: {method} {url}")
+
+    return http, calls
+
+
+class TestWriteActions:
+    def test_list_actions_exposes_pause_enable_and_budget(self):
+        conn = _connector({})
+        by_id = {a.id: a for a in conn.list_actions()}
+        assert {"pause_campaign", "enable_campaign", "set_campaign_budget",
+                "pause_ad_group", "enable_ad_group"} <= set(by_id)
+        # every action carries a JSON schema and is marked destructive
+        assert all(a.schema.get("type") == "object" for a in conn.list_actions())
+        assert all(a.destructive for a in conn.list_actions())
+
+    def test_pause_campaign_reads_then_mutates_status(self):
+        search = {"results": [{"campaign": {
+            "id": "1", "name": "Brand", "status": "ENABLED"}}]}
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): search,
+            ("POST", "campaigns:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("pause_campaign", "1112223333",
+                                  {"campaign_id": "1"})
+        d = res.as_dict()
+        assert d["before"]["status"] == "ENABLED"      # read-before-write
+        assert d["after"]["status"] == "PAUSED"
+        # the mutate body sets status=PAUSED on the right resource, never REMOVED
+        mutate = [c for c in calls if "campaigns:mutate" in c["url"]][0]
+        op = mutate["body"]["operations"][0]
+        assert op["update"]["status"] == "PAUSED"
+        assert op["update"]["resourceName"].endswith("/campaigns/1")
+        assert op["updateMask"] == "status"
+
+    def test_enable_campaign_sets_enabled(self):
+        search = {"results": [{"campaign": {
+            "id": "9", "name": "X", "status": "PAUSED"}}]}
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): search,
+            ("POST", "campaigns:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("enable_campaign", "1112223333",
+                                  {"campaign_id": "9"})
+        assert res.as_dict()["after"]["status"] == "ENABLED"
+
+    def test_set_campaign_budget_converts_to_micros_on_the_budget_resource(self):
+        search = {"results": [{
+            "campaign": {"id": "1", "name": "Brand",
+                         "campaignBudget": "customers/1112223333/campaignBudgets/55"},
+            "campaignBudget": {"amountMicros": "10000000"},
+        }]}
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): search,
+            ("POST", "campaignBudgets:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("set_campaign_budget", "1112223333",
+                                  {"campaign_id": "1", "amount": 50})
+        d = res.as_dict()
+        assert d["before"]["amount"] == 10.0     # old micros -> currency units
+        assert d["after"]["amount"] == 50
+        mutate = [c for c in calls if "campaignBudgets:mutate" in c["url"]][0]
+        op = mutate["body"]["operations"][0]
+        assert op["update"]["amountMicros"] == 50_000_000
+        assert op["update"]["resourceName"].endswith("/campaignBudgets/55")
+
+    def test_unknown_action_is_rejected(self):
+        conn = _connector({})
+        with pytest.raises(ApiError) as e:
+            conn.execute_action("delete_campaign", "1112223333", {"campaign_id": "1"})
+        assert e.value.code == ErrorCode.UNKNOWN_ACTION
+
+    def test_missing_or_nonnumeric_id_is_rejected(self):
+        conn = _connector({})
+        with pytest.raises(ApiError) as e1:
+            conn.execute_action("pause_campaign", "1112223333", {})
+        assert e1.value.code == ErrorCode.INVALID_ACTION_PARAMS
+        with pytest.raises(ApiError) as e2:
+            conn.execute_action("pause_campaign", "1112223333",
+                                {"campaign_id": "abc"})
+        assert e2.value.code == ErrorCode.INVALID_ACTION_PARAMS
+
+    def test_nonpositive_budget_is_rejected_before_any_call(self):
+        conn = _connector({})   # no routes: a provider call would raise
+        with pytest.raises(ApiError) as e:
+            conn.execute_action("set_campaign_budget", "1112223333",
+                                {"campaign_id": "1", "amount": 0})
+        assert e.value.code == ErrorCode.INVALID_ACTION_PARAMS
+
+    def test_missing_campaign_is_reported_not_mutated(self):
+        http, calls = _recording_http({("POST", "googleAds:search"): {"results": []}})
+        conn = GoogleAdsConnector(_DS(), http=http)
+        with pytest.raises(ApiError) as e:
+            conn.execute_action("pause_campaign", "1112223333", {"campaign_id": "7"})
+        assert e.value.code == ErrorCode.INVALID_ACTION_PARAMS
+        assert not any("mutate" in c["url"] for c in calls)   # never mutated
+
+    def test_base_connector_is_read_only_by_default(self):
+        from terno_dbi.connectors.api.model.base import ApiConnector
+        # A minimal concrete connector that does not override write methods.
+        class _RO(ApiConnector):
+            def list_accounts(self): return []
+            def list_fields(self, report_type=None): return []
+            def _run(self, spec): raise AssertionError
+        ro = _RO(_DS())
+        assert ro.list_actions() == []
+        with pytest.raises(ApiError) as e:
+            ro.execute_action("anything", "acct", {})
+        assert e.value.code == ErrorCode.UNKNOWN_ACTION

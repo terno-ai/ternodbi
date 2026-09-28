@@ -75,6 +75,27 @@ def _authorise_accounts(
         )
 
 
+def authorise_write_account(data_source, account_id: str) -> None:
+    """Reject a write action against an account not opted into writes.
+
+    The per-account write gate: reads are enabled by default on connect, but a
+    write (execute_action) is refused unless an org admin has explicitly opted
+    this account in (`ConnectorAccountSelection.writes_enabled`). Writes are off
+    by default, so an unknown or un-opted account denies — never defaults to
+    allowing a mutation. This is the write counterpart of `_authorise_accounts`.
+    """
+    from terno_dbi.connectors.api.auth import account_selection
+
+    writable = account_selection.writes_enabled_account_ids(data_source)
+    if str(account_id) not in writable:
+        raise ApiError(
+            ErrorCode.ACCOUNT_FORBIDDEN,
+            f"Write actions are not enabled for account {account_id}. An "
+            f"organisation admin must turn on write access for it first.",
+            details={"account_id": str(account_id), "writes_enabled": False},
+        )
+
+
 def _field_meta(connector: ApiConnector, report_type: Optional[str]) -> Dict[str, Field]:
     """`{field_id: Field}`, or empty if the source cannot report it.
 
@@ -247,4 +268,34 @@ def run_query(
     return payload
 
 
-__all__ = ["run_query"]
+def run_write_action(
+    connector: ApiConnector,
+    action_id: str,
+    account: str,
+    params: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Run one connector write action through the pipeline. Returns a payload.
+
+    The write counterpart of `run_query`, and it enforces the write policy in the
+    same "authorise first, before anything touches the account" order:
+
+        1. per-account write gate — the account must be opted into writes
+        2. connector.execute_action — read-before-write, then the mutation
+
+    Unlike reads, there is no cache and no rate-limit step: a mutation must always
+    hit the provider, and is low-frequency by nature. `ApiError` propagates to the
+    caller (tool layer), which turns it into the response envelope. The account is
+    authorised here, never inside the connector — mirroring `_authorise_accounts`.
+    """
+    authorise_write_account(connector.datasource, account)
+    result = connector.execute_action(action_id, account, params or {})
+    payload = result.as_dict()
+    payload["success"] = True
+    logger.info(
+        "Connector write: source=%s action=%s account=%s",
+        connector.key, action_id, account,
+    )
+    return payload
+
+
+__all__ = ["run_query", "run_write_action", "authorise_write_account"]

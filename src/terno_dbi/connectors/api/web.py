@@ -329,7 +329,9 @@ def connector_accounts(request, connector_key):
            drives the account-picker modal, so it returns *all* accounts, not
            only the enabled ones.
     POST — body `{"account_ids": [...]}` turns exactly those accounts on and the
-           rest off.
+           rest off. An optional `"writes_account_ids": [...]` opts exactly those
+           accounts into write actions (execute_action) and turns writes off for
+           the rest; omit the key to leave the write flags untouched.
 
     Org-admin gated and CSRF-protected, mirroring connect/disconnect: choosing the
     queryable account set is a management action on a shared connection.
@@ -357,7 +359,17 @@ def connector_accounts(request, connector_key):
         if not isinstance(account_ids, list):
             return HttpResponseBadRequest("account_ids must be a list.")
         count = account_selection.set_enabled_accounts(ds, account_ids)
-        return JsonResponse({"status": "saved", "enabled_count": count})
+        result = {"status": "saved", "enabled_count": count}
+        # Optional and separate: only touch write flags when the key is present,
+        # so existing read-only callers never change write enablement.
+        if "writes_account_ids" in body:
+            writes_ids = body.get("writes_account_ids") or []
+            if not isinstance(writes_ids, list):
+                return HttpResponseBadRequest("writes_account_ids must be a list.")
+            result["writes_enabled_count"] = (
+                account_selection.set_writes_enabled_accounts(ds, writes_ids)
+            )
+        return JsonResponse(result)
 
     try:
         connector = registry.build_connector(ds)
@@ -372,6 +384,7 @@ def connector_accounts(request, connector_key):
         "accounts": rows,
         "count": len(rows),
         "enabled_count": sum(1 for r in rows if r["enabled"]),
+        "writes_enabled_count": sum(1 for r in rows if r.get("writes_enabled")),
         "email": _connected_email(ds),
     })
 

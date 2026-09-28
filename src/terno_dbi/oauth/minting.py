@@ -17,7 +17,7 @@ import hashlib
 import logging
 import secrets
 from typing import Iterable, Tuple
-from terno_dbi.oauth.scopes import granted_scopes, scope_string
+from terno_dbi.oauth.scopes import WRITE_SCOPES, granted_scopes, scope_string
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ def token_grant_summary(token) -> dict:
     )
     return {
         "scopes": scopes,
-        "can_write": bool(scopes & {"admin:write", "admin:sync"}) and is_org_admin,
+        "can_write": bool(scopes & WRITE_SCOPES) and is_org_admin,
         "is_org_admin": is_org_admin,
     }
 

@@ -301,3 +301,114 @@ class TestResultsAreOrgScoped:
         )
         poll = api_views.api_query_results(_req("GET", other_token), qid)
         assert poll.status_code == 404
+
+
+def _writable_token(env):
+    """A token carrying connector:write (+ Org Admin) for the same datasource."""
+    key = "dbi_query_writetoken"
+    token = ServiceToken.objects.create(
+        name="Write", token_type=ServiceToken.TokenType.ADMIN,
+        key_prefix="dbi_query_",
+        key_hash=hashlib.sha256(key.encode()).hexdigest(),
+        is_active=True, created_by=env["user"], created_for=env["user"],
+        organisation=env["org"], scopes=["connector:write", "query:read"],
+    )
+    token.datasources.add(env["ds"])
+    return token
+
+
+@pytest.mark.django_db
+class TestListActions:
+    def test_readonly_source_returns_empty(self, env):
+        # FakeGA4 does not override list_actions -> read-only, empty list.
+        resp = api_views.api_list_actions(_req("GET", env["token"]), "GA4")
+        data = _json(resp)
+        assert data["status"] == "success"
+        assert data["actions"] == [] and data["count"] == 0
+
+
+class FakeWritableGA4(FakeGA4):
+    """A fake that supports one harmless write action, for the success path."""
+
+    def list_actions(self):
+        from terno_dbi.connectors.api.model.types import Action
+        return [Action("noop", "Noop", "Flips a fake status.",
+                       schema={"type": "object",
+                               "properties": {"campaign_id": {"type": "string"}},
+                               "required": ["campaign_id"]})]
+
+    def execute_action(self, action_id, account, params=None):
+        from terno_dbi.connectors.api.model.types import ActionResult
+        from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
+        if action_id != "noop":
+            raise ApiError(ErrorCode.UNKNOWN_ACTION, "no such action",
+                           retriable=False)
+        return ActionResult(action="noop", account=account,
+                            summary="did the thing",
+                            before={"status": "ENABLED"},
+                            after={"status": "PAUSED"})
+
+
+@pytest.mark.django_db
+class TestExecuteAction:
+    def test_requires_connector_write_scope(self, env):
+        # The plain query token lacks connector:write -> 403 before anything runs.
+        resp = api_views.api_execute_action(
+            _req("POST", env["token"],
+                 {"action": "pause_campaign", "account": "111",
+                  "params": {"campaign_id": "1"}}), "GA4")
+        assert resp.status_code == 403
+        assert "scope" in _json(resp)["error"].lower()
+
+    def test_missing_action_or_account_is_rejected(self, env):
+        resp = api_views.api_execute_action(
+            _req("POST", _writable_token(env), {"account": "111"}), "GA4")
+        assert resp.status_code == 400
+        assert _json(resp)["error"]["code"] == "INVALID_ACTION_PARAMS"
+
+    def test_denied_when_account_not_write_enabled(self, env):
+        # Scope passes, but no account is opted into writes -> ACCOUNT_FORBIDDEN.
+        resp = api_views.api_execute_action(
+            _req("POST", _writable_token(env),
+                 {"action": "pause_campaign", "account": "111",
+                  "params": {"campaign_id": "1"}}), "GA4")
+        assert resp.status_code == 403
+        assert _json(resp)["error"]["code"] == "ACCOUNT_FORBIDDEN"
+
+    def test_denied_attempt_is_audited_as_error(self, env):
+        from terno_dbi.core.models import ConnectorWriteLog
+        api_views.api_execute_action(
+            _req("POST", _writable_token(env),
+                 {"action": "pause_campaign", "account": "111",
+                  "params": {"campaign_id": "1"}}), "GA4")
+        row = ConnectorWriteLog.objects.latest("id")
+        assert row.status == "error"
+        assert row.error_code == "ACCOUNT_FORBIDDEN"
+        assert row.action == "pause_campaign" and row.account_id == "111"
+        assert row.organisation_id == env["org"].id
+
+    def test_successful_action_is_audited_with_before_after(self, env):
+        from terno_dbi.connectors.api import registry
+        from terno_dbi.connectors.api.auth import account_selection as sel
+        from terno_dbi.connectors.api.model.types import Account
+        from terno_dbi.core.models import ConnectorWriteLog
+
+        registry.register("googleanalytics4", lambda ds: FakeWritableGA4(ds))
+        sel.sync_account_selections(env["ds"], [Account("111", "A")])
+        sel.set_writes_enabled_accounts(env["ds"], ["111"])   # opt in
+
+        resp = api_views.api_execute_action(
+            _req("POST", _writable_token(env),
+                 {"action": "noop", "account": "111",
+                  "params": {"campaign_id": "1"}}), "GA4")
+        assert resp.status_code == 200
+        body = _json(resp)
+        assert body["status"] == "success" and body["success"] is True
+
+        row = ConnectorWriteLog.objects.latest("id")
+        assert row.status == "success"
+        assert row.action == "noop" and row.account_id == "111"
+        assert row.before == {"status": "ENABLED"}
+        assert row.after == {"status": "PAUSED"}
+        assert row.summary == "did the thing"
+        assert row.actor_id == env["user"].id          # who acted

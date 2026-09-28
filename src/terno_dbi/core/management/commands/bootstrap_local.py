@@ -62,7 +62,7 @@ class Command(BaseCommand):
 
         scopes = ["query:read", "query:execute"]
         if not options["read_only"]:
-            scopes += ["admin:read", "admin:write", "admin:sync"]
+            scopes += ["admin:read", "admin:write", "admin:sync", "connector:write"]
 
         key = generate_oauth_access_token()
         token = mint_service_token_for_key(

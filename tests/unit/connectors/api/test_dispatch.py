@@ -171,3 +171,69 @@ class TestRateLimit:
             run_query(conn, _spec(end="2020-02-28"), org_id=1,
                       permitted_accounts=["1"], rate_limit=limit)
         assert exc.value.code == ErrorCode.RATE_LIMITED
+
+
+# --- write-action dispatch (per-account write gate) ------------------------
+
+class _WriteConnector:
+    """Minimal connector for run_write_action: only what dispatch touches."""
+
+    key = "fake"
+
+    def __init__(self, datasource):
+        self.datasource = datasource
+        self.executed = []
+
+    def execute_action(self, action_id, account, params=None):
+        from terno_dbi.connectors.api.model.types import ActionResult
+        self.executed.append((action_id, account, params))
+        return ActionResult(action=action_id, account=account, summary="done")
+
+
+@pytest.fixture
+def real_ds(db):
+    from django.contrib.auth import get_user_model
+    from terno_dbi.core.models import CoreOrganisation, DataSource
+    User = get_user_model()
+    owner = User.objects.create(username="wa-owner")
+    org = CoreOrganisation.objects.create(
+        name="WA", subdomain="wa", owner=owner)
+    return DataSource.objects.create(
+        display_name="wa-ds", type="google_ads", connection_str="",
+        organisation=org)
+
+
+@pytest.mark.django_db
+def test_run_write_action_denies_until_account_opted_in(real_ds):
+    from terno_dbi.connectors.api.pipeline.dispatch import run_write_action
+    from terno_dbi.connectors.api.auth import account_selection as sel
+
+    sel.sync_account_selections(real_ds, [Account("1", "One")])
+    conn = _WriteConnector(real_ds)
+
+    # writes off by default -> denied, and the connector is never called
+    with pytest.raises(ApiError) as e:
+        run_write_action(conn, "pause_campaign", "1", {"campaign_id": "5"})
+    assert e.value.code == ErrorCode.ACCOUNT_FORBIDDEN
+    assert conn.executed == []
+
+    # opt the account into writes -> the action runs
+    sel.set_writes_enabled_accounts(real_ds, ["1"])
+    payload = run_write_action(conn, "pause_campaign", "1", {"campaign_id": "5"})
+    assert payload["success"] is True
+    assert conn.executed == [("pause_campaign", "1", {"campaign_id": "5"})]
+
+
+@pytest.mark.django_db
+def test_run_write_action_denies_a_different_account(real_ds):
+    from terno_dbi.connectors.api.pipeline.dispatch import run_write_action
+    from terno_dbi.connectors.api.auth import account_selection as sel
+
+    sel.sync_account_selections(real_ds, [Account("1", "One"), Account("2", "Two")])
+    sel.set_writes_enabled_accounts(real_ds, ["1"])   # only account 1
+    conn = _WriteConnector(real_ds)
+
+    with pytest.raises(ApiError) as e:
+        run_write_action(conn, "pause_campaign", "2", {"campaign_id": "5"})
+    assert e.value.code == ErrorCode.ACCOUNT_FORBIDDEN
+    assert conn.executed == []

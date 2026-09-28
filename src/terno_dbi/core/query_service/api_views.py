@@ -21,8 +21,9 @@ from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
 from terno_dbi.connectors.api.pipeline.jobs import enqueue_query, get_query_results
 from terno_dbi.connectors.api.pipeline.ratelimit import RateLimit
 from terno_dbi.connectors.api.model.types import Compare, DateRange, QuerySpec
+from terno_dbi.connectors.api.pipeline.dispatch import run_write_action
 from terno_dbi.core.query_service.views import _resolve_roles
-from terno_dbi.decorators import require_service_auth
+from terno_dbi.decorators import require_scope, require_service_auth
 from terno_dbi.services.resolver import resolve_for_caller
 
 logger = logging.getLogger(__name__)
@@ -230,6 +231,110 @@ def api_data_query(request, datasource_identifier):
     except ApiError as exc:
         return _err(exc)
     return JsonResponse({"status": "success", **result})
+
+
+@require_service_auth()
+@require_http_methods(["GET"])
+def api_list_actions(request, datasource_identifier):
+    """The write actions a source supports, with their param schemas.
+
+    Read-only discovery — it mutates nothing, so it needs no write scope. Most
+    sources return an empty list (they are read-only).
+    """
+    try:
+        ds = _resolve_api_datasource(request, datasource_identifier)
+    except ApiError as exc:
+        return _err(exc, status=404)
+    try:
+        connector = registry.build_connector(ds)
+        actions = connector.list_actions()
+    except ApiError as exc:
+        return _err(exc)
+    return JsonResponse({
+        "status": "success",
+        "actions": [a.as_dict() for a in actions],
+        "count": len(actions),
+    })
+
+
+@csrf_exempt
+@require_service_auth()
+@require_scope("connector:write")
+@require_http_methods(["POST"])
+def api_execute_action(request, datasource_identifier):
+    """Perform one write action against one account.
+
+    Defence-in-depth: the MCP layer already gates `execute_action` on
+    `connector:write` + Org Admin, and `@require_scope` re-checks here in case a
+    token ever reaches this endpoint directly. The per-account write-enable gate
+    is enforced inside `run_write_action`, not from the request body.
+    """
+    try:
+        ds = _resolve_api_datasource(request, datasource_identifier)
+        body = json.loads(request.body or "{}")
+    except ApiError as exc:
+        return _err(exc, status=404)
+    except (json.JSONDecodeError, ValueError) as exc:
+        return _err(ApiError(ErrorCode.INVALID_ACTION_PARAMS, str(exc)))
+
+    action = (body.get("action") or "").strip()
+    account = str(body.get("account") or "").strip()
+    params = body.get("params") or {}
+    if not action or not account:
+        return _err(ApiError(
+            ErrorCode.INVALID_ACTION_PARAMS,
+            "Both 'action' and 'account' are required.",
+        ))
+    if not isinstance(params, dict):
+        return _err(ApiError(
+            ErrorCode.INVALID_ACTION_PARAMS, "'params' must be an object."))
+
+    try:
+        connector = registry.build_connector(ds)
+        result = run_write_action(connector, action, account, params)
+    except ApiError as exc:
+        _record_connector_write(request, ds, action, account, params,
+                                status="error", error=exc)
+        http_status = 403 if exc.code == ErrorCode.ACCOUNT_FORBIDDEN else 400
+        return _err(exc, status=http_status)
+    _record_connector_write(request, ds, action, account, params,
+                            status="success", result=result)
+    return JsonResponse({"status": "success", **result})
+
+
+def _record_connector_write(request, ds, action, account, params, *,
+                            status, result=None, error=None):
+    """Append one audit row for a write attempt. Never raises.
+
+    A failed audit write must not turn a successful mutation into an error
+    response, so this logs and swallows its own exceptions — but it is called on
+    every path (success and failure) so the trail is complete.
+    """
+    from terno_dbi.core.models import ConnectorWriteLog
+
+    token = getattr(request, "service_token", None)
+    org = getattr(request, "token_organisation", None)
+    result = result or {}
+    try:
+        ConnectorWriteLog.objects.create(
+            organisation=org,
+            data_source=ds,
+            actor=getattr(token, "created_for", None) if token else None,
+            token_name=getattr(token, "name", "") or "",
+            connector_key=(getattr(ds.catalog, "key", "") if ds.catalog else "")
+            or ds.type,
+            account_id=str(account),
+            action=action,
+            params=params or {},
+            status=status,
+            summary=result.get("summary", "") or "",
+            before=result.get("before"),
+            after=result.get("after"),
+            error_code=(error.code if error is not None else ""),
+            error_message=(error.message if error is not None else ""),
+        )
+    except Exception:   # noqa: BLE001 — audit must never break the response
+        logger.exception("Failed to write ConnectorWriteLog for %s/%s", action, account)
 
 
 @require_service_auth()

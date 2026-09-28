@@ -48,6 +48,13 @@ _LIST_DATASOURCES_DESC_STABLE = "List all configured database connections"
 # Enable with TERNO_ENABLE_CONNECTOR_TOOLS after the updated listing is approved.
 _CONNECTOR_TOOL_NAMES = frozenset({"list_connectors"})
 
+# Connector WRITE tools (execute_action mutates a customer's external account).
+# Gated separately and OFF by default so they never join the reviewed manifest
+# implicitly: enabling them re-opens the mcp.terno.ai manifest for re-submission.
+# execute_action is additionally scope-gated (connector:write + Org Admin) at the
+# merged server, so even when exposed it is withheld from non-admins.
+_CONNECTOR_WRITE_TOOL_NAMES = frozenset({"list_actions", "execute_action"})
+
 
 def _flag_on(name: str) -> bool:
     from django.conf import settings
@@ -67,6 +74,11 @@ def _connector_tools_enabled() -> bool:
     return _flag_on("TERNO_ENABLE_CONNECTOR_TOOLS")
 
 
+def _connector_write_tools_enabled() -> bool:
+    """Whether the connector write tools are exposed. Off by default."""
+    return _flag_on("TERNO_ENABLE_CONNECTOR_WRITE_TOOLS")
+
+
 def _gated_off_tool_names() -> frozenset:
     """Tool names to strip from the manifest given the current flags."""
     names = set()
@@ -74,6 +86,8 @@ def _gated_off_tool_names() -> frozenset:
         names |= _API_TOOL_NAMES
     if not _connector_tools_enabled():
         names |= _CONNECTOR_TOOL_NAMES
+    if not _connector_write_tools_enabled():
+        names |= _CONNECTOR_WRITE_TOOL_NAMES
     return frozenset(names)
 
 
@@ -450,6 +464,47 @@ Returns columns and data rows. Use max_rows to limit the number of rows returned
                 "required": ["query_id"]
             }
         ),
+        Tool(
+            name="list_actions",
+            description=(
+                "List the write actions a connected API datasource supports "
+                "(e.g. Google Ads: pause/enable campaigns, set budgets), each "
+                "with a JSON schema for its params. Read-only discovery — it "
+                "changes nothing. Most sources return an empty list. Call this "
+                "first to get an action's id and params before execute_action."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "datasource": {"type": "string", "description": "Datasource name or ID"},
+                },
+                "required": ["datasource"]
+            }
+        ),
+        Tool(
+            name="execute_action",
+            description=(
+                "Perform ONE write action on ONE account of an API datasource. "
+                "This CHANGES live state on the customer's external account "
+                "(spend, campaign status) and is not trivially reversible — only "
+                "call it after the user has confirmed the specific change, never "
+                "speculatively. Use an action id and params from list_actions, "
+                "and an account id from list_accounts. The account must be "
+                "write-enabled by an org admin, or the call is refused. Enabling "
+                "a campaign starts spend; treat it as a deliberate step."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "datasource": {"type": "string", "description": "Datasource name or ID"},
+                    "action": {"type": "string", "description": "Action id from list_actions"},
+                    "account": {"type": "string", "description": "Account id from list_accounts"},
+                    "params": {"type": "object",
+                               "description": "Params matching the action's schema from list_actions"},
+                },
+                "required": ["datasource", "action", "account"]
+            }
+        ),
 
     ]
 
@@ -594,6 +649,17 @@ def _dispatch(name: str, arguments: Dict[str, Any]):
 
         elif name == "get_query_results":
             result = client.get_query_results(arguments["query_id"])
+
+        elif name == "list_actions":
+            result = client.list_actions(arguments["datasource"])
+
+        elif name == "execute_action":
+            result = client.execute_action(
+                arguments["datasource"],
+                arguments["action"],
+                arguments["account"],
+                arguments.get("params") or {},
+            )
 
         else:
             return as_error_result(f"Unknown tool: {name}")
