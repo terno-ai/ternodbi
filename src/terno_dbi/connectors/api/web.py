@@ -328,10 +328,15 @@ def connector_accounts(request, connector_key):
            `enabled` flag, refreshing the cached set from the provider. This
            drives the account-picker modal, so it returns *all* accounts, not
            only the enabled ones.
-    POST — body `{"account_ids": [...]}` turns exactly those accounts on and the
-           rest off. An optional `"writes_account_ids": [...]` opts exactly those
-           accounts into write actions (execute_action) and turns writes off for
-           the rest; omit the key to leave the write flags untouched.
+    POST — two accepted shapes:
+           * Per-account deltas (preferred): `{"enabled_deltas": {"<acct>": true/
+             false, ...}, "writes_deltas": {"<acct>": true/false, ...}}`. Only the
+             named accounts are changed; every other row is left untouched. This
+             is race-safe: two admins editing different accounts never clobber
+             each other. Either key may be omitted.
+           * Whole-set (legacy): `{"account_ids": [...]}` turns exactly those on
+             and the rest off; optional `"writes_account_ids": [...]` does the same
+             for write enablement. Last full save wins the whole set.
 
     Org-admin gated and CSRF-protected, mirroring connect/disconnect: choosing the
     queryable account set is a management action on a shared connection.
@@ -355,6 +360,24 @@ def connector_accounts(request, connector_key):
             body = json.loads(request.body or "{}")
         except (json.JSONDecodeError, ValueError):
             return HttpResponseBadRequest("Invalid JSON.")
+
+        # Delta shape takes precedence when either key is present: apply only the
+        # named accounts, so concurrent edits to different accounts don't clobber.
+        if "enabled_deltas" in body or "writes_deltas" in body:
+            enabled_deltas = body.get("enabled_deltas") or {}
+            writes_deltas = body.get("writes_deltas") or {}
+            if not isinstance(enabled_deltas, dict) or not isinstance(writes_deltas, dict):
+                return HttpResponseBadRequest(
+                    "enabled_deltas and writes_deltas must be objects.")
+            result = {"status": "saved"}
+            if "enabled_deltas" in body:
+                result["enabled_count"] = account_selection.apply_enabled_deltas(
+                    ds, enabled_deltas)
+            if "writes_deltas" in body:
+                result["writes_enabled_count"] = account_selection.apply_writes_deltas(
+                    ds, writes_deltas)
+            return JsonResponse(result)
+
         account_ids = body.get("account_ids") or []
         if not isinstance(account_ids, list):
             return HttpResponseBadRequest("account_ids must be a list.")

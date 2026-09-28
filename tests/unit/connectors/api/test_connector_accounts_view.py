@@ -86,6 +86,41 @@ def test_post_saves_the_enabled_subset(org, ds, monkeypatch):
 
 
 @pytest.mark.django_db
+def test_post_delta_shape_touches_only_named_accounts(org, ds, monkeypatch):
+    from terno_dbi.connectors.api.auth import account_selection
+    web.connector_accounts(_req("GET", org, monkeypatch), "google_ads")  # materialise
+    # Turn account 1 off via a delta; account 2 is not mentioned and stays on.
+    resp = web.connector_accounts(
+        _req("POST", org, monkeypatch, {"enabled_deltas": {"1": False}}),
+        "google_ads")
+    payload = json.loads(resp.content)
+    assert resp.status_code == 200
+    assert payload["enabled_count"] == 1
+    assert account_selection.enabled_account_ids(ds) == {"2"}
+
+
+@pytest.mark.django_db
+def test_post_writes_delta_is_independent_of_reads(org, ds, monkeypatch):
+    from terno_dbi.connectors.api.auth import account_selection
+    web.connector_accounts(_req("GET", org, monkeypatch), "google_ads")
+    resp = web.connector_accounts(
+        _req("POST", org, monkeypatch, {"writes_deltas": {"1": True}}),
+        "google_ads")
+    payload = json.loads(resp.content)
+    assert payload["writes_enabled_count"] == 1
+    assert "enabled_count" not in payload            # reads untouched (key absent)
+    assert account_selection.writes_enabled_account_ids(ds) == {"1"}
+    assert account_selection.enabled_account_ids(ds) == {"1", "2"}
+
+
+@pytest.mark.django_db
+def test_post_delta_rejects_non_object(org, ds, monkeypatch):
+    resp = web.connector_accounts(
+        _req("POST", org, monkeypatch, {"enabled_deltas": ["1"]}), "google_ads")
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
 def test_post_rejects_non_list_body(org, ds, monkeypatch):
     resp = web.connector_accounts(
         _req("POST", org, monkeypatch, {"account_ids": "1"}), "google_ads")

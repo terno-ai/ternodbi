@@ -96,6 +96,49 @@ def set_writes_enabled_accounts(data_source, account_ids: Iterable[str]) -> int:
     return writable_count
 
 
+def _apply_deltas(data_source, changes: dict, field: str) -> int:
+    """Flip `field` on only the named accounts, leaving every other row untouched.
+
+    `changes` is `{account_id: bool}` — each entry is an independent "turn this
+    account on/off". Because untouched rows are never written, two admins editing
+    *different* accounts cannot clobber each other (unlike a whole-set replace,
+    where the last full save wins everything). A same-account race degrades to a
+    single boolean's last-writer-wins, which is harmless. Unknown account ids are
+    ignored. Returns the resulting count of rows where `field` is True.
+    """
+    from terno_dbi.core.models import ConnectorAccountSelection
+
+    wanted = {str(aid): bool(val) for aid, val in (changes or {}).items()}
+    if wanted:
+        rows = {
+            r.account_id: r
+            for r in ConnectorAccountSelection.objects.filter(
+                data_source=data_source, account_id__in=list(wanted),
+            )
+        }
+        for account_id, value in wanted.items():
+            row = rows.get(account_id)
+            if row is None:
+                continue   # account not (or no longer) visible; skip silently
+            if getattr(row, field) != value:
+                setattr(row, field, value)
+                row.save(update_fields=[field, "updated_at"])
+
+    return ConnectorAccountSelection.objects.filter(
+        data_source=data_source, **{field: True},
+    ).count()
+
+
+def apply_enabled_deltas(data_source, changes: dict) -> int:
+    """Per-account read-enable changes; see `_apply_deltas`. Returns enabled count."""
+    return _apply_deltas(data_source, changes, "enabled")
+
+
+def apply_writes_deltas(data_source, changes: dict) -> int:
+    """Per-account write-enable changes; see `_apply_deltas`. Returns writes count."""
+    return _apply_deltas(data_source, changes, "writes_enabled")
+
+
 def writes_enabled_account_ids(data_source) -> Set[str]:
     """The accounts opted into write actions for this connection.
 
@@ -141,6 +184,8 @@ __all__ = [
     "sync_account_selections",
     "set_enabled_accounts",
     "set_writes_enabled_accounts",
+    "apply_enabled_deltas",
+    "apply_writes_deltas",
     "enabled_account_ids",
     "writes_enabled_account_ids",
     "restrict_to_selection",

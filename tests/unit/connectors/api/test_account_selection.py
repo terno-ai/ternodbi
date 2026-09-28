@@ -155,6 +155,56 @@ def test_authorise_write_account_denies_until_opted_in(org):
         authorise_write_account(ds, "2")
 
 
+@pytest.mark.django_db
+def test_enabled_deltas_touch_only_named_accounts(org):
+    ds = _ds(org)
+    sel.sync_account_selections(ds, [_Acct("1", "A"), _Acct("2", "B")])  # both on
+    sel.apply_enabled_deltas(ds, {"1": False})     # turn 1 off, don't mention 2
+    assert sel.enabled_account_ids(ds) == {"2"}    # 2 untouched, still on
+
+
+@pytest.mark.django_db
+def test_writes_deltas_are_independent_and_per_account(org):
+    ds = _ds(org)
+    sel.sync_account_selections(ds, [_Acct("1", "A"), _Acct("2", "B")])
+    sel.apply_writes_deltas(ds, {"1": True})       # arm only 1
+    assert sel.writes_enabled_account_ids(ds) == {"1"}
+    assert sel.enabled_account_ids(ds) == {"1", "2"}   # reads untouched
+    sel.apply_writes_deltas(ds, {"2": True})       # arm 2 without resending 1
+    assert sel.writes_enabled_account_ids(ds) == {"1", "2"}   # 1 survived
+
+
+@pytest.mark.django_db
+def test_delta_returns_resulting_true_count(org):
+    ds = _ds(org)
+    sel.sync_account_selections(ds, [_Acct("1"), _Acct("2"), _Acct("3")])
+    assert sel.apply_writes_deltas(ds, {"1": True, "2": True}) == 2
+    assert sel.apply_writes_deltas(ds, {"1": False}) == 1
+
+
+@pytest.mark.django_db
+def test_delta_ignores_unknown_accounts(org):
+    ds = _ds(org)
+    sel.sync_account_selections(ds, [_Acct("1", "A")])
+    sel.apply_writes_deltas(ds, {"1": True, "999": True})   # 999 has no row
+    assert sel.writes_enabled_account_ids(ds) == {"1"}
+
+
+@pytest.mark.django_db
+def test_deltas_do_not_clobber_a_concurrent_edit_to_another_account(org):
+    """The whole point: two admins each toggle a *different* account; both stick.
+
+    With whole-set replace the second save would overwrite the first. With
+    deltas, each save names only its own account, so both changes survive.
+    """
+    ds = _ds(org)
+    sel.sync_account_selections(ds, [_Acct("1", "A"), _Acct("2", "B")])  # writes off
+    # Admin A arms account 1; Admin B (independently) arms account 2.
+    sel.apply_writes_deltas(ds, {"1": True})
+    sel.apply_writes_deltas(ds, {"2": True})
+    assert sel.writes_enabled_account_ids(ds) == {"1", "2"}   # neither lost
+
+
 def test_connected_email_reads_id_token_claim():
     import base64 as _b64, json as _json
     from terno_dbi.connectors.api.auth.oauth import _connected_email
