@@ -124,6 +124,25 @@ def test_callback_declined_is_400(org):
 
 
 @pytest.mark.django_db
+def test_callback_no_org_explains_the_missing_crm_org(org):
+    # Zoho sends this when the account has no Zoho CRM org — not a decline.
+    resp = web.oauth_callback(RequestFactory().get("/cb?error=no_org&state=s"))
+    assert resp.status_code == 400
+    body = resp.content.decode()
+    assert "no Zoho CRM organisation" in body
+    assert "declined" not in body
+
+
+@pytest.mark.django_db
+def test_callback_error_is_escaped(org):
+    resp = web.oauth_callback(RequestFactory().get(
+        "/cb", {"error": "<script>alert(1)</script>"}))
+    assert resp.status_code == 400
+    assert b"<script>" not in resp.content
+    assert b"&lt;script&gt;" in resp.content
+
+
+@pytest.mark.django_db
 def test_callback_missing_state_or_code_is_400(org):
     resp = web.oauth_callback(RequestFactory().get("/cb?state=only"))
     assert resp.status_code == 400
@@ -147,6 +166,22 @@ def test_callback_success_appends_select_accounts(org, monkeypatch):
     assert resp.status_code == 302
     assert "connected=Google%20Ads" in resp.url
     assert "select_accounts=google_ads" in resp.url
+
+
+@pytest.mark.django_db
+def test_callback_passes_its_query_string_through(org, monkeypatch):
+    # A provider like Zoho names the user's data centre in the redirect.
+    seen = {}
+
+    def fake_complete(**kw):
+        seen.update(kw)
+        return _DS()
+
+    monkeypatch.setattr(
+        "terno_dbi.connectors.api.auth.oauth.complete_authorization", fake_complete)
+    web.oauth_callback(RequestFactory().get(
+        "/cb?state=s&code=c&location=eu&accounts-server=https://accounts.zoho.eu"))
+    assert seen["callback_params"]["accounts-server"] == "https://accounts.zoho.eu"
 
 
 @pytest.mark.django_db

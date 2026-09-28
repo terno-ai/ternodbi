@@ -22,7 +22,7 @@ import re
 import secrets as _secrets
 import time
 from datetime import timedelta
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 from urllib.parse import urlencode
 from django.utils import timezone
 import requests
@@ -139,6 +139,32 @@ def _validated_instance(provider, connector_key: str, instance: str) -> str:
     return shop
 
 
+def _callback_instance(provider, connector_key: str,
+                       callback_params: Optional[Mapping[str, str]]) -> str:
+    """The regional host a provider named in its callback (Zoho's accounts server).
+
+    The value comes from the browser redirect, so it is untrusted: it decides
+    where the token exchange — which carries our client secret — is POSTed.
+    Only an exact host from the provider's allowlist is accepted. A missing
+    parameter means the user never left the server consent started on.
+    """
+    from urllib.parse import urlparse
+    from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
+
+    raw = ((callback_params or {}).get(provider.callback_instance_param) or "").strip()
+    if not raw:
+        return urlparse(provider.authorization_url).hostname or ""
+    host = (urlparse(raw).hostname if "://" in raw else raw).lower()
+    if host not in provider.callback_instances:
+        raise ApiError(
+            ErrorCode.UPSTREAM_ERROR,
+            f"{connector_key} redirected back from an unrecognised server. "
+            f"Start the connection again.",
+            retriable=False,
+        )
+    return host
+
+
 def _default_post(url: str, data: Dict[str, str]) -> Dict[str, Any]:
     resp = requests.post(url, data=data, timeout=15)
     resp.raise_for_status()
@@ -184,6 +210,9 @@ def _store_tokens(data_source, token_response: Dict[str, Any],
         bundle["CONNECTED_EMAIL"] = email
     if instance:
         bundle["INSTANCE"] = instance
+    # Zoho names the regional API host its data lives on (www.zohoapis.eu, …).
+    if token_response.get("api_domain"):
+        bundle["API_DOMAIN"] = token_response["api_domain"]
     expires_in = token_response.get("expires_in")
     if expires_in:
         bundle["TOKEN_EXPIRES_AT"] = str(time.time() + float(expires_in))
@@ -201,11 +230,13 @@ def complete_authorization(
     state: str,
     code: str,
     http_post: Optional[Callable[[str, Dict[str, str]], Dict[str, Any]]] = None,
+    callback_params: Optional[Mapping[str, str]] = None,
 ):
     """Finish a flow: exchange the code, store encrypted tokens, return the DS.
 
     Creates the `DataSource` on a first connect, or updates the one referenced by
-    the state on a reconnect.
+    the state on a reconnect. `callback_params` is the redirect's query string,
+    read only by a provider that names its regional server there (Zoho).
     """
     # Resolved at call time (not as a default arg) so tests can monkeypatch it.
     http_post = http_post or _default_post
@@ -232,8 +263,10 @@ def complete_authorization(
         exchange["code_verifier"] = st.code_verifier
     exchange.update(provider.extra_token_params)   # e.g. Shopify `expiring=1`
 
-    token_url = (provider.token_url.format(instance=st.instance)
-                 if provider.requires_instance else provider.token_url)
+    instance = (_callback_instance(provider, st.connector_key, callback_params)
+                if provider.callback_instance_param else st.instance)
+    token_url = (provider.token_url.format(instance=instance)
+                 if provider.uses_instance else provider.token_url)
 
     try:
         token_response = http_post(token_url, exchange)
@@ -267,7 +300,7 @@ def complete_authorization(
                 auth_status=DataSource.AuthStatus.NOT_AUTHENTICATED,
             )
 
-    _store_tokens(data_source, token_response, instance=st.instance)
+    _store_tokens(data_source, token_response, instance=instance)
     st.delete()
     return data_source
 
@@ -333,11 +366,11 @@ def refresh_access_token(
         raise ApiError(ErrorCode.AUTH_EXPIRED,
                        f"{data_source.type} needs reconnecting.")
 
-    # Per-store providers (Shopify) template their token URL with the connected
-    # store domain, kept in the token bundle as INSTANCE.
+    # Per-store (Shopify) and per-region (Zoho) providers template their token
+    # URL with the host saved at connect, kept in the token bundle as INSTANCE.
     instance = tokens.get("INSTANCE", "") or ""
     token_url = (provider.token_url.format(instance=instance)
-                 if provider.requires_instance else provider.token_url)
+                 if provider.uses_instance else provider.token_url)
 
     body = {
         "grant_type": "refresh_token",

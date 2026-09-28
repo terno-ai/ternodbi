@@ -410,6 +410,38 @@ _APIS: List[ConnectorSpec] = [
         default_enabled=True,
     ),
     ConnectorSpec(
+        key="zoho_crm",
+        display_name="Zoho CRM",
+        provider="Zoho",
+        category="CRM",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Leads, contacts, accounts, deals, cases and sales activities "
+                    "from Zoho CRM — including custom fields — for pipeline, "
+                    "revenue, lead-source and rep-activity analytics.",
+        scopes_label="Zoho CRM access to read, create and update records; "
+                     "read-only access to field metadata, organisation and users",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=True,
+        account_label_singular="Organisation",
+        account_label_plural="Organisations",
+        report_types=[
+            ReportType("Leads", "Leads"),
+            ReportType("Contacts", "Contacts"),
+            ReportType("Accounts", "Accounts"),
+            ReportType("Deals", "Deals"),
+            ReportType("Cases", "Cases"),
+            ReportType("Tasks", "Tasks"),
+            ReportType("Calls", "Calls"),
+            ReportType("Events", "Meetings (events)"),
+        ],
+        default_report_type="Leads",
+        rate_limit_per_second=10,
+        rate_limit_per_day=10000,
+        default_enabled=False,   # enable once the Zoho OAuth client is registered
+    ),
+    ConnectorSpec(
         key="amazon_ads",
         display_name="Amazon Ads",
         provider="Amazon",

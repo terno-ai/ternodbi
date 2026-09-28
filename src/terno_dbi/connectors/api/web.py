@@ -15,6 +15,7 @@ import logging
 from django.conf import settings
 from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import redirect
+from django.utils.html import escape
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods
 from terno_dbi.services.secrets import decrypt_dict
@@ -24,6 +25,14 @@ from terno_dbi.connectors.api.auth import account_selection, rbac
 logger = logging.getLogger(__name__)
 
 CALLBACK_PATH = "/connectors/oauth/callback/"
+
+# Callback `error` values that are not the user declining, mapped to what to do.
+_CALLBACK_ERRORS = {
+    # Zoho: the signed-in account has no organisation in the product the scopes
+    # ask for, so Zoho offered no Accept button at all.
+    "no_org": "This Zoho account has no Zoho CRM organisation. Sign in with an "
+              "account that uses Zoho CRM, then connect again.",
+}
 
 
 def _org_from_subdomain(request):
@@ -161,7 +170,8 @@ def oauth_callback(request):
 
     error = request.GET.get("error")
     if error:
-        return HttpResponse(f"Authorization was declined: {error}", status=400)
+        message = _CALLBACK_ERRORS.get(error) or f"Authorization was declined: {escape(error)}"
+        return HttpResponse(message, status=400)
 
     state = request.GET.get("state", "")
     code = request.GET.get("code", "")
@@ -174,7 +184,8 @@ def oauth_callback(request):
     connector_key = st.connector_key if st else ""
 
     try:
-        data_source = complete_authorization(state=state, code=code)
+        data_source = complete_authorization(
+            state=state, code=code, callback_params=request.GET)
     except ApiError as exc:
         return HttpResponse(exc.message, status=400)
 

@@ -12,7 +12,7 @@ such as Google Analytics, YouTube, and Google Ads.
 from __future__ import annotations
 import os
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Optional, Union
+from typing import Callable, Dict, FrozenSet, Optional, Union
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,18 @@ class OAuthProvider:
     # `{instance}` (e.g. Shopify's per-store domain) that the flow fills in from
     # a store name the user supplies before connecting.
     requires_instance: bool = False
+    # When set, the provider names the user's regional server only at the
+    # callback, in this query parameter (Zoho's `accounts-server`). `token_url`
+    # is then an `{instance}` template filled from that host, which must be one
+    # of `callback_instances` — it arrives in the browser redirect, so it is
+    # untrusted, and the token POST carries our client secret.
+    callback_instance_param: str = ""
+    callback_instances: FrozenSet[str] = frozenset()
+
+    @property
+    def uses_instance(self) -> bool:
+        """True when `token_url` is an `{instance}` template."""
+        return self.requires_instance or bool(self.callback_instance_param)
 
     def client_id(self) -> str:
         return os.getenv(self.client_id_env, "").strip()
@@ -166,6 +178,40 @@ _SHOPIFY = OAuthProvider(
 )
 
 
+_ZOHO = OAuthProvider(
+    name="zoho",
+    # Consent starts at the US server, which forwards the user to their own data
+    # centre; the callback then names that centre's accounts server, and the
+    # token exchange and every refresh must go there.
+    authorization_url="https://accounts.zoho.com/oauth/v2/auth",
+    token_url="https://{instance}/oauth/v2/token",
+    # Record write access (create/update, never delete) is requested up front so
+    # write features need no reconnect; nothing in the connector writes yet.
+    scope="ZohoCRM.modules.READ,ZohoCRM.modules.CREATE,ZohoCRM.modules.UPDATE,"
+          "ZohoCRM.coql.READ,ZohoCRM.settings.fields.READ,"
+          "ZohoCRM.org.READ,ZohoCRM.users.READ",
+    client_id_env="TERNO_ZOHO_CLIENT_ID",
+    client_secret_env="TERNO_ZOHO_CLIENT_SECRET",
+    use_pkce=False,
+    extra_authorize_params={
+        "access_type": "offline",   # issue a refresh token
+        "prompt": "consent",        # ...on every connect, not just the first
+    },
+    callback_instance_param="accounts-server",
+    callback_instances=frozenset({
+        "accounts.zoho.com",
+        "accounts.zoho.eu",
+        "accounts.zoho.in",
+        "accounts.zoho.com.au",
+        "accounts.zoho.jp",
+        "accounts.zoho.com.cn",
+        "accounts.zohocloud.ca",
+        "accounts.zoho.sa",
+        "accounts.zoho.uk",
+    }),
+)
+
+
 def _google_with_scope(scope: str) -> OAuthProvider:
     from dataclasses import replace
     return replace(_GOOGLE, scope=f"openid email {scope}")
@@ -202,6 +248,7 @@ _PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
     "hubspot": _HUBSPOT,
     "amazon_ads": _AMAZON_ADS,
     "shopify": _SHOPIFY,
+    "zoho_crm": _ZOHO,
 }
 
 

@@ -261,3 +261,112 @@ class TestPostProcess:
         out = oauth._post_process("meta_ads", get_provider("meta_ads"),
                                   {"access_token": "short"})
         assert out["access_token"] == "short"     # original kept
+
+
+@pytest.mark.django_db
+class TestZohoRegionalServer:
+    """Zoho names the user's data centre only at the callback (`accounts-server`);
+    the token exchange and every refresh must go there — and nowhere else, since
+    that POST carries our client secret."""
+
+    @pytest.fixture(autouse=True)
+    def zoho_creds(self, monkeypatch):
+        monkeypatch.setenv("TERNO_ZOHO_CLIENT_ID", "zoho-id")
+        monkeypatch.setenv("TERNO_ZOHO_CLIENT_SECRET", "zoho-secret")
+
+    def _start(self, org):
+        return oauth.start_authorization(
+            connector_key="zoho_crm",
+            redirect_uri="https://acme.app.terno.ai/callback",
+            organisation=org,
+        )
+
+    def test_consent_starts_at_the_us_server_asking_for_offline_access(self, org, catalog):
+        from urllib.parse import urlparse, parse_qs
+
+        url = self._start(org)["authorization_url"]
+        assert url.startswith("https://accounts.zoho.com/oauth/v2/auth?")
+        qs = parse_qs(urlparse(url).query)
+        assert qs["access_type"] == ["offline"]
+        assert qs["prompt"] == ["consent"]
+        scopes = set(qs["scope"][0].split(","))
+        assert {"ZohoCRM.modules.READ", "ZohoCRM.coql.READ",
+                "ZohoCRM.modules.CREATE", "ZohoCRM.modules.UPDATE"} <= scopes
+        # Record deletion is never requested.
+        assert not {s for s in scopes if s.endswith((".DELETE", ".ALL"))}
+        assert "code_challenge" not in qs
+
+    def test_exchange_goes_to_the_named_data_centre(self, org, catalog):
+        started = self._start(org)
+        posted = {}
+
+        def fake_post(url, data):
+            posted["url"] = url
+            return {"access_token": "at", "refresh_token": "rt",
+                    "api_domain": "https://www.zohoapis.eu", "expires_in": 3600}
+
+        ds = oauth.complete_authorization(
+            state=started["state"], code="c", http_post=fake_post,
+            callback_params={"location": "eu",
+                             "accounts-server": "https://accounts.zoho.eu"},
+        )
+        assert posted["url"] == "https://accounts.zoho.eu/oauth/v2/token"
+        bundle = secrets.decrypt_dict(ds.connection_json)
+        assert bundle["INSTANCE"] == "accounts.zoho.eu"
+        assert bundle["API_DOMAIN"] == "https://www.zohoapis.eu"
+
+    def test_missing_server_means_the_one_consent_started_on(self, org, catalog):
+        started = self._start(org)
+        posted = {}
+
+        def fake_post(url, data):
+            posted["url"] = url
+            return {"access_token": "at", "api_domain": "https://www.zohoapis.com"}
+
+        oauth.complete_authorization(
+            state=started["state"], code="c", http_post=fake_post)
+        assert posted["url"] == "https://accounts.zoho.com/oauth/v2/token"
+
+    @pytest.mark.parametrize("server", [
+        "https://evil.example.com",
+        "https://accounts.zoho.com.evil.io",
+        "https://accounts.zoho.com@evil.example.com",
+        "accounts.zoho.eu.evil.io",
+    ])
+    def test_a_forged_server_never_receives_the_client_secret(self, org, catalog, server):
+        started = self._start(org)
+
+        def fake_post(url, data):
+            raise AssertionError(f"token exchange must not be sent to {url}")
+
+        with pytest.raises(ApiError) as exc:
+            oauth.complete_authorization(
+                state=started["state"], code="c", http_post=fake_post,
+                callback_params={"accounts-server": server},
+            )
+        assert "unrecognised server" in exc.value.message
+
+    def test_refresh_goes_to_the_saved_data_centre(self, org, catalog):
+        ds = DataSource.objects.create(
+            display_name="Zoho", type="zoho_crm", connection_str="",
+            organisation=org,
+            catalog=ConnectorCatalog.objects.get(key="zoho_crm"),
+        )
+        ds.connection_json = secrets.encrypt_dict({
+            "ACCESS_TOKEN": "old", "REFRESH_TOKEN": "rt",
+            "INSTANCE": "accounts.zoho.in",
+            "API_DOMAIN": "https://www.zohoapis.in",
+            "TOKEN_EXPIRES_AT": str(time.time() - 1),
+        })
+        ds.save()
+        posted = {}
+
+        def fake_post(url, data):
+            posted["url"] = url
+            return {"access_token": "new", "api_domain": "https://www.zohoapis.in",
+                    "expires_in": 3600}
+
+        bundle = oauth.refresh_access_token(ds, http_post=fake_post)
+        assert posted["url"] == "https://accounts.zoho.in/oauth/v2/token"
+        assert bundle["ACCESS_TOKEN"] == "new"
+        assert bundle["REFRESH_TOKEN"] == "rt"
