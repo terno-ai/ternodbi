@@ -214,7 +214,8 @@ def _connector_cards(org) -> list:
     appears here automatically — there is no per-connector code. A connected row
     wins over an unauthenticated leftover for the same source.
     """
-    from terno_dbi.core.models import ConnectorCatalog, DataSource
+    from terno_dbi.core.models import ConnectorAccountSelection, ConnectorCatalog, DataSource
+    from django.db.models import Count, Q
 
     catalogs = list(ConnectorCatalog.objects.filter(family="api", enabled=True))
     ds_by_key = {}
@@ -225,9 +226,21 @@ def _connector_cards(org) -> list:
         if key not in ds_by_key or ds.auth_status == DataSource.AuthStatus.CONNECTED:
             ds_by_key[key] = ds
 
+    ds_ids = [ds.id for ds in ds_by_key.values() if ds]
+    counts_by_ds = {
+        row["data_source"]: row
+        for row in (ConnectorAccountSelection.objects
+                    .filter(data_source_id__in=ds_ids)
+                    .values("data_source")
+                    .annotate(enabled=Count("id", filter=Q(enabled=True)),
+                              writable=Count("id", filter=Q(writes_enabled=True))))
+    }
+
     cards = []
     for cat in catalogs:
         ds = ds_by_key.get(cat.key)
+        connected = ds is not None and _connector_status(ds) == "connected"
+        counts = counts_by_ds.get(ds.id) if ds else None
         cards.append({
             "key": cat.key,
             "name": cat.name,
@@ -239,6 +252,10 @@ def _connector_cards(org) -> list:
             "status": _connector_status(ds),
             "datasource_id": ds.id if ds else None,
             "last_error": (getattr(ds, "auth_error", "") if ds else "") or "",
+            # Connection identity + account state, only meaningful when connected.
+            "connected_email": _connected_email(ds) if connected else "",
+            "enabled_account_count": (counts["enabled"] if counts else 0),
+            "writes_enabled_count": (counts["writable"] if counts else 0),
         })
     return cards
 

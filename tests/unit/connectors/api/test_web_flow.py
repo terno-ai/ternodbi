@@ -170,6 +170,36 @@ def test_list_api_connectors_reports_status(org, oauth_catalog):
     assert "google_ads" in keys
     ga = next(c for c in payload["connectors"] if c["key"] == "google_ads")
     assert ga["status"] == "not_connected"
+    # Not connected -> no identity, zero counts.
+    assert ga["connected_email"] == ""
+    assert ga["enabled_account_count"] == 0
+    assert ga["writes_enabled_count"] == 0
+
+
+@pytest.mark.django_db
+def test_list_api_connectors_surfaces_identity_and_counts(org, oauth_catalog):
+    from terno_dbi.core.models import DataSource
+    from terno_dbi.connectors.api.auth import account_selection as sel
+    from terno_dbi.connectors.api.model.types import Account
+    from terno_dbi.services.secrets import encrypt_dict
+
+    ds = DataSource.objects.create(
+        display_name="Google Ads", type="google_ads", connection_str="",
+        organisation=org, catalog=oauth_catalog,
+        auth_status=DataSource.AuthStatus.CONNECTED,
+        connection_json=encrypt_dict({"ACCESS_TOKEN": "x",
+                                      "CONNECTED_EMAIL": "navin@cloudxlab.com"}),
+    )
+    sel.sync_account_selections(ds, [Account("111", "A"), Account("222", "B")])
+    sel.set_writes_enabled_accounts(ds, ["111"])   # one account write-enabled
+
+    resp = web.list_api_connectors(_get("/connectors/api/", org.owner, org))
+    ga = next(c for c in json.loads(resp.content)["connectors"]
+              if c["key"] == "google_ads")
+    assert ga["status"] == "connected"
+    assert ga["connected_email"] == "navin@cloudxlab.com"
+    assert ga["enabled_account_count"] == 2      # both enabled on connect
+    assert ga["writes_enabled_count"] == 1       # one opted into writes
 
 
 @pytest.mark.django_db
