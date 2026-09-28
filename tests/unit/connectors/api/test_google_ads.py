@@ -630,3 +630,454 @@ class TestWriteActions:
         with pytest.raises(ApiError) as e:
             ro.execute_action("anything", "acct", {})
         assert e.value.code == ErrorCode.UNKNOWN_ACTION
+
+
+class TestWriteActionsExtended:
+    def test_list_actions_now_includes_create_and_keywords(self):
+        conn = _connector({})
+        ids = {a.id for a in conn.list_actions()}
+        assert {"create_campaign", "add_keywords", "add_negative_keywords",
+                "remove_keyword"} <= ids
+
+    def test_create_campaign_makes_budget_then_paused_campaign(self):
+        http, calls = _recording_http({
+            ("POST", "campaignBudgets:mutate"):
+                {"results": [{"resourceName": "customers/1112223333/campaignBudgets/77"}]},
+            ("POST", "campaigns:mutate"):
+                {"results": [{"resourceName": "customers/1112223333/campaigns/999"}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("create_campaign", "1112223333",
+                                  {"name": "Brand", "daily_budget": 50})
+        d = res.as_dict()
+        assert d["after"]["status"] == "PAUSED"        # create-paused
+        assert d["after"]["id"] == "999"
+        assert d["after"]["daily_budget"] == 50
+        # budget created first, referenced by the campaign create
+        budget_call = [c for c in calls if "campaignBudgets:mutate" in c["url"]][0]
+        assert budget_call["body"]["operations"][0]["create"]["amountMicros"] == 50_000_000
+        camp_op = [c for c in calls if "campaigns:mutate" in c["url"]][0]["body"]["operations"][0]["create"]
+        assert camp_op["status"] == "PAUSED"
+        assert camp_op["advertisingChannelType"] == "SEARCH"
+        assert camp_op["campaignBudget"] == "customers/1112223333/campaignBudgets/77"
+
+    def test_create_campaign_rejects_nonpositive_budget(self):
+        conn = _connector({})   # no routes -> a provider call would blow up
+        with pytest.raises(ApiError) as e:
+            conn.execute_action("create_campaign", "1112223333",
+                                {"name": "X", "daily_budget": 0})
+        assert e.value.code == ErrorCode.INVALID_ACTION_PARAMS
+
+    def test_add_keywords_creates_enabled_criteria_with_match_type(self):
+        http, calls = _recording_http({
+            ("POST", "adGroupCriteria:mutate"): {"results": [{}, {}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("add_keywords", "1112223333",
+                                  {"ad_group_id": "55",
+                                   "keywords": ["running shoes", "trainers"],
+                                   "match_type": "exact"})
+        assert res.as_dict()["after"]["match_type"] == "EXACT"
+        ops = [c for c in calls if "adGroupCriteria:mutate" in c["url"]][0]["body"]["operations"]
+        assert len(ops) == 2
+        assert ops[0]["create"]["keyword"] == {"text": "running shoes", "matchType": "EXACT"}
+        assert ops[0]["create"]["adGroup"].endswith("/adGroups/55")
+        assert ops[0]["create"]["status"] == "ENABLED"
+
+    def test_add_keywords_defaults_to_phrase(self):
+        http, _ = _recording_http({("POST", "adGroupCriteria:mutate"): {"results": [{}]}})
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("add_keywords", "1112223333",
+                                  {"ad_group_id": "55", "keywords": ["shoes"]})
+        assert res.as_dict()["after"]["match_type"] == "PHRASE"
+
+    def test_add_negative_keywords_marks_negative_on_campaign(self):
+        http, calls = _recording_http({
+            ("POST", "campaignCriteria:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn.execute_action("add_negative_keywords", "1112223333",
+                            {"campaign_id": "12", "keywords": ["free"]})
+        op = [c for c in calls if "campaignCriteria:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["create"]["negative"] is True
+        assert op["create"]["campaign"].endswith("/campaigns/12")
+        assert op["create"]["keyword"]["text"] == "free"
+
+    def test_add_keywords_rejects_empty_list(self):
+        conn = _connector({})
+        with pytest.raises(ApiError) as e:
+            conn.execute_action("add_keywords", "1112223333",
+                                {"ad_group_id": "55", "keywords": []})
+        assert e.value.code == ErrorCode.INVALID_ACTION_PARAMS
+
+    def test_add_keywords_rejects_bad_match_type(self):
+        conn = _connector({})
+        with pytest.raises(ApiError) as e:
+            conn.execute_action("add_keywords", "1112223333",
+                                {"ad_group_id": "55", "keywords": ["x"],
+                                 "match_type": "SORTA"})
+        assert e.value.code == ErrorCode.INVALID_ACTION_PARAMS
+
+    def test_remove_keyword_targets_the_composite_resource(self):
+        http, calls = _recording_http({
+            ("POST", "adGroupCriteria:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn.execute_action("remove_keyword", "1112223333",
+                            {"ad_group_id": "55", "criterion_id": "888"})
+        op = [c for c in calls if "adGroupCriteria:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["remove"].endswith("/adGroupCriteria/55~888")
+
+
+class TestBiddingAndAds:
+    def test_list_actions_includes_bidding_and_rsa(self):
+        ids = {a.id for a in _connector({}).list_actions()}
+        assert {"set_target_cpa", "set_target_roas", "set_max_cpc",
+                "create_responsive_search_ad"} <= ids
+
+    def test_set_target_cpa_switches_strategy_with_micros(self):
+        search = {"results": [{"campaign": {
+            "id": "1", "name": "Brand", "biddingStrategyType": "MANUAL_CPC"}}]}
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): search,
+            ("POST", "campaigns:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("set_target_cpa", "1112223333",
+                                  {"campaign_id": "1", "target_cpa": 25})
+        d = res.as_dict()
+        assert d["before"]["bidding_strategy_type"] == "MANUAL_CPC"
+        assert d["after"]["bidding_strategy_type"] == "TARGET_CPA"
+        op = [c for c in calls if "campaigns:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["update"]["targetCpa"]["targetCpaMicros"] == 25_000_000
+        assert op["updateMask"] == "target_cpa.target_cpa_micros"
+
+    def test_set_target_roas_uses_ratio(self):
+        search = {"results": [{"campaign": {"id": "1", "name": "B",
+                                            "biddingStrategyType": "MANUAL_CPC"}}]}
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): search,
+            ("POST", "campaigns:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn.execute_action("set_target_roas", "1112223333",
+                            {"campaign_id": "1", "target_roas": 4})
+        op = [c for c in calls if "campaigns:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["update"]["targetRoas"]["targetRoas"] == 4
+        assert op["updateMask"] == "target_roas.target_roas"
+
+    def test_set_max_cpc_on_ad_group(self):
+        search = {"results": [{"adGroup": {
+            "id": "55", "name": "AG", "cpcBidMicros": "1000000"}}]}
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): search,
+            ("POST", "adGroups:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("set_max_cpc", "1112223333",
+                                  {"ad_group_id": "55", "max_cpc": 1.5})
+        d = res.as_dict()
+        assert d["before"]["max_cpc"] == 1.0
+        assert d["after"]["max_cpc"] == 1.5
+        op = [c for c in calls if "adGroups:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["update"]["cpcBidMicros"] == 1_500_000
+        assert op["updateMask"] == "cpc_bid_micros"
+
+    def test_create_rsa_builds_headlines_and_descriptions(self):
+        http, calls = _recording_http({
+            ("POST", "adGroupAds:mutate"):
+                {"results": [{"resourceName": "customers/1112223333/adGroupAds/55~9"}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("create_responsive_search_ad", "1112223333", {
+            "ad_group_id": "55",
+            "final_url": "https://example.com",
+            "headlines": ["H1", "H2", "H3"],
+            "descriptions": ["D1", "D2"],
+        })
+        assert res.as_dict()["after"]["status"] == "ENABLED"
+        create = [c for c in calls if "adGroupAds:mutate" in c["url"]][0]["body"]["operations"][0]["create"]
+        rsa = create["ad"]["responsiveSearchAd"]
+        assert [h["text"] for h in rsa["headlines"]] == ["H1", "H2", "H3"]
+        assert [d["text"] for d in rsa["descriptions"]] == ["D1", "D2"]
+        assert create["ad"]["finalUrls"] == ["https://example.com"]
+
+    def test_create_rsa_requires_min_headlines(self):
+        conn = _connector({})
+        with pytest.raises(ApiError) as e:
+            conn.execute_action("create_responsive_search_ad", "1112223333", {
+                "ad_group_id": "55", "final_url": "https://x.com",
+                "headlines": ["only one"], "descriptions": ["D1", "D2"],
+            })
+        assert e.value.code == ErrorCode.INVALID_ACTION_PARAMS
+
+    def test_create_rsa_rejects_overlong_headline(self):
+        conn = _connector({})
+        with pytest.raises(ApiError) as e:
+            conn.execute_action("create_responsive_search_ad", "1112223333", {
+                "ad_group_id": "55", "final_url": "https://x.com",
+                "headlines": ["x" * 31, "H2", "H3"], "descriptions": ["D1", "D2"],
+            })
+        assert e.value.code == ErrorCode.INVALID_ACTION_PARAMS
+
+    def test_bidding_rejects_nonpositive(self):
+        conn = _connector({})
+        with pytest.raises(ApiError) as e:
+            conn.execute_action("set_target_cpa", "1112223333",
+                                {"campaign_id": "1", "target_cpa": 0})
+        assert e.value.code == ErrorCode.INVALID_ACTION_PARAMS
+
+
+class TestLifecycleCompletion:
+    def test_list_actions_now_covers_full_lifecycle(self):
+        ids = {a.id for a in _connector({}).list_actions()}
+        assert {"create_ad_group", "remove_ad_group", "pause_ad", "enable_ad",
+                "remove_ad", "update_keyword", "remove_campaign"} <= ids
+        assert len(ids) == 33   # complete registry (incl. advanced surface)
+
+    def test_create_ad_group_is_paused_with_optional_max_cpc(self):
+        http, calls = _recording_http({
+            ("POST", "adGroups:mutate"):
+                {"results": [{"resourceName": "customers/1112223333/adGroups/60"}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("create_ad_group", "1112223333",
+                                  {"campaign_id": "1", "name": "AG1", "max_cpc": 2})
+        d = res.as_dict()
+        assert d["after"]["status"] == "PAUSED" and d["after"]["id"] == "60"
+        op = [c for c in calls if "adGroups:mutate" in c["url"]][0]["body"]["operations"][0]["create"]
+        assert op["status"] == "PAUSED"
+        assert op["campaign"].endswith("/campaigns/1")
+        assert op["cpcBidMicros"] == 2_000_000
+
+    def test_remove_ad_group_reads_then_removes(self):
+        search = {"results": [{"adGroup": {"id": "55", "name": "AG"}}]}
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): search,
+            ("POST", "adGroups:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("remove_ad_group", "1112223333", {"ad_group_id": "55"})
+        assert res.as_dict()["after"]["removed"] is True
+        op = [c for c in calls if "adGroups:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["remove"].endswith("/adGroups/55")
+
+    def test_pause_ad_reads_status_then_mutates(self):
+        search = {"results": [{"adGroupAd": {"status": "ENABLED", "ad": {"id": "9"}}}]}
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): search,
+            ("POST", "adGroupAds:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("pause_ad", "1112223333",
+                                  {"ad_group_id": "55", "ad_id": "9"})
+        d = res.as_dict()
+        assert d["before"]["status"] == "ENABLED"
+        assert d["after"]["status"] == "PAUSED"
+        op = [c for c in calls if "adGroupAds:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["update"]["resourceName"].endswith("/adGroupAds/55~9")
+        assert op["update"]["status"] == "PAUSED"
+
+    def test_remove_ad_targets_composite(self):
+        http, calls = _recording_http({("POST", "adGroupAds:mutate"): {"results": [{}]}})
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn.execute_action("remove_ad", "1112223333",
+                            {"ad_group_id": "55", "ad_id": "9"})
+        op = [c for c in calls if "adGroupAds:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["remove"].endswith("/adGroupAds/55~9")
+
+    def test_update_keyword_status_and_bid_builds_mask(self):
+        http, calls = _recording_http({("POST", "adGroupCriteria:mutate"): {"results": [{}]}})
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn.execute_action("update_keyword", "1112223333",
+                            {"ad_group_id": "55", "criterion_id": "888",
+                             "status": "paused", "max_cpc": 3})
+        body = [c for c in calls if "adGroupCriteria:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert body["update"]["status"] == "PAUSED"
+        assert body["update"]["cpcBidMicros"] == 3_000_000
+        assert set(body["updateMask"].split(",")) == {"status", "cpc_bid_micros"}
+        assert body["update"]["resourceName"].endswith("/adGroupCriteria/55~888")
+
+    def test_update_keyword_requires_a_field(self):
+        conn = _connector({})
+        with pytest.raises(ApiError) as e:
+            conn.execute_action("update_keyword", "1112223333",
+                                {"ad_group_id": "55", "criterion_id": "888"})
+        assert e.value.code == ErrorCode.INVALID_ACTION_PARAMS
+
+    def test_remove_campaign_reads_then_removes(self):
+        search = {"results": [{"campaign": {"id": "1", "name": "Brand", "status": "PAUSED"}}]}
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): search,
+            ("POST", "campaigns:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("remove_campaign", "1112223333", {"campaign_id": "1"})
+        d = res.as_dict()
+        assert d["before"]["name"] == "Brand"
+        assert d["after"]["status"] == "REMOVED"
+        op = [c for c in calls if "campaigns:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["remove"].endswith("/campaigns/1")
+
+
+class TestAdvancedSurface:
+    def test_registry_totals_33(self):
+        ids = {a.id for a in _connector({}).list_actions()}
+        assert {"set_maximize_conversions", "set_maximize_conversion_value",
+                "set_manual_cpc", "set_target_impression_share",
+                "create_portfolio_bid_strategy", "attach_campaign_to_portfolio",
+                "add_sitelink", "add_callout", "add_structured_snippet",
+                "create_customer_list", "add_customer_list_members",
+                "attach_audience", "remove_audience"} <= ids
+
+    def _camp_search(self):
+        return {"results": [{"campaign": {"id": "1", "name": "B",
+                                          "biddingStrategyType": "MANUAL_CPC"}}]}
+
+    def test_maximize_conversions_with_target_cpa(self):
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): self._camp_search(),
+            ("POST", "campaigns:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn.execute_action("set_maximize_conversions", "1112223333",
+                            {"campaign_id": "1", "target_cpa": 20})
+        op = [c for c in calls if "campaigns:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["update"]["maximizeConversions"]["targetCpaMicros"] == 20_000_000
+        assert op["updateMask"] == "maximize_conversions.target_cpa_micros"
+
+    def test_maximize_conversions_without_target(self):
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): self._camp_search(),
+            ("POST", "campaigns:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn.execute_action("set_maximize_conversions", "1112223333", {"campaign_id": "1"})
+        op = [c for c in calls if "campaigns:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["updateMask"] == "maximize_conversions"
+        assert op["update"]["maximizeConversions"] == {}
+
+    def test_manual_cpc_enhanced(self):
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): self._camp_search(),
+            ("POST", "campaigns:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn.execute_action("set_manual_cpc", "1112223333",
+                            {"campaign_id": "1", "enhanced": True})
+        op = [c for c in calls if "campaigns:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["update"]["manualCpc"]["enhancedCpcEnabled"] is True
+
+    def test_target_impression_share_converts_percentage(self):
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): self._camp_search(),
+            ("POST", "campaigns:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn.execute_action("set_target_impression_share", "1112223333",
+                            {"campaign_id": "1", "location": "top_of_page",
+                             "target_percentage": 65, "cpc_bid_ceiling": 2})
+        op = [c for c in calls if "campaigns:mutate" in c["url"]][0]["body"]["operations"][0]
+        tis = op["update"]["targetImpressionShare"]
+        assert tis["location"] == "TOP_OF_PAGE"
+        assert tis["locationFractionMicros"] == 650_000   # 65%
+        assert tis["cpcBidCeilingMicros"] == 2_000_000
+        assert "target_impression_share.cpc_bid_ceiling_micros" in op["updateMask"]
+
+    def test_create_portfolio_target_roas(self):
+        http, calls = _recording_http({
+            ("POST", "biddingStrategies:mutate"):
+                {"results": [{"resourceName": "customers/1112223333/biddingStrategies/5"}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("create_portfolio_bid_strategy", "1112223333",
+                                  {"name": "P1", "type": "TARGET_ROAS", "target": 4})
+        assert res.as_dict()["after"]["id"] == "5"
+        op = [c for c in calls if "biddingStrategies:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["create"]["targetRoas"]["targetRoas"] == 4
+
+    def test_attach_campaign_to_portfolio(self):
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): self._camp_search(),
+            ("POST", "campaigns:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn.execute_action("attach_campaign_to_portfolio", "1112223333",
+                            {"campaign_id": "1", "bidding_strategy_id": "5"})
+        op = [c for c in calls if "campaigns:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["update"]["biddingStrategy"].endswith("/biddingStrategies/5")
+        assert op["updateMask"] == "bidding_strategy"
+
+    def test_add_sitelink_creates_asset_then_links(self):
+        http, calls = _recording_http({
+            ("POST", "assets:mutate"):
+                {"results": [{"resourceName": "customers/1112223333/assets/900"}]},
+            ("POST", "campaignAssets:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn.execute_action("add_sitelink", "1112223333",
+                            {"campaign_id": "1", "link_text": "Shop",
+                             "final_url": "https://e.com"})
+        asset_op = [c for c in calls if "assets:mutate" in c["url"] and "campaignAssets" not in c["url"]][0]["body"]["operations"][0]
+        assert asset_op["create"]["sitelinkAsset"]["linkText"] == "Shop"
+        link_op = [c for c in calls if "campaignAssets:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert link_op["create"]["fieldType"] == "SITELINK"
+        assert link_op["create"]["asset"].endswith("/assets/900")
+
+    def test_add_callout(self):
+        http, calls = _recording_http({
+            ("POST", "assets:mutate"):
+                {"results": [{"resourceName": "customers/1112223333/assets/901"}]},
+            ("POST", "campaignAssets:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn.execute_action("add_callout", "1112223333",
+                            {"campaign_id": "1", "text": "Free shipping"})
+        link_op = [c for c in calls if "campaignAssets:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert link_op["create"]["fieldType"] == "CALLOUT"
+
+    def test_create_customer_list(self):
+        http, calls = _recording_http({
+            ("POST", "userLists:mutate"):
+                {"results": [{"resourceName": "customers/1112223333/userLists/321"}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("create_customer_list", "1112223333", {"name": "VIPs"})
+        assert res.as_dict()["after"]["id"] == "321"
+        op = [c for c in calls if "userLists:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["create"]["crmBasedUserList"]["uploadKeyType"] == "CONTACT_INFO"
+
+    def test_add_members_hashes_pii_and_runs_job(self):
+        import hashlib
+        http, calls = _recording_http({
+            ("POST", "offlineUserDataJobs:create"):
+                {"resourceName": "customers/1112223333/offlineUserDataJobs/77"},
+            ("POST", "offlineUserDataJobs/77:addOperations"): {},
+            ("POST", "offlineUserDataJobs/77:run"): {},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("add_customer_list_members", "1112223333",
+                                  {"user_list_id": "321",
+                                   "emails": ["  Alice@Example.com "]})
+        assert res.as_dict()["after"]["member_count"] == 1
+        add_op = [c for c in calls if "addOperations" in c["url"]][0]["body"]["operations"][0]
+        expected = hashlib.sha256("alice@example.com".encode()).hexdigest()
+        assert add_op["create"]["userIdentifiers"][0]["hashedEmail"] == expected
+        # the job is actually run
+        assert any(":run" in c["url"] for c in calls)
+
+    def test_add_members_requires_some_identifier(self):
+        conn = _connector({})
+        with pytest.raises(ApiError) as e:
+            conn.execute_action("add_customer_list_members", "1112223333",
+                                {"user_list_id": "321", "emails": [], "phones": []})
+        assert e.value.code == ErrorCode.INVALID_ACTION_PARAMS
+
+    def test_attach_audience(self):
+        http, calls = _recording_http({("POST", "adGroupCriteria:mutate"): {"results": [{}]}})
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn.execute_action("attach_audience", "1112223333",
+                            {"ad_group_id": "55", "user_list_id": "321"})
+        op = [c for c in calls if "adGroupCriteria:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["create"]["userList"]["userList"].endswith("/userLists/321")
+        assert op["create"]["adGroup"].endswith("/adGroups/55")

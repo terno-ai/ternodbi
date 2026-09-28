@@ -17,9 +17,11 @@ Unlike GA4/GSC, Google Ads:
 """
 
 from __future__ import annotations
+import hashlib
 import logging
 import os
 import re
+import uuid
 from typing import Any, Callable, Dict, List, Optional
 from terno_dbi.connectors.api.model.base import ApiConnector
 from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode, invalid_field
@@ -446,8 +448,403 @@ _ACTIONS: List[Action] = [
                 "properties": {"ad_group_id": _id_prop("ad group")},
                 "required": ["ad_group_id"], "additionalProperties": False},
     ),
+    Action(
+        "create_campaign", "Create campaign",
+        "Create a new Search campaign with its own daily budget. Always created "
+        "PAUSED — nothing serves or spends until you separately enable it with "
+        "enable_campaign. Uses manual CPC bidding by default.",
+        schema={"type": "object",
+                "properties": {
+                    "name": {"type": "string", "minLength": 1,
+                             "description": "Campaign name (must be unique in the account)."},
+                    "daily_budget": {"type": "number", "exclusiveMinimum": 0,
+                                     "description": "Daily budget in account currency "
+                                                    "units, e.g. 50 for 50.00."},
+                },
+                "required": ["name", "daily_budget"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "add_keywords", "Add keywords",
+        "Add one or more keywords to an ad group. Keywords are added ENABLED, so "
+        "they can serve immediately if the ad group and campaign are live.",
+        schema={"type": "object",
+                "properties": {
+                    "ad_group_id": _id_prop("ad group"),
+                    "keywords": {"type": "array", "minItems": 1,
+                                 "items": {"type": "string"},
+                                 "description": "Keyword texts to add."},
+                    "match_type": {"type": "string",
+                                   "enum": ["BROAD", "PHRASE", "EXACT"],
+                                   "description": "Match type for all keywords "
+                                                  "(default PHRASE)."},
+                },
+                "required": ["ad_group_id", "keywords"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "add_negative_keywords", "Add negative keywords",
+        "Add campaign-level negative keywords so the campaign stops matching those "
+        "terms. Safe: negatives only restrict serving, never expand it.",
+        schema={"type": "object",
+                "properties": {
+                    "campaign_id": _id_prop("campaign"),
+                    "keywords": {"type": "array", "minItems": 1,
+                                 "items": {"type": "string"},
+                                 "description": "Negative keyword texts to add."},
+                    "match_type": {"type": "string",
+                                   "enum": ["BROAD", "PHRASE", "EXACT"],
+                                   "description": "Match type for all negatives "
+                                                  "(default PHRASE)."},
+                },
+                "required": ["campaign_id", "keywords"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "remove_keyword", "Remove keyword",
+        "Remove one keyword from an ad group by its criterion id (from a keyword "
+        "report). Removes only that positive keyword criterion.",
+        schema={"type": "object",
+                "properties": {
+                    "ad_group_id": _id_prop("ad group"),
+                    "criterion_id": {"type": "string",
+                                     "description": "Numeric keyword criterion id "
+                                                    "(criteria id from a Keyword report)."},
+                },
+                "required": ["ad_group_id", "criterion_id"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "set_target_cpa", "Set Target CPA bidding",
+        "Switch a campaign to Target CPA bidding at the given cost-per-action, in "
+        "account currency units. Changes how the campaign bids (and can change "
+        "spend/volume).",
+        schema={"type": "object",
+                "properties": {
+                    "campaign_id": _id_prop("campaign"),
+                    "target_cpa": {"type": "number", "exclusiveMinimum": 0,
+                                   "description": "Target cost per conversion in "
+                                                  "account currency units, e.g. 25 "
+                                                  "for 25.00."},
+                },
+                "required": ["campaign_id", "target_cpa"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "set_target_roas", "Set Target ROAS bidding",
+        "Switch a campaign to Target ROAS bidding at the given ratio (Google's "
+        "native multiplier: 4 means 400%, i.e. $4 revenue per $1 spend). Requires "
+        "conversion-value tracking to be effective.",
+        schema={"type": "object",
+                "properties": {
+                    "campaign_id": _id_prop("campaign"),
+                    "target_roas": {"type": "number", "exclusiveMinimum": 0,
+                                    "description": "Target return on ad spend as a "
+                                                   "multiplier, e.g. 4 for 400%."},
+                },
+                "required": ["campaign_id", "target_roas"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "set_max_cpc", "Set ad group max CPC",
+        "Set an ad group's default maximum CPC bid, in account currency units. "
+        "Applies to manual-CPC (and CPC-ceiling) bidding. Affects spend.",
+        schema={"type": "object",
+                "properties": {
+                    "ad_group_id": _id_prop("ad group"),
+                    "max_cpc": {"type": "number", "exclusiveMinimum": 0,
+                                "description": "Max CPC bid in account currency "
+                                               "units, e.g. 1.50."},
+                },
+                "required": ["ad_group_id", "max_cpc"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "create_responsive_search_ad", "Create responsive search ad",
+        "Create a responsive search ad in an ad group. Needs at least 3 headlines "
+        "(≤30 chars each) and 2 descriptions (≤90 chars each) and a final URL. "
+        "Created ENABLED, but only serves when its ad group and campaign are live.",
+        schema={"type": "object",
+                "properties": {
+                    "ad_group_id": _id_prop("ad group"),
+                    "final_url": {"type": "string",
+                                  "description": "Landing page URL (https://…)."},
+                    "headlines": {"type": "array", "minItems": 3, "maxItems": 15,
+                                  "items": {"type": "string"},
+                                  "description": "3–15 headlines, ≤30 chars each."},
+                    "descriptions": {"type": "array", "minItems": 2, "maxItems": 4,
+                                     "items": {"type": "string"},
+                                     "description": "2–4 descriptions, ≤90 chars each."},
+                },
+                "required": ["ad_group_id", "final_url", "headlines", "descriptions"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "create_ad_group", "Create ad group",
+        "Create an ad group in a campaign, always PAUSED. Optionally set its "
+        "default max CPC bid (account currency units).",
+        schema={"type": "object",
+                "properties": {
+                    "campaign_id": _id_prop("campaign"),
+                    "name": {"type": "string", "minLength": 1,
+                             "description": "Ad group name (unique within the campaign)."},
+                    "max_cpc": {"type": "number", "exclusiveMinimum": 0,
+                                "description": "Optional default max CPC bid, e.g. 1.50."},
+                },
+                "required": ["campaign_id", "name"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "remove_ad_group", "Remove ad group",
+        "Permanently remove an ad group. This CANNOT be undone — prefer "
+        "pause_ad_group to stop it reversibly.",
+        schema={"type": "object",
+                "properties": {"ad_group_id": _id_prop("ad group")},
+                "required": ["ad_group_id"], "additionalProperties": False},
+    ),
+    Action(
+        "pause_ad", "Pause ad",
+        "Pause a single ad so it stops serving. Reversible with enable_ad.",
+        schema={"type": "object",
+                "properties": {"ad_group_id": _id_prop("ad group"),
+                               "ad_id": _id_prop("ad")},
+                "required": ["ad_group_id", "ad_id"], "additionalProperties": False},
+    ),
+    Action(
+        "enable_ad", "Enable ad",
+        "Enable a single ad. It serves only when its ad group and campaign are live.",
+        schema={"type": "object",
+                "properties": {"ad_group_id": _id_prop("ad group"),
+                               "ad_id": _id_prop("ad")},
+                "required": ["ad_group_id", "ad_id"], "additionalProperties": False},
+    ),
+    Action(
+        "remove_ad", "Remove ad",
+        "Permanently remove a single ad. This CANNOT be undone — prefer pause_ad "
+        "to stop it reversibly.",
+        schema={"type": "object",
+                "properties": {"ad_group_id": _id_prop("ad group"),
+                               "ad_id": _id_prop("ad")},
+                "required": ["ad_group_id", "ad_id"], "additionalProperties": False},
+    ),
+    Action(
+        "update_keyword", "Update keyword",
+        "Change a keyword's status (ENABLED/PAUSED) and/or its max CPC bid, by "
+        "criterion id (from a Keyword report). Provide at least one of status or "
+        "max_cpc.",
+        schema={"type": "object",
+                "properties": {
+                    "ad_group_id": _id_prop("ad group"),
+                    "criterion_id": {"type": "string",
+                                     "description": "Numeric keyword criterion id."},
+                    "status": {"type": "string", "enum": ["ENABLED", "PAUSED"],
+                               "description": "New keyword status."},
+                    "max_cpc": {"type": "number", "exclusiveMinimum": 0,
+                                "description": "New max CPC bid, account currency units."},
+                },
+                "required": ["ad_group_id", "criterion_id"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "remove_campaign", "Remove campaign",
+        "PERMANENTLY remove a campaign. This is IRREVERSIBLE — Google cannot "
+        "restore a removed campaign. Prefer pause_campaign, which stops spend and "
+        "is reversible. Only remove when the user explicitly asks to delete it.",
+        schema={"type": "object",
+                "properties": {"campaign_id": _id_prop("campaign")},
+                "required": ["campaign_id"], "additionalProperties": False},
+    ),
+    # -- additional bidding strategies -------------------------------------
+    Action(
+        "set_maximize_conversions", "Set Maximize Conversions bidding",
+        "Switch a campaign to Maximize Conversions bidding, optionally capped by a "
+        "target CPA (account currency units). Affects how it bids and spends.",
+        schema={"type": "object",
+                "properties": {
+                    "campaign_id": _id_prop("campaign"),
+                    "target_cpa": {"type": "number", "exclusiveMinimum": 0,
+                                   "description": "Optional target CPA cap."},
+                },
+                "required": ["campaign_id"], "additionalProperties": False},
+    ),
+    Action(
+        "set_maximize_conversion_value", "Set Maximize Conversion Value bidding",
+        "Switch a campaign to Maximize Conversion Value bidding, optionally with a "
+        "target ROAS (ratio, e.g. 4 = 400%).",
+        schema={"type": "object",
+                "properties": {
+                    "campaign_id": _id_prop("campaign"),
+                    "target_roas": {"type": "number", "exclusiveMinimum": 0,
+                                    "description": "Optional target ROAS multiplier."},
+                },
+                "required": ["campaign_id"], "additionalProperties": False},
+    ),
+    Action(
+        "set_manual_cpc", "Set Manual CPC bidding",
+        "Switch a campaign to Manual CPC bidding, optionally with Enhanced CPC.",
+        schema={"type": "object",
+                "properties": {
+                    "campaign_id": _id_prop("campaign"),
+                    "enhanced": {"type": "boolean",
+                                 "description": "Enable Enhanced CPC (default false)."},
+                },
+                "required": ["campaign_id"], "additionalProperties": False},
+    ),
+    Action(
+        "set_target_impression_share", "Set Target Impression Share bidding",
+        "Switch a campaign to Target Impression Share bidding: aim for a share of "
+        "impressions at a page location, with an optional max CPC ceiling.",
+        schema={"type": "object",
+                "properties": {
+                    "campaign_id": _id_prop("campaign"),
+                    "location": {"type": "string",
+                                 "enum": ["ANYWHERE_ON_PAGE", "TOP_OF_PAGE",
+                                          "ABSOLUTE_TOP_OF_PAGE"],
+                                 "description": "Where on the page to target."},
+                    "target_percentage": {"type": "number", "exclusiveMinimum": 0,
+                                          "maximum": 100,
+                                          "description": "Target impression share %, 1–100."},
+                    "cpc_bid_ceiling": {"type": "number", "exclusiveMinimum": 0,
+                                        "description": "Optional max CPC ceiling, "
+                                                       "account currency units."},
+                },
+                "required": ["campaign_id", "location", "target_percentage"],
+                "additionalProperties": False},
+    ),
+    # -- portfolio (shared) bid strategies --------------------------------
+    Action(
+        "create_portfolio_bid_strategy", "Create portfolio bid strategy",
+        "Create a shared (portfolio) bid strategy multiple campaigns can use. Type "
+        "is TARGET_CPA (target in currency units) or TARGET_ROAS (ratio, 4 = 400%).",
+        schema={"type": "object",
+                "properties": {
+                    "name": {"type": "string", "minLength": 1,
+                             "description": "Strategy name (unique in the account)."},
+                    "type": {"type": "string", "enum": ["TARGET_CPA", "TARGET_ROAS"],
+                             "description": "Strategy type."},
+                    "target": {"type": "number", "exclusiveMinimum": 0,
+                               "description": "Target CPA (currency) or ROAS (ratio)."},
+                },
+                "required": ["name", "type", "target"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "attach_campaign_to_portfolio", "Attach campaign to portfolio strategy",
+        "Point a campaign at an existing portfolio (shared) bid strategy by id.",
+        schema={"type": "object",
+                "properties": {
+                    "campaign_id": _id_prop("campaign"),
+                    "bidding_strategy_id": {"type": "string",
+                                            "description": "Portfolio bid strategy id."},
+                },
+                "required": ["campaign_id", "bidding_strategy_id"],
+                "additionalProperties": False},
+    ),
+    # -- ad extensions (assets) -------------------------------------------
+    Action(
+        "add_sitelink", "Add sitelink extension",
+        "Add a sitelink to a campaign: creates the sitelink asset and links it.",
+        schema={"type": "object",
+                "properties": {
+                    "campaign_id": _id_prop("campaign"),
+                    "link_text": {"type": "string", "minLength": 1, "maxLength": 25,
+                                  "description": "Sitelink text, ≤25 chars."},
+                    "final_url": {"type": "string",
+                                  "description": "Sitelink landing URL."},
+                    "description1": {"type": "string", "maxLength": 35,
+                                     "description": "Optional line 1, ≤35 chars."},
+                    "description2": {"type": "string", "maxLength": 35,
+                                     "description": "Optional line 2, ≤35 chars."},
+                },
+                "required": ["campaign_id", "link_text", "final_url"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "add_callout", "Add callout extension",
+        "Add a callout (short highlight text) to a campaign.",
+        schema={"type": "object",
+                "properties": {
+                    "campaign_id": _id_prop("campaign"),
+                    "text": {"type": "string", "minLength": 1, "maxLength": 25,
+                             "description": "Callout text, ≤25 chars."},
+                },
+                "required": ["campaign_id", "text"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "add_structured_snippet", "Add structured snippet extension",
+        "Add a structured snippet (a header plus values, e.g. 'Brands: A, B, C') "
+        "to a campaign.",
+        schema={"type": "object",
+                "properties": {
+                    "campaign_id": _id_prop("campaign"),
+                    "header": {"type": "string", "minLength": 1,
+                               "description": "Snippet header, e.g. 'Brands' "
+                                              "(must be a valid Google header)."},
+                    "values": {"type": "array", "minItems": 1, "maxItems": 10,
+                               "items": {"type": "string"},
+                               "description": "1–10 values, ≤25 chars each."},
+                },
+                "required": ["campaign_id", "header", "values"],
+                "additionalProperties": False},
+    ),
+    # -- Customer Match audiences (PII) -----------------------------------
+    Action(
+        "create_customer_list", "Create Customer Match list",
+        "Create an empty Customer Match user list you can later upload members to "
+        "and target. No personal data is sent by this action.",
+        schema={"type": "object",
+                "properties": {
+                    "name": {"type": "string", "minLength": 1,
+                             "description": "User list name."},
+                },
+                "required": ["name"], "additionalProperties": False},
+    ),
+    Action(
+        "add_customer_list_members", "Add Customer Match members",
+        "Upload members (emails and/or phone numbers) to a Customer Match list. "
+        "PRIVACY: the emails/phones are hashed (SHA-256) before sending and are "
+        "the user's own first-party data — confirm the user has consent to upload "
+        "them. Phones must be E.164 (e.g. +14155550123).",
+        schema={"type": "object",
+                "properties": {
+                    "user_list_id": {"type": "string",
+                                     "description": "Customer Match user list id."},
+                    "emails": {"type": "array", "items": {"type": "string"},
+                               "description": "Plain emails; hashed before upload."},
+                    "phones": {"type": "array", "items": {"type": "string"},
+                               "description": "E.164 phone numbers; hashed before upload."},
+                },
+                "required": ["user_list_id"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "attach_audience", "Attach audience to ad group",
+        "Target a user list (e.g. a Customer Match list) on an ad group.",
+        schema={"type": "object",
+                "properties": {
+                    "ad_group_id": _id_prop("ad group"),
+                    "user_list_id": {"type": "string",
+                                     "description": "User list id to target."},
+                },
+                "required": ["ad_group_id", "user_list_id"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "remove_audience", "Remove audience from ad group",
+        "Stop targeting a user-list audience on an ad group, by its criterion id.",
+        schema={"type": "object",
+                "properties": {
+                    "ad_group_id": _id_prop("ad group"),
+                    "criterion_id": {"type": "string",
+                                     "description": "Audience criterion id (from a read)."},
+                },
+                "required": ["ad_group_id", "criterion_id"],
+                "additionalProperties": False},
+    ),
 ]
 _ACTIONS_BY_ID: Dict[str, Action] = {a.id: a for a in _ACTIONS}
+_MATCH_TYPES = {"BROAD", "PHRASE", "EXACT"}
 
 
 class _AuthError(Exception):
@@ -703,6 +1100,62 @@ class GoogleAdsConnector(ApiConnector):
             return self._set_ad_group_status(cid, account, params, "PAUSED")
         if action_id == "enable_ad_group":
             return self._set_ad_group_status(cid, account, params, "ENABLED")
+        if action_id == "create_campaign":
+            return self._create_campaign(cid, account, params)
+        if action_id == "add_keywords":
+            return self._add_keywords(cid, account, params)
+        if action_id == "add_negative_keywords":
+            return self._add_negative_keywords(cid, account, params)
+        if action_id == "remove_keyword":
+            return self._remove_keyword(cid, account, params)
+        if action_id == "set_target_cpa":
+            return self._set_target_cpa(cid, account, params)
+        if action_id == "set_target_roas":
+            return self._set_target_roas(cid, account, params)
+        if action_id == "set_max_cpc":
+            return self._set_max_cpc(cid, account, params)
+        if action_id == "create_responsive_search_ad":
+            return self._create_rsa(cid, account, params)
+        if action_id == "create_ad_group":
+            return self._create_ad_group(cid, account, params)
+        if action_id == "remove_ad_group":
+            return self._remove_ad_group(cid, account, params)
+        if action_id == "pause_ad":
+            return self._set_ad_status(cid, account, params, "PAUSED")
+        if action_id == "enable_ad":
+            return self._set_ad_status(cid, account, params, "ENABLED")
+        if action_id == "remove_ad":
+            return self._remove_ad(cid, account, params)
+        if action_id == "update_keyword":
+            return self._update_keyword(cid, account, params)
+        if action_id == "remove_campaign":
+            return self._remove_campaign(cid, account, params)
+        if action_id == "set_maximize_conversions":
+            return self._set_maximize_conversions(cid, account, params)
+        if action_id == "set_maximize_conversion_value":
+            return self._set_maximize_conversion_value(cid, account, params)
+        if action_id == "set_manual_cpc":
+            return self._set_manual_cpc(cid, account, params)
+        if action_id == "set_target_impression_share":
+            return self._set_target_impression_share(cid, account, params)
+        if action_id == "create_portfolio_bid_strategy":
+            return self._create_portfolio_bid_strategy(cid, account, params)
+        if action_id == "attach_campaign_to_portfolio":
+            return self._attach_campaign_to_portfolio(cid, account, params)
+        if action_id == "add_sitelink":
+            return self._add_sitelink(cid, account, params)
+        if action_id == "add_callout":
+            return self._add_callout(cid, account, params)
+        if action_id == "add_structured_snippet":
+            return self._add_structured_snippet(cid, account, params)
+        if action_id == "create_customer_list":
+            return self._create_customer_list(cid, account, params)
+        if action_id == "add_customer_list_members":
+            return self._add_customer_list_members(cid, account, params)
+        if action_id == "attach_audience":
+            return self._attach_audience(cid, account, params)
+        if action_id == "remove_audience":
+            return self._remove_audience(cid, account, params)
         # Unreachable: every id in _ACTIONS_BY_ID is handled above.
         raise ApiError(ErrorCode.UNKNOWN_ACTION,
                        f"Action {action_id!r} is declared but not implemented.",
@@ -839,6 +1292,757 @@ class GoogleAdsConnector(ApiConnector):
                      f"set to {amount}."),
             before=before, after=after,
         )
+
+    def _match_type(self, params: Dict[str, Any]) -> str:
+        mt = str(params.get("match_type") or "PHRASE").upper()
+        if mt not in _MATCH_TYPES:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"match_type must be one of {sorted(_MATCH_TYPES)}.",
+                           retriable=False, details={"param": "match_type"})
+        return mt
+
+    def _keyword_texts(self, params: Dict[str, Any]) -> List[str]:
+        raw = params.get("keywords")
+        if isinstance(raw, str):
+            raw = [raw]
+        if not isinstance(raw, list) or not raw:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "'keywords' must be a non-empty list of keyword texts.",
+                           retriable=False, details={"param": "keywords"})
+        texts = [str(k).strip() for k in raw if str(k).strip()]
+        if not texts:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "'keywords' contained no non-empty texts.",
+                           retriable=False, details={"param": "keywords"})
+        return texts
+
+    def _new_resource_id(self, data: Dict[str, Any]) -> Optional[str]:
+        """The trailing id of the first mutated resource, e.g. .../campaigns/123."""
+        results = data.get("results") or []
+        if not results:
+            return None
+        name = results[0].get("resourceName", "")
+        return name.split("/")[-1] or None
+
+    def _create_campaign(self, cid, account, params) -> ActionResult:
+        name = str(params.get("name") or "").strip()
+        if not name:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "'name' is required.", retriable=False,
+                           details={"param": "name"})
+        budget = params.get("daily_budget")
+        if not isinstance(budget, (int, float)) or isinstance(budget, bool) or budget <= 0:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "'daily_budget' must be a positive number (account "
+                           "currency units).", retriable=False,
+                           details={"param": "daily_budget"})
+        micros = int(round(float(budget) * 1_000_000))
+
+        # 1. A dedicated budget for this campaign (name must be unique).
+        budget_name = f"{name} budget {uuid.uuid4().hex[:8]}"
+        budget_res = self._new_resource_id_full(self._mutate(cid, "campaignBudgets", {
+            "create": {"name": budget_name, "amountMicros": micros,
+                       "deliveryMethod": "STANDARD"},
+        }))
+        if not budget_res:
+            raise ApiError(ErrorCode.UPSTREAM_ERROR,
+                           "Google Ads did not return the new budget resource.",
+                           retriable=False)
+
+        # 2. The campaign itself — PAUSED, Search network, manual CPC.
+        data = self._mutate(cid, "campaigns", {
+            "create": {
+                "name": name,
+                "status": "PAUSED",   # create-paused: never serves until enabled
+                "advertisingChannelType": "SEARCH",
+                "manualCpc": {},
+                "campaignBudget": budget_res,
+                "networkSettings": {
+                    "targetGoogleSearch": True,
+                    "targetSearchNetwork": True,
+                    "targetContentNetwork": False,
+                    "targetPartnerSearchNetwork": False,
+                },
+            },
+        })
+        new_id = self._new_resource_id(data)
+        after = {"id": new_id, "name": name, "status": "PAUSED",
+                 "daily_budget": budget, "channel_type": "SEARCH"}
+        return ActionResult(
+            action="create_campaign", account=account,
+            summary=(f"Created Search campaign {name!r} (id {new_id}) PAUSED with a "
+                     f"{budget}/day budget. Enable it to start serving."),
+            before=None, after=after,
+        )
+
+    def _new_resource_id_full(self, data: Dict[str, Any]) -> Optional[str]:
+        """Full resourceName of the first mutated resource (for referencing)."""
+        results = data.get("results") or []
+        if not results:
+            return None
+        return results[0].get("resourceName") or None
+
+    def _add_keywords(self, cid, account, params) -> ActionResult:
+        ad_group_id = self._require_id(params, "ad_group_id")
+        texts = self._keyword_texts(params)
+        match_type = self._match_type(params)
+        ag_res = f"customers/{cid}/adGroups/{ad_group_id}"
+        operations = [{
+            "create": {
+                "adGroup": ag_res,
+                "status": "ENABLED",
+                "keyword": {"text": t, "matchType": match_type},
+            },
+        } for t in texts]
+        self._call("POST", f"{_BASE}/customers/{cid}/adGroupCriteria:mutate",
+                   {"operations": operations})
+        after = {"ad_group_id": ad_group_id, "match_type": match_type,
+                 "keywords": texts}
+        return ActionResult(
+            action="add_keywords", account=account,
+            summary=(f"Added {len(texts)} {match_type} keyword"
+                     f"{'' if len(texts) == 1 else 's'} to ad group {ad_group_id}."),
+            before=None, after=after,
+        )
+
+    def _add_negative_keywords(self, cid, account, params) -> ActionResult:
+        campaign_id = self._require_id(params, "campaign_id")
+        texts = self._keyword_texts(params)
+        match_type = self._match_type(params)
+        camp_res = f"customers/{cid}/campaigns/{campaign_id}"
+        operations = [{
+            "create": {
+                "campaign": camp_res,
+                "negative": True,
+                "keyword": {"text": t, "matchType": match_type},
+            },
+        } for t in texts]
+        self._call("POST", f"{_BASE}/customers/{cid}/campaignCriteria:mutate",
+                   {"operations": operations})
+        after = {"campaign_id": campaign_id, "match_type": match_type,
+                 "negative_keywords": texts}
+        return ActionResult(
+            action="add_negative_keywords", account=account,
+            summary=(f"Added {len(texts)} {match_type} negative keyword"
+                     f"{'' if len(texts) == 1 else 's'} to campaign {campaign_id}."),
+            before=None, after=after,
+        )
+
+    def _remove_keyword(self, cid, account, params) -> ActionResult:
+        ad_group_id = self._require_id(params, "ad_group_id")
+        criterion_id = self._require_id(params, "criterion_id")
+        resource = f"customers/{cid}/adGroupCriteria/{ad_group_id}~{criterion_id}"
+        self._mutate(cid, "adGroupCriteria", {"remove": resource})
+        after = {"ad_group_id": ad_group_id, "criterion_id": criterion_id,
+                 "removed": True}
+        return ActionResult(
+            action="remove_keyword", account=account,
+            summary=f"Removed keyword {criterion_id} from ad group {ad_group_id}.",
+            before={"ad_group_id": ad_group_id, "criterion_id": criterion_id},
+            after=after,
+        )
+
+    def _positive_amount(self, params: Dict[str, Any], key: str) -> float:
+        v = params.get(key)
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"{key!r} must be a positive number.",
+                           retriable=False, details={"param": key})
+        return float(v)
+
+    def _campaign_bidding_before(self, cid, campaign_id) -> Dict[str, Any]:
+        row = self._search_one(
+            cid,
+            f"SELECT campaign.id, campaign.name, campaign.bidding_strategy_type "
+            f"FROM campaign WHERE campaign.id = {campaign_id}",
+        )
+        if row is None:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"Campaign {campaign_id} was not found in this account.",
+                           retriable=False, details={"campaign_id": campaign_id})
+        camp = row.get("campaign", {})
+        return {"id": campaign_id, "name": camp.get("name"),
+                "bidding_strategy_type": camp.get("biddingStrategyType")}
+
+    def _set_target_cpa(self, cid, account, params) -> ActionResult:
+        campaign_id = self._require_id(params, "campaign_id")
+        cpa = self._positive_amount(params, "target_cpa")
+        before = self._campaign_bidding_before(cid, campaign_id)
+        micros = int(round(cpa * 1_000_000))
+        self._mutate(cid, "campaigns", {
+            "updateMask": "target_cpa.target_cpa_micros",
+            "update": {"resourceName": f"customers/{cid}/campaigns/{campaign_id}",
+                       "targetCpa": {"targetCpaMicros": micros}},
+        })
+        after = {**before, "bidding_strategy_type": "TARGET_CPA", "target_cpa": cpa}
+        return ActionResult(
+            action="set_target_cpa", account=account,
+            summary=(f"Campaign {before.get('name') or campaign_id} set to Target "
+                     f"CPA bidding at {cpa}."),
+            before=before, after=after,
+        )
+
+    def _set_target_roas(self, cid, account, params) -> ActionResult:
+        campaign_id = self._require_id(params, "campaign_id")
+        roas = self._positive_amount(params, "target_roas")
+        before = self._campaign_bidding_before(cid, campaign_id)
+        self._mutate(cid, "campaigns", {
+            "updateMask": "target_roas.target_roas",
+            "update": {"resourceName": f"customers/{cid}/campaigns/{campaign_id}",
+                       "targetRoas": {"targetRoas": roas}},
+        })
+        after = {**before, "bidding_strategy_type": "TARGET_ROAS", "target_roas": roas}
+        return ActionResult(
+            action="set_target_roas", account=account,
+            summary=(f"Campaign {before.get('name') or campaign_id} set to Target "
+                     f"ROAS bidding at {roas} ({roas * 100:g}%)."),
+            before=before, after=after,
+        )
+
+    def _set_max_cpc(self, cid, account, params) -> ActionResult:
+        ad_group_id = self._require_id(params, "ad_group_id")
+        max_cpc = self._positive_amount(params, "max_cpc")
+        row = self._search_one(
+            cid,
+            f"SELECT ad_group.id, ad_group.name, ad_group.cpc_bid_micros "
+            f"FROM ad_group WHERE ad_group.id = {ad_group_id}",
+        )
+        if row is None:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"Ad group {ad_group_id} was not found in this account.",
+                           retriable=False, details={"ad_group_id": ad_group_id})
+        ag = row.get("adGroup", {})
+        old = ag.get("cpcBidMicros")
+        micros = int(round(max_cpc * 1_000_000))
+        self._mutate(cid, "adGroups", {
+            "updateMask": "cpc_bid_micros",
+            "update": {"resourceName": f"customers/{cid}/adGroups/{ad_group_id}",
+                       "cpcBidMicros": micros},
+        })
+        def _units(m):
+            try:
+                return float(m) / 1_000_000
+            except (TypeError, ValueError):
+                return None
+        before = {"ad_group_id": ad_group_id, "name": ag.get("name"),
+                  "max_cpc": _units(old)}
+        after = {**before, "max_cpc": max_cpc}
+        return ActionResult(
+            action="set_max_cpc", account=account,
+            summary=(f"Ad group {ag.get('name') or ad_group_id} max CPC set to "
+                     f"{max_cpc}."),
+            before=before, after=after,
+        )
+
+    def _text_list(self, params, key, min_n, max_len, label) -> List[str]:
+        raw = params.get(key)
+        if not isinstance(raw, list):
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"{key!r} must be a list of {label}.",
+                           retriable=False, details={"param": key})
+        texts = [str(t).strip() for t in raw if str(t).strip()]
+        if len(texts) < min_n:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"At least {min_n} {label} are required (got {len(texts)}).",
+                           retriable=False, details={"param": key})
+        too_long = [t for t in texts if len(t) > max_len]
+        if too_long:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"Each of the {label} must be ≤{max_len} characters; "
+                           f"too long: {too_long[0]!r}.",
+                           retriable=False, details={"param": key})
+        return texts
+
+    def _create_rsa(self, cid, account, params) -> ActionResult:
+        ad_group_id = self._require_id(params, "ad_group_id")
+        final_url = str(params.get("final_url") or "").strip()
+        if not final_url:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "'final_url' is required.", retriable=False,
+                           details={"param": "final_url"})
+        headlines = self._text_list(params, "headlines", 3, 30, "headlines")
+        descriptions = self._text_list(params, "descriptions", 2, 90, "descriptions")
+        data = self._mutate(cid, "adGroupAds", {
+            "create": {
+                "adGroup": f"customers/{cid}/adGroups/{ad_group_id}",
+                "status": "ENABLED",
+                "ad": {
+                    "finalUrls": [final_url],
+                    "responsiveSearchAd": {
+                        "headlines": [{"text": h} for h in headlines],
+                        "descriptions": [{"text": d} for d in descriptions],
+                    },
+                },
+            },
+        })
+        new_res = self._new_resource_id_full(data)
+        after = {"ad_group_id": ad_group_id, "final_url": final_url,
+                 "headlines": headlines, "descriptions": descriptions,
+                 "resource": new_res, "status": "ENABLED"}
+        return ActionResult(
+            action="create_responsive_search_ad", account=account,
+            summary=(f"Created a responsive search ad in ad group {ad_group_id} "
+                     f"({len(headlines)} headlines, {len(descriptions)} descriptions). "
+                     f"It serves only when the ad group and campaign are enabled."),
+            before=None, after=after,
+        )
+
+    def _create_ad_group(self, cid, account, params) -> ActionResult:
+        campaign_id = self._require_id(params, "campaign_id")
+        name = str(params.get("name") or "").strip()
+        if not name:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "'name' is required.", retriable=False,
+                           details={"param": "name"})
+        create = {
+            "campaign": f"customers/{cid}/campaigns/{campaign_id}",
+            "name": name,
+            "status": "PAUSED",   # create-paused
+            "type": "SEARCH_STANDARD",
+        }
+        max_cpc = None
+        if params.get("max_cpc") is not None:
+            max_cpc = self._positive_amount(params, "max_cpc")
+            create["cpcBidMicros"] = int(round(max_cpc * 1_000_000))
+        data = self._mutate(cid, "adGroups", {"create": create})
+        new_id = self._new_resource_id(data)
+        after = {"id": new_id, "name": name, "status": "PAUSED",
+                 "campaign_id": campaign_id, "max_cpc": max_cpc}
+        return ActionResult(
+            action="create_ad_group", account=account,
+            summary=(f"Created ad group {name!r} (id {new_id}) PAUSED in campaign "
+                     f"{campaign_id}."),
+            before=None, after=after,
+        )
+
+    def _remove_ad_group(self, cid, account, params) -> ActionResult:
+        ad_group_id = self._require_id(params, "ad_group_id")
+        row = self._search_one(
+            cid,
+            f"SELECT ad_group.id, ad_group.name FROM ad_group "
+            f"WHERE ad_group.id = {ad_group_id}",
+        )
+        if row is None:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"Ad group {ad_group_id} was not found in this account.",
+                           retriable=False, details={"ad_group_id": ad_group_id})
+        name = row.get("adGroup", {}).get("name")
+        self._mutate(cid, "adGroups",
+                     {"remove": f"customers/{cid}/adGroups/{ad_group_id}"})
+        return ActionResult(
+            action="remove_ad_group", account=account,
+            summary=f"Permanently removed ad group {name or ad_group_id}.",
+            before={"id": ad_group_id, "name": name},
+            after={"id": ad_group_id, "removed": True},
+        )
+
+    def _set_ad_status(self, cid, account, params, status) -> ActionResult:
+        ad_group_id = self._require_id(params, "ad_group_id")
+        ad_id = self._require_id(params, "ad_id")
+        row = self._search_one(
+            cid,
+            f"SELECT ad_group_ad.status, ad_group_ad.ad.id FROM ad_group_ad "
+            f"WHERE ad_group_ad.ad.id = {ad_id} AND ad_group.id = {ad_group_id}",
+        )
+        if row is None:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"Ad {ad_id} was not found in ad group {ad_group_id}.",
+                           retriable=False,
+                           details={"ad_group_id": ad_group_id, "ad_id": ad_id})
+        before_status = row.get("adGroupAd", {}).get("status")
+        self._mutate(cid, "adGroupAds", {
+            "updateMask": "status",
+            "update": {
+                "resourceName": f"customers/{cid}/adGroupAds/{ad_group_id}~{ad_id}",
+                "status": status,
+            },
+        })
+        verb = "paused" if status == "PAUSED" else "enabled"
+        return ActionResult(
+            action=("pause_ad" if status == "PAUSED" else "enable_ad"),
+            account=account,
+            summary=f"Ad {ad_id} in ad group {ad_group_id} {verb}.",
+            before={"ad_group_id": ad_group_id, "ad_id": ad_id, "status": before_status},
+            after={"ad_group_id": ad_group_id, "ad_id": ad_id, "status": status},
+        )
+
+    def _remove_ad(self, cid, account, params) -> ActionResult:
+        ad_group_id = self._require_id(params, "ad_group_id")
+        ad_id = self._require_id(params, "ad_id")
+        self._mutate(cid, "adGroupAds", {
+            "remove": f"customers/{cid}/adGroupAds/{ad_group_id}~{ad_id}",
+        })
+        return ActionResult(
+            action="remove_ad", account=account,
+            summary=f"Permanently removed ad {ad_id} from ad group {ad_group_id}.",
+            before={"ad_group_id": ad_group_id, "ad_id": ad_id},
+            after={"ad_group_id": ad_group_id, "ad_id": ad_id, "removed": True},
+        )
+
+    def _update_keyword(self, cid, account, params) -> ActionResult:
+        ad_group_id = self._require_id(params, "ad_group_id")
+        criterion_id = self._require_id(params, "criterion_id")
+        update = {
+            "resourceName": f"customers/{cid}/adGroupCriteria/{ad_group_id}~{criterion_id}",
+        }
+        masks: List[str] = []
+        changed: Dict[str, Any] = {}
+        if params.get("status") is not None:
+            status = str(params["status"]).upper()
+            if status not in ("ENABLED", "PAUSED"):
+                raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                               "status must be ENABLED or PAUSED.",
+                               retriable=False, details={"param": "status"})
+            update["status"] = status
+            masks.append("status")
+            changed["status"] = status
+        if params.get("max_cpc") is not None:
+            max_cpc = self._positive_amount(params, "max_cpc")
+            update["cpcBidMicros"] = int(round(max_cpc * 1_000_000))
+            masks.append("cpc_bid_micros")
+            changed["max_cpc"] = max_cpc
+        if not masks:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "Provide at least one of 'status' or 'max_cpc' to update.",
+                           retriable=False)
+        self._mutate(cid, "adGroupCriteria",
+                     {"updateMask": ",".join(masks), "update": update})
+        after = {"ad_group_id": ad_group_id, "criterion_id": criterion_id, **changed}
+        return ActionResult(
+            action="update_keyword", account=account,
+            summary=(f"Updated keyword {criterion_id} in ad group {ad_group_id} "
+                     f"({', '.join(masks)})."),
+            before={"ad_group_id": ad_group_id, "criterion_id": criterion_id},
+            after=after,
+        )
+
+    def _remove_campaign(self, cid, account, params) -> ActionResult:
+        campaign_id = self._require_id(params, "campaign_id")
+        row = self._search_one(
+            cid,
+            f"SELECT campaign.id, campaign.name, campaign.status FROM campaign "
+            f"WHERE campaign.id = {campaign_id}",
+        )
+        if row is None:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"Campaign {campaign_id} was not found in this account.",
+                           retriable=False, details={"campaign_id": campaign_id})
+        camp = row.get("campaign", {})
+        self._mutate(cid, "campaigns",
+                     {"remove": f"customers/{cid}/campaigns/{campaign_id}"})
+        return ActionResult(
+            action="remove_campaign", account=account,
+            summary=(f"PERMANENTLY removed campaign {camp.get('name') or campaign_id}. "
+                     f"This cannot be undone."),
+            before={"id": campaign_id, "name": camp.get("name"),
+                    "status": camp.get("status")},
+            after={"id": campaign_id, "status": "REMOVED", "removed": True},
+        )
+
+    # -- additional bidding strategies -------------------------------------
+
+    def _update_campaign_bidding(self, cid, account, params, action_id,
+                                 update_fields, mask, after_extra, verb) -> ActionResult:
+        campaign_id = self._require_id(params, "campaign_id")
+        before = self._campaign_bidding_before(cid, campaign_id)
+        self._mutate(cid, "campaigns", {
+            "updateMask": mask,
+            "update": {"resourceName": f"customers/{cid}/campaigns/{campaign_id}",
+                       **update_fields},
+        })
+        after = {**before, **after_extra}
+        return ActionResult(
+            action=action_id, account=account,
+            summary=f"Campaign {before.get('name') or campaign_id} set to {verb}.",
+            before=before, after=after,
+        )
+
+    def _set_maximize_conversions(self, cid, account, params) -> ActionResult:
+        mc: Dict[str, Any] = {}
+        mask = "maximize_conversions"
+        extra = {"bidding_strategy_type": "MAXIMIZE_CONVERSIONS"}
+        if params.get("target_cpa") is not None:
+            cpa = self._positive_amount(params, "target_cpa")
+            mc["targetCpaMicros"] = int(round(cpa * 1_000_000))
+            mask = "maximize_conversions.target_cpa_micros"
+            extra["target_cpa"] = cpa
+        return self._update_campaign_bidding(
+            cid, account, params, "set_maximize_conversions",
+            {"maximizeConversions": mc}, mask, extra, "Maximize Conversions bidding")
+
+    def _set_maximize_conversion_value(self, cid, account, params) -> ActionResult:
+        mcv: Dict[str, Any] = {}
+        mask = "maximize_conversion_value"
+        extra = {"bidding_strategy_type": "MAXIMIZE_CONVERSION_VALUE"}
+        if params.get("target_roas") is not None:
+            roas = self._positive_amount(params, "target_roas")
+            mcv["targetRoas"] = roas
+            mask = "maximize_conversion_value.target_roas"
+            extra["target_roas"] = roas
+        return self._update_campaign_bidding(
+            cid, account, params, "set_maximize_conversion_value",
+            {"maximizeConversionValue": mcv}, mask, extra,
+            "Maximize Conversion Value bidding")
+
+    def _set_manual_cpc(self, cid, account, params) -> ActionResult:
+        enhanced = bool(params.get("enhanced", False))
+        return self._update_campaign_bidding(
+            cid, account, params, "set_manual_cpc",
+            {"manualCpc": {"enhancedCpcEnabled": enhanced}},
+            "manual_cpc.enhanced_cpc_enabled",
+            {"bidding_strategy_type": "MANUAL_CPC", "enhanced": enhanced},
+            f"Manual CPC bidding (enhanced={enhanced})")
+
+    def _set_target_impression_share(self, cid, account, params) -> ActionResult:
+        location = str(params.get("location") or "").upper()
+        valid_loc = {"ANYWHERE_ON_PAGE", "TOP_OF_PAGE", "ABSOLUTE_TOP_OF_PAGE"}
+        if location not in valid_loc:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"location must be one of {sorted(valid_loc)}.",
+                           retriable=False, details={"param": "location"})
+        pct = params.get("target_percentage")
+        if not isinstance(pct, (int, float)) or isinstance(pct, bool) or not (0 < pct <= 100):
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "target_percentage must be a number in (0, 100].",
+                           retriable=False, details={"param": "target_percentage"})
+        tis: Dict[str, Any] = {
+            "location": location,
+            "locationFractionMicros": int(round(pct / 100 * 1_000_000)),
+        }
+        masks = ["target_impression_share.location",
+                 "target_impression_share.location_fraction_micros"]
+        extra = {"bidding_strategy_type": "TARGET_IMPRESSION_SHARE",
+                 "location": location, "target_percentage": pct}
+        if params.get("cpc_bid_ceiling") is not None:
+            ceil = self._positive_amount(params, "cpc_bid_ceiling")
+            tis["cpcBidCeilingMicros"] = int(round(ceil * 1_000_000))
+            masks.append("target_impression_share.cpc_bid_ceiling_micros")
+            extra["cpc_bid_ceiling"] = ceil
+        return self._update_campaign_bidding(
+            cid, account, params, "set_target_impression_share",
+            {"targetImpressionShare": tis}, ",".join(masks), extra,
+            "Target Impression Share bidding")
+
+    # -- portfolio bid strategies -----------------------------------------
+
+    def _create_portfolio_bid_strategy(self, cid, account, params) -> ActionResult:
+        name = str(params.get("name") or "").strip()
+        if not name:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "'name' is required.", retriable=False,
+                           details={"param": "name"})
+        stype = str(params.get("type") or "").upper()
+        target = self._positive_amount(params, "target")
+        if stype == "TARGET_CPA":
+            strategy = {"targetCpa": {"targetCpaMicros": int(round(target * 1_000_000))}}
+        elif stype == "TARGET_ROAS":
+            strategy = {"targetRoas": {"targetRoas": target}}
+        else:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "type must be TARGET_CPA or TARGET_ROAS.",
+                           retriable=False, details={"param": "type"})
+        data = self._mutate(cid, "biddingStrategies",
+                            {"create": {"name": name, **strategy}})
+        new_id = self._new_resource_id(data)
+        after = {"id": new_id, "name": name, "type": stype, "target": target}
+        return ActionResult(
+            action="create_portfolio_bid_strategy", account=account,
+            summary=(f"Created portfolio bid strategy {name!r} (id {new_id}, "
+                     f"{stype} {target})."),
+            before=None, after=after,
+        )
+
+    def _attach_campaign_to_portfolio(self, cid, account, params) -> ActionResult:
+        campaign_id = self._require_id(params, "campaign_id")
+        strategy_id = self._require_id(params, "bidding_strategy_id")
+        before = self._campaign_bidding_before(cid, campaign_id)
+        strat_res = f"customers/{cid}/biddingStrategies/{strategy_id}"
+        self._mutate(cid, "campaigns", {
+            "updateMask": "bidding_strategy",
+            "update": {"resourceName": f"customers/{cid}/campaigns/{campaign_id}",
+                       "biddingStrategy": strat_res},
+        })
+        after = {**before, "bidding_strategy_id": strategy_id}
+        return ActionResult(
+            action="attach_campaign_to_portfolio", account=account,
+            summary=(f"Campaign {before.get('name') or campaign_id} attached to "
+                     f"portfolio bid strategy {strategy_id}."),
+            before=before, after=after,
+        )
+
+    # -- ad extensions (assets) -------------------------------------------
+
+    def _create_asset(self, cid, asset_body) -> str:
+        data = self._call("POST", f"{_BASE}/customers/{cid}/assets:mutate",
+                          {"operations": [{"create": asset_body}]})
+        res = self._new_resource_id_full(data)
+        if not res:
+            raise ApiError(ErrorCode.UPSTREAM_ERROR,
+                           "Google Ads did not return the new asset resource.",
+                           retriable=False)
+        return res
+
+    def _link_campaign_asset(self, cid, campaign_id, asset_res, field_type) -> None:
+        self._call("POST", f"{_BASE}/customers/{cid}/campaignAssets:mutate",
+                   {"operations": [{"create": {
+                       "campaign": f"customers/{cid}/campaigns/{campaign_id}",
+                       "asset": asset_res,
+                       "fieldType": field_type,
+                   }}]})
+
+    def _add_sitelink(self, cid, account, params) -> ActionResult:
+        campaign_id = self._require_id(params, "campaign_id")
+        link_text = str(params.get("link_text") or "").strip()
+        final_url = str(params.get("final_url") or "").strip()
+        if not link_text or not final_url:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "'link_text' and 'final_url' are required.",
+                           retriable=False)
+        sitelink: Dict[str, Any] = {"linkText": link_text}
+        if params.get("description1"):
+            sitelink["description1"] = str(params["description1"])
+        if params.get("description2"):
+            sitelink["description2"] = str(params["description2"])
+        asset_res = self._create_asset(cid, {
+            "finalUrls": [final_url], "sitelinkAsset": sitelink})
+        self._link_campaign_asset(cid, campaign_id, asset_res, "SITELINK")
+        after = {"campaign_id": campaign_id, "link_text": link_text,
+                 "final_url": final_url, "asset": asset_res}
+        return ActionResult(
+            action="add_sitelink", account=account,
+            summary=f"Added sitelink {link_text!r} to campaign {campaign_id}.",
+            before=None, after=after,
+        )
+
+    def _add_callout(self, cid, account, params) -> ActionResult:
+        campaign_id = self._require_id(params, "campaign_id")
+        text = str(params.get("text") or "").strip()
+        if not text:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS, "'text' is required.",
+                           retriable=False, details={"param": "text"})
+        asset_res = self._create_asset(cid, {"calloutAsset": {"calloutText": text}})
+        self._link_campaign_asset(cid, campaign_id, asset_res, "CALLOUT")
+        return ActionResult(
+            action="add_callout", account=account,
+            summary=f"Added callout {text!r} to campaign {campaign_id}.",
+            before=None,
+            after={"campaign_id": campaign_id, "text": text, "asset": asset_res},
+        )
+
+    def _add_structured_snippet(self, cid, account, params) -> ActionResult:
+        campaign_id = self._require_id(params, "campaign_id")
+        header = str(params.get("header") or "").strip()
+        values = self._text_list(params, "values", 1, 25, "values")
+        if not header:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS, "'header' is required.",
+                           retriable=False, details={"param": "header"})
+        asset_res = self._create_asset(cid, {"structuredSnippetAsset": {
+            "header": header, "values": values}})
+        self._link_campaign_asset(cid, campaign_id, asset_res, "STRUCTURED_SNIPPET")
+        return ActionResult(
+            action="add_structured_snippet", account=account,
+            summary=(f"Added structured snippet {header!r} ({len(values)} values) "
+                     f"to campaign {campaign_id}."),
+            before=None,
+            after={"campaign_id": campaign_id, "header": header, "values": values,
+                   "asset": asset_res},
+        )
+
+    # -- Customer Match audiences -----------------------------------------
+
+    @staticmethod
+    def _hash_identifier(value: str) -> str:
+        """SHA-256 of a normalised identifier (lowercased, trimmed), hex."""
+        return hashlib.sha256(value.strip().lower().encode("utf-8")).hexdigest()
+
+    def _create_customer_list(self, cid, account, params) -> ActionResult:
+        name = str(params.get("name") or "").strip()
+        if not name:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS, "'name' is required.",
+                           retriable=False, details={"param": "name"})
+        data = self._call("POST", f"{_BASE}/customers/{cid}/userLists:mutate",
+                          {"operations": [{"create": {
+                              "name": name,
+                              "membershipStatus": "OPEN",
+                              "crmBasedUserList": {"uploadKeyType": "CONTACT_INFO"},
+                          }}]})
+        new_id = self._new_resource_id(data)
+        return ActionResult(
+            action="create_customer_list", account=account,
+            summary=f"Created Customer Match list {name!r} (id {new_id}).",
+            before=None, after={"id": new_id, "name": name})
+
+    def _add_customer_list_members(self, cid, account, params) -> ActionResult:
+        user_list_id = self._require_id(params, "user_list_id")
+        emails = params.get("emails") or []
+        phones = params.get("phones") or []
+        if not isinstance(emails, list) or not isinstance(phones, list):
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "'emails' and 'phones' must be lists.", retriable=False)
+        identifiers: List[Dict[str, str]] = []
+        for e in emails:
+            e = str(e).strip()
+            if e:
+                identifiers.append({"hashedEmail": self._hash_identifier(e)})
+        for p in phones:
+            p = str(p).strip()
+            if p:
+                identifiers.append({"hashedPhoneNumber": self._hash_identifier(p)})
+        if not identifiers:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "Provide at least one email or phone number.",
+                           retriable=False)
+        user_list_res = f"customers/{cid}/userLists/{user_list_id}"
+        # Offline user-data job: create -> add operations -> run.
+        created = self._call(
+            "POST", f"{_BASE}/customers/{cid}/offlineUserDataJobs:create",
+            {"job": {"type": "CUSTOMER_MATCH_USER_LIST",
+                     "customerMatchUserListMetadata": {"userList": user_list_res}}})
+        job_res = created.get("resourceName")
+        if not job_res:
+            raise ApiError(ErrorCode.UPSTREAM_ERROR,
+                           "Google Ads did not return an offline-user-data job.",
+                           retriable=False)
+        self._call("POST", f"{_BASE}/{job_res}:addOperations",
+                   {"enablePartialFailure": True,
+                    "operations": [{"create": {"userIdentifiers": [ident]}}
+                                   for ident in identifiers]})
+        self._call("POST", f"{_BASE}/{job_res}:run", {})
+        return ActionResult(
+            action="add_customer_list_members", account=account,
+            summary=(f"Uploaded {len(identifiers)} hashed member identifier"
+                     f"{'' if len(identifiers) == 1 else 's'} to Customer Match "
+                     f"list {user_list_id} (processing is asynchronous)."),
+            before=None,
+            after={"user_list_id": user_list_id, "member_count": len(identifiers),
+                   "job": job_res})
+
+    def _attach_audience(self, cid, account, params) -> ActionResult:
+        ad_group_id = self._require_id(params, "ad_group_id")
+        user_list_id = self._require_id(params, "user_list_id")
+        self._call("POST", f"{_BASE}/customers/{cid}/adGroupCriteria:mutate",
+                   {"operations": [{"create": {
+                       "adGroup": f"customers/{cid}/adGroups/{ad_group_id}",
+                       "status": "ENABLED",
+                       "userList": {"userList": f"customers/{cid}/userLists/{user_list_id}"},
+                   }}]})
+        return ActionResult(
+            action="attach_audience", account=account,
+            summary=(f"Targeting user list {user_list_id} on ad group {ad_group_id}."),
+            before=None,
+            after={"ad_group_id": ad_group_id, "user_list_id": user_list_id})
+
+    def _remove_audience(self, cid, account, params) -> ActionResult:
+        ad_group_id = self._require_id(params, "ad_group_id")
+        criterion_id = self._require_id(params, "criterion_id")
+        self._mutate(cid, "adGroupCriteria",
+                     {"remove": f"customers/{cid}/adGroupCriteria/{ad_group_id}~{criterion_id}"})
+        return ActionResult(
+            action="remove_audience", account=account,
+            summary=f"Removed audience {criterion_id} from ad group {ad_group_id}.",
+            before={"ad_group_id": ad_group_id, "criterion_id": criterion_id},
+            after={"ad_group_id": ad_group_id, "criterion_id": criterion_id,
+                   "removed": True})
 
 
 def _build_gaql(resource, dimensions, metrics, start, end, limit) -> str:
