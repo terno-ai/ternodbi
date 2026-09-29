@@ -337,7 +337,7 @@ class FakeWritableGA4(FakeGA4):
                                "properties": {"campaign_id": {"type": "string"}},
                                "required": ["campaign_id"]})]
 
-    def execute_action(self, action_id, account, params=None):
+    def execute_action(self, action_id, account, params=None, dry_run=False):
         from terno_dbi.connectors.api.model.types import ActionResult
         from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
         if action_id != "noop":
@@ -412,3 +412,26 @@ class TestExecuteAction:
         assert row.after == {"status": "PAUSED"}
         assert row.summary == "did the thing"
         assert row.actor_id == env["user"].id          # who acted
+
+
+@pytest.mark.django_db
+class TestExecuteActionDryRun:
+    def test_dry_run_is_not_audited_and_flagged(self, env):
+        from terno_dbi.connectors.api import registry
+        from terno_dbi.connectors.api.auth import account_selection as sel
+        from terno_dbi.connectors.api.model.types import Account
+        from terno_dbi.core.models import ConnectorWriteLog
+
+        registry.register("googleanalytics4", lambda ds: FakeWritableGA4(ds))
+        sel.sync_account_selections(env["ds"], [Account("111", "A")])
+        sel.set_writes_enabled_accounts(env["ds"], ["111"])
+        before = ConnectorWriteLog.objects.count()
+
+        resp = api_views.api_execute_action(
+            _req("POST", _writable_token(env),
+                 {"action": "noop", "account": "111", "params": {"campaign_id": "1"},
+                  "dry_run": True}), "GA4")
+        assert resp.status_code == 200
+        assert _json(resp)["dry_run"] is True
+        # a dry run changes nothing, so no audit row is written
+        assert ConnectorWriteLog.objects.count() == before

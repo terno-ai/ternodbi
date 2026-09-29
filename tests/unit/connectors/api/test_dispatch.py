@@ -184,7 +184,7 @@ class _WriteConnector:
         self.datasource = datasource
         self.executed = []
 
-    def execute_action(self, action_id, account, params=None):
+    def execute_action(self, action_id, account, params=None, dry_run=False):
         from terno_dbi.connectors.api.model.types import ActionResult
         self.executed.append((action_id, account, params))
         return ActionResult(action=action_id, account=account, summary="done")

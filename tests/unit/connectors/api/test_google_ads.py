@@ -487,13 +487,38 @@ class TestErrorSurfacing:
         err = _ads_error(self._Resp(503, {"error": {"message": "backend"}}))
         assert err.retriable is True
 
-    def test_missing_developer_token_is_a_clear_config_error(self, monkeypatch):
+    def test_developer_token_header_is_optional_post_sunset(self, monkeypatch):
         from terno_dbi.connectors.api.sources import google_ads as ga
+        import requests
+
+        captured = {}
+
+        class _Resp:
+            status_code = 200
+
+            def json(self):
+                return {"ok": True}
+
+        def fake_request(method, url, headers=None, json=None, timeout=None):
+            captured["headers"] = headers
+            return _Resp()
+
+        monkeypatch.setattr(requests, "request", fake_request)
+
         monkeypatch.delenv(ga._DEVELOPER_TOKEN_ENV, raising=False)
-        with pytest.raises(ApiError) as exc:
-            ga._default_http("GET", "https://x", "tok")
-        assert exc.value.retriable is False
-        assert ga._DEVELOPER_TOKEN_ENV in exc.value.message
+        ga._default_http("GET", "https://x", "tok")          # no error
+        assert "developer-token" not in captured["headers"]
+        assert captured["headers"]["Authorization"] == "Bearer tok"
+
+        monkeypatch.setenv(ga._DEVELOPER_TOKEN_ENV, "dev123")
+        ga._default_http("GET", "https://x", "tok")
+        assert captured["headers"]["developer-token"] == "dev123"
+
+        # login-customer-id: omitted unless set; hyphens stripped when set.
+        assert "login-customer-id" not in captured["headers"]
+        monkeypatch.setenv(ga._LOGIN_CUSTOMER_ID_ENV, "857-054-4175")
+        ga._default_http("GET", "https://x", "tok")
+        assert captured["headers"]["login-customer-id"] == "8570544175"
 
 
 class TestRegistration:
@@ -655,11 +680,17 @@ class TestWriteActionsExtended:
         assert d["after"]["daily_budget"] == 50
         # budget created first, referenced by the campaign create
         budget_call = [c for c in calls if "campaignBudgets:mutate" in c["url"]][0]
-        assert budget_call["body"]["operations"][0]["create"]["amountMicros"] == 50_000_000
+        budget_create = budget_call["body"]["operations"][0]["create"]
+        assert budget_create["amountMicros"] == 50_000_000
+        # Non-shared budget, required by Maximize Conversions/Value bidding.
+        assert budget_create["explicitlyShared"] is False
         camp_op = [c for c in calls if "campaigns:mutate" in c["url"]][0]["body"]["operations"][0]["create"]
         assert camp_op["status"] == "PAUSED"
         assert camp_op["advertisingChannelType"] == "SEARCH"
         assert camp_op["campaignBudget"] == "customers/1112223333/campaignBudgets/77"
+        # Required by Google Ads: EU political-ads declaration.
+        assert camp_op["containsEuPoliticalAdvertising"] == \
+            "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING"
 
     def test_create_campaign_rejects_nonpositive_budget(self):
         conn = _connector({})   # no routes -> a provider call would blow up
@@ -747,10 +778,12 @@ class TestBiddingAndAds:
                                   {"campaign_id": "1", "target_cpa": 25})
         d = res.as_dict()
         assert d["before"]["bidding_strategy_type"] == "MANUAL_CPC"
-        assert d["after"]["bidding_strategy_type"] == "TARGET_CPA"
+        # Standalone TargetCpa is not permitted; implemented as Maximize
+        # Conversions with a target CPA (scalar-leaf mask).
+        assert d["after"]["bidding_strategy_type"] == "MAXIMIZE_CONVERSIONS"
         op = [c for c in calls if "campaigns:mutate" in c["url"]][0]["body"]["operations"][0]
-        assert op["update"]["targetCpa"]["targetCpaMicros"] == 25_000_000
-        assert op["updateMask"] == "target_cpa.target_cpa_micros"
+        assert op["update"]["maximizeConversions"]["targetCpaMicros"] == 25_000_000
+        assert op["updateMask"] == "maximize_conversions.target_cpa_micros"
 
     def test_set_target_roas_uses_ratio(self):
         search = {"results": [{"campaign": {"id": "1", "name": "B",
@@ -763,8 +796,8 @@ class TestBiddingAndAds:
         conn.execute_action("set_target_roas", "1112223333",
                             {"campaign_id": "1", "target_roas": 4})
         op = [c for c in calls if "campaigns:mutate" in c["url"]][0]["body"]["operations"][0]
-        assert op["update"]["targetRoas"]["targetRoas"] == 4
-        assert op["updateMask"] == "target_roas.target_roas"
+        assert op["update"]["maximizeConversionValue"]["targetRoas"] == 4
+        assert op["updateMask"] == "maximize_conversion_value.target_roas"
 
     def test_set_max_cpc_on_ad_group(self):
         search = {"results": [{"adGroup": {
@@ -833,7 +866,7 @@ class TestLifecycleCompletion:
         ids = {a.id for a in _connector({}).list_actions()}
         assert {"create_ad_group", "remove_ad_group", "pause_ad", "enable_ad",
                 "remove_ad", "update_keyword", "remove_campaign"} <= ids
-        assert len(ids) == 33   # complete registry (incl. advanced surface)
+        assert len(ids) == 35   # complete registry (incl. advanced surface)
 
     def test_create_ad_group_is_paused_with_optional_max_cpc(self):
         http, calls = _recording_http({
@@ -954,8 +987,10 @@ class TestAdvancedSurface:
         conn = GoogleAdsConnector(_DS(), http=http)
         conn.execute_action("set_maximize_conversions", "1112223333", {"campaign_id": "1"})
         op = [c for c in calls if "campaigns:mutate" in c["url"]][0]["body"]["operations"][0]
-        assert op["updateMask"] == "maximize_conversions"
-        assert op["update"]["maximizeConversions"] == {}
+        # No target: still mask the scalar leaf (targetCpaMicros=0), never the
+        # bare message (which raises FIELD_HAS_SUBFIELDS live).
+        assert op["updateMask"] == "maximize_conversions.target_cpa_micros"
+        assert op["update"]["maximizeConversions"]["targetCpaMicros"] == 0
 
     def test_manual_cpc_enhanced(self):
         http, calls = _recording_http({
@@ -1081,3 +1116,102 @@ class TestAdvancedSurface:
         op = [c for c in calls if "adGroupCriteria:mutate" in c["url"]][0]["body"]["operations"][0]
         assert op["create"]["userList"]["userList"].endswith("/userLists/321")
         assert op["create"]["adGroup"].endswith("/adGroups/55")
+
+
+class TestDryRun:
+    def test_single_mutate_sends_validate_only_and_marks_result(self):
+        search = {"results": [{"campaign": {"id": "1", "name": "B", "status": "ENABLED"}}]}
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): search,
+            ("POST", "campaigns:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("pause_campaign", "1112223333",
+                                  {"campaign_id": "1"}, dry_run=True)
+        d = res.as_dict()
+        assert d["details"]["dry_run"] is True and d["details"]["applied"] is False
+        assert d["summary"].startswith("[dry-run")
+        mutate = [c for c in calls if "campaigns:mutate" in c["url"]][0]
+        assert mutate["body"]["validateOnly"] is True
+
+    def test_reads_do_not_carry_validate_only(self):
+        search = {"results": [{"campaign": {"id": "1", "name": "B", "status": "ENABLED"}}]}
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): search,
+            ("POST", "campaigns:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn.execute_action("pause_campaign", "1112223333",
+                            {"campaign_id": "1"}, dry_run=True)
+        read = [c for c in calls if "googleAds:search" in c["url"]][0]
+        assert "validateOnly" not in (read["body"] or {})
+
+    def test_dry_run_flag_resets_between_calls(self):
+        search = {"results": [{"campaign": {"id": "1", "name": "B", "status": "ENABLED"}}]}
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): search,
+            ("POST", "campaigns:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn.execute_action("pause_campaign", "1112223333", {"campaign_id": "1"}, dry_run=True)
+        conn.execute_action("pause_campaign", "1112223333", {"campaign_id": "1"})
+        last_mutate = [c for c in calls if "campaigns:mutate" in c["url"]][-1]
+        assert "validateOnly" not in last_mutate["body"]   # real call, not dry
+
+    def test_multistep_create_campaign_validates_first_step_only(self):
+        http, calls = _recording_http({
+            ("POST", "campaignBudgets:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("create_campaign", "1112223333",
+                                  {"name": "X", "daily_budget": 10}, dry_run=True)
+        d = res.as_dict()
+        assert d["details"]["partial"] is True
+        # budget was validated, campaign step never called
+        assert any("campaignBudgets:mutate" in c["url"] for c in calls)
+        assert not any(c["url"].endswith("/campaigns:mutate") for c in calls)
+        assert [c for c in calls if "campaignBudgets:mutate" in c["url"]][0]["body"]["validateOnly"] is True
+
+    def test_customer_match_upload_uploads_nothing_in_dry_run(self):
+        http, calls = _recording_http({})   # no routes: any call would raise
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("add_customer_list_members", "1112223333",
+                                  {"user_list_id": "321", "emails": ["a@b.com"]},
+                                  dry_run=True)
+        assert res.as_dict()["details"]["dry_run"] is True
+        assert calls == []   # nothing sent — no job created, no upload
+
+
+class TestSharedBudget:
+    def test_registry_includes_shared_budget_actions(self):
+        ids = {a.id for a in _connector({}).list_actions()}
+        assert {"create_shared_budget", "attach_campaign_to_budget"} <= ids
+
+    def test_create_shared_budget_is_explicitly_shared(self):
+        http, calls = _recording_http({
+            ("POST", "campaignBudgets:mutate"):
+                {"results": [{"resourceName": "customers/1112223333/campaignBudgets/70"}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        res = conn.execute_action("create_shared_budget", "1112223333",
+                                  {"name": "Shared", "daily_budget": 100})
+        d = res.as_dict()
+        assert d["after"]["id"] == "70" and d["after"]["shared"] is True
+        op = [c for c in calls if "campaignBudgets:mutate" in c["url"]][0]["body"]["operations"][0]["create"]
+        assert op["explicitlyShared"] is True
+        assert op["amountMicros"] == 100_000_000
+
+    def test_attach_campaign_to_budget(self):
+        search = {"results": [{"campaign": {
+            "id": "1", "name": "Brand",
+            "campaignBudget": "customers/1112223333/campaignBudgets/9"}}]}
+        http, calls = _recording_http({
+            ("POST", "googleAds:search"): search,
+            ("POST", "campaigns:mutate"): {"results": [{}]},
+        })
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn.execute_action("attach_campaign_to_budget", "1112223333",
+                            {"campaign_id": "1", "budget_id": "70"})
+        op = [c for c in calls if "campaigns:mutate" in c["url"]][0]["body"]["operations"][0]
+        assert op["updateMask"] == "campaign_budget"
+        assert op["update"]["campaignBudget"].endswith("/campaignBudgets/70")

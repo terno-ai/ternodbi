@@ -273,6 +273,8 @@ def run_write_action(
     action_id: str,
     account: str,
     params: Optional[Dict[str, Any]] = None,
+    *,
+    dry_run: bool = False,
 ) -> Dict[str, Any]:
     """Run one connector write action through the pipeline. Returns a payload.
 
@@ -288,12 +290,14 @@ def run_write_action(
     authorised here, never inside the connector — mirroring `_authorise_accounts`.
     """
     authorise_write_account(connector.datasource, account)
-    result = connector.execute_action(action_id, account, params or {})
+    result = connector.execute_action(action_id, account, params or {},
+                                      dry_run=dry_run)
     payload = result.as_dict()
     payload["success"] = True
+    payload["dry_run"] = bool(dry_run)
     logger.info(
-        "Connector write: source=%s action=%s account=%s",
-        connector.key, action_id, account,
+        "Connector write: source=%s action=%s account=%s dry_run=%s",
+        connector.key, action_id, account, dry_run,
     )
     return payload
 

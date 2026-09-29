@@ -101,15 +101,18 @@ class ApiConnector(ABC):
         return []
 
     def execute_action(
-        self, action_id: str, account: str, params: Optional[Dict[str, Any]] = None
+        self, action_id: str, account: str,
+        params: Optional[Dict[str, Any]] = None, dry_run: bool = False,
     ) -> ActionResult:
         """Perform one write action against one account.
 
-        The default refuses: a connector must override this (and `list_actions`)
-        to support writes. Callers reach this only through the pipeline's
-        write-dispatch, which has already enforced the per-account write gate —
-        an individual connector never authorises accounts itself, exactly as with
-        reads (`query`).
+        With `dry_run=True`, a connector that supports it validates the request
+        with the provider but applies nothing (zero side effects). The default
+        refuses: a connector must override this (and `list_actions`) to support
+        writes. Callers reach this only through the pipeline's write-dispatch,
+        which has already enforced the per-account write gate — an individual
+        connector never authorises accounts itself, exactly as with reads
+        (`query`).
         """
         raise ApiError(
             ErrorCode.UNKNOWN_ACTION,

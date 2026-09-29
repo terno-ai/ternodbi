@@ -160,10 +160,15 @@ class TernoDBIClient:
         return self._handle_response(response)
 
     def execute_action(self, datasource: str, action: str, account: str,
-                       params: Optional[Dict] = None) -> Dict:
-        """Perform one write action against one account on a source."""
+                       params: Optional[Dict] = None, dry_run: bool = False) -> Dict:
+        """Perform one write action against one account on a source.
+
+        `dry_run=True` validates the action with the provider without applying
+        it (no side effects, no spend).
+        """
         url = f"{self.base_url}/api/query/datasources/{datasource}/actions/execute/"
-        payload = {"action": action, "account": account, "params": params or {}}
+        payload = {"action": action, "account": account, "params": params or {},
+                   "dry_run": bool(dry_run)}
         response = self._http.post(url, json=payload, headers=self._get_headers())
         return self._handle_response(response)
 

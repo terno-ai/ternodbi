@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import uuid
+from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional
 from terno_dbi.connectors.api.model.base import ApiConnector
 from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode, invalid_field
@@ -40,6 +41,10 @@ logger = logging.getLogger(__name__)
 _API_VERSION = "v22"
 _BASE = f"https://googleads.googleapis.com/{_API_VERSION}"
 _DEVELOPER_TOKEN_ENV = "TERNO_GOOGLE_ADS_DEVELOPER_TOKEN"
+# Manager (MCC) customer id to send as `login-customer-id`. Required when the
+# OAuth user reaches a client account *through* a manager account (agencies, and
+# test client accounts under a test manager). Digits only, no hyphens.
+_LOGIN_CUSTOMER_ID_ENV = "TERNO_GOOGLE_ADS_LOGIN_CUSTOMER_ID"
 
 _RESOURCE: Dict[str, str] = {
     "Campaign": "campaign",
@@ -339,15 +344,13 @@ def _dynamic_segment_field(field_id: str) -> Field:
 def _default_http(method: str, url: str, token: str,
                   json_body: Optional[Dict] = None) -> Dict[str, Any]:
     import requests
+    headers = {"Authorization": f"Bearer {token}"}
     dev_token = os.getenv(_DEVELOPER_TOKEN_ENV, "").strip()
-    if not dev_token:
-        raise ApiError(
-            ErrorCode.UPSTREAM_ERROR,
-            f"Google Ads is not configured on the server: {_DEVELOPER_TOKEN_ENV} "
-            "is unset. Set the developer token and restart.",
-            retriable=False,
-        )
-    headers = {"Authorization": f"Bearer {token}", "developer-token": dev_token}
+    if dev_token:
+        headers["developer-token"] = dev_token
+    login_cid = os.getenv(_LOGIN_CUSTOMER_ID_ENV, "").strip().replace("-", "")
+    if login_cid:
+        headers["login-customer-id"] = login_cid
     resp = requests.request(method, url, headers=headers, json=json_body, timeout=30)
     if resp.status_code == 401:
         raise _AuthError()
@@ -366,7 +369,7 @@ def _ads_error(resp) -> ApiError:
     that retrying will not fix.
     """
     status = resp.status_code
-    code_name, message = "", ""
+    code_name, message, field_path = "", "", ""
     try:
         err = (resp.json() or {}).get("error", {})
         message = err.get("message", "")
@@ -376,11 +379,17 @@ def _ads_error(resp) -> ApiError:
                 if isinstance(ec, dict) and ec:
                     code_name = next(iter(ec.values()))
                 message = e.get("message", message)
+                elems = (e.get("location", {}) or {}).get("fieldPathElements", [])
+                parts = [str(p.get("fieldName", "")) for p in elems if p.get("fieldName")]
+                field_path = ".".join(parts)
                 break
             if code_name:
                 break
     except ValueError:
         message = (resp.text or "")[:200]   # non-JSON (e.g. a 404 HTML page)
+
+    if field_path:
+        message = f"{message} [field: {field_path}]"
 
     if status == 404:
         message = (message or "Not found") + (
@@ -705,10 +714,11 @@ _ACTIONS: List[Action] = [
                                           "maximum": 100,
                                           "description": "Target impression share %, 1–100."},
                     "cpc_bid_ceiling": {"type": "number", "exclusiveMinimum": 0,
-                                        "description": "Optional max CPC ceiling, "
-                                                       "account currency units."},
+                                        "description": "Max CPC ceiling, account "
+                                                       "currency units (required)."},
                 },
-                "required": ["campaign_id", "location", "target_percentage"],
+                "required": ["campaign_id", "location", "target_percentage",
+                             "cpc_bid_ceiling"],
                 "additionalProperties": False},
     ),
     # -- portfolio (shared) bid strategies --------------------------------
@@ -738,6 +748,35 @@ _ACTIONS: List[Action] = [
                                             "description": "Portfolio bid strategy id."},
                 },
                 "required": ["campaign_id", "bidding_strategy_id"],
+                "additionalProperties": False},
+    ),
+    # -- shared budgets ----------------------------------------------------
+    Action(
+        "create_shared_budget", "Create shared budget",
+        "Create a shared daily budget that multiple campaigns can draw from. "
+        "Note: shared budgets are incompatible with Maximize Conversions/Value "
+        "bidding — use a dedicated budget (create_campaign) for those.",
+        schema={"type": "object",
+                "properties": {
+                    "name": {"type": "string", "minLength": 1,
+                             "description": "Budget name (unique in the account)."},
+                    "daily_budget": {"type": "number", "exclusiveMinimum": 0,
+                                     "description": "Daily amount in account currency "
+                                                    "units, e.g. 50 for 50.00."},
+                },
+                "required": ["name", "daily_budget"],
+                "additionalProperties": False},
+    ),
+    Action(
+        "attach_campaign_to_budget", "Attach campaign to shared budget",
+        "Point a campaign at an existing budget by id (e.g. a shared budget).",
+        schema={"type": "object",
+                "properties": {
+                    "campaign_id": _id_prop("campaign"),
+                    "budget_id": {"type": "string",
+                                  "description": "Campaign budget id to attach."},
+                },
+                "required": ["campaign_id", "budget_id"],
                 "additionalProperties": False},
     ),
     # -- ad extensions (assets) -------------------------------------------
@@ -781,9 +820,9 @@ _ACTIONS: List[Action] = [
                     "header": {"type": "string", "minLength": 1,
                                "description": "Snippet header, e.g. 'Brands' "
                                               "(must be a valid Google header)."},
-                    "values": {"type": "array", "minItems": 1, "maxItems": 10,
+                    "values": {"type": "array", "minItems": 3, "maxItems": 10,
                                "items": {"type": "string"},
-                               "description": "1–10 values, ≤25 chars each."},
+                               "description": "3–10 values, ≤25 chars each."},
                 },
                 "required": ["campaign_id", "header", "values"],
                 "additionalProperties": False},
@@ -861,8 +900,23 @@ class GoogleAdsConnector(ApiConnector):
         # Per-field `selectable_with` sets (None = unknown), for compatibility
         # pre-validation. Cached so repeated queries don't refetch metadata.
         self._selectable_cache: Dict[str, Optional[set]] = {}
+        # Set for the duration of one execute_action call. When true, every
+        # provider mutate carries validateOnly=true, so Google validates the
+        # request but applies nothing — a real dry run with zero side effects.
+        self._dry_run = False
 
     # -- transport ----------------------------------------------------------
+
+    def _mutate_call(self, url: str, operations: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """POST a mutate request, injecting validateOnly in dry-run mode.
+
+        Every write goes through here so dry-run coverage cannot be forgotten by
+        an individual action handler.
+        """
+        body: Dict[str, Any] = {"operations": operations}
+        if self._dry_run:
+            body["validateOnly"] = True
+        return self._call("POST", url, body)
 
     def _call(self, method: str, url: str, body: Optional[Dict] = None) -> Dict[str, Any]:
         try:
@@ -1070,9 +1124,36 @@ class GoogleAdsConnector(ApiConnector):
         return list(_ACTIONS)
 
     def execute_action(
-        self, action_id: str, account: str, params: Optional[Dict[str, Any]] = None
+        self, action_id: str, account: str,
+        params: Optional[Dict[str, Any]] = None, dry_run: bool = False,
     ) -> ActionResult:
         """Perform one write action. Account authorisation happens upstream.
+
+        With `dry_run=True`, every mutate is sent with Google's `validateOnly`
+        flag: the request is fully validated server-side but nothing is applied,
+        so you can check an action is correct with zero side effects and zero
+        spend. Multi-step actions (create_campaign, add_sitelink, …) validate
+        their first step and skip the dependent step(s) in dry-run, since those
+        reference a resource that was never created.
+        """
+        self._dry_run = bool(dry_run)
+        try:
+            result = self._dispatch_action(action_id, account, params or {})
+        finally:
+            was_dry = self._dry_run
+            self._dry_run = False
+        if was_dry and not (result.details or {}).get("dry_run"):
+            result = replace(
+                result,
+                summary="[dry-run — not applied] " + result.summary,
+                details={**(result.details or {}), "dry_run": True, "applied": False},
+            )
+        return result
+
+    def _dispatch_action(
+        self, action_id: str, account: str, params: Dict[str, Any]
+    ) -> ActionResult:
+        """Route to the concrete handler.
 
         Read-before-write: every handler first reads the entity's current state
         (which also validates the id exists) and returns it as `before`, so the
@@ -1142,6 +1223,10 @@ class GoogleAdsConnector(ApiConnector):
             return self._create_portfolio_bid_strategy(cid, account, params)
         if action_id == "attach_campaign_to_portfolio":
             return self._attach_campaign_to_portfolio(cid, account, params)
+        if action_id == "create_shared_budget":
+            return self._create_shared_budget(cid, account, params)
+        if action_id == "attach_campaign_to_budget":
+            return self._attach_campaign_to_budget(cid, account, params)
         if action_id == "add_sitelink":
             return self._add_sitelink(cid, account, params)
         if action_id == "add_callout":
@@ -1181,8 +1266,8 @@ class GoogleAdsConnector(ApiConnector):
         return results[0] if results else None
 
     def _mutate(self, cid: str, collection: str, operation: Dict[str, Any]) -> Dict[str, Any]:
-        url = f"{_BASE}/customers/{cid}/{collection}:mutate"
-        return self._call("POST", url, {"operations": [operation]})
+        return self._mutate_call(
+            f"{_BASE}/customers/{cid}/{collection}:mutate", [operation])
 
     def _set_campaign_status(self, cid, account, params, status) -> ActionResult:
         campaign_id = self._require_id(params, "campaign_id")
@@ -1340,10 +1425,17 @@ class GoogleAdsConnector(ApiConnector):
 
         # 1. A dedicated budget for this campaign (name must be unique).
         budget_name = f"{name} budget {uuid.uuid4().hex[:8]}"
-        budget_res = self._new_resource_id_full(self._mutate(cid, "campaignBudgets", {
+        budget_data = self._mutate(cid, "campaignBudgets", {
             "create": {"name": budget_name, "amountMicros": micros,
-                       "deliveryMethod": "STANDARD"},
-        }))
+                       "deliveryMethod": "STANDARD", "explicitlyShared": False},
+        })
+        if self._dry_run:
+            return self._dry_run_partial(
+                "create_campaign", account,
+                {"name": name, "status": "PAUSED", "daily_budget": budget,
+                 "channel_type": "SEARCH"},
+                f"Validated budget for campaign {name!r}.")
+        budget_res = self._new_resource_id_full(budget_data)
         if not budget_res:
             raise ApiError(ErrorCode.UPSTREAM_ERROR,
                            "Google Ads did not return the new budget resource.",
@@ -1357,6 +1449,8 @@ class GoogleAdsConnector(ApiConnector):
                 "advertisingChannelType": "SEARCH",
                 "manualCpc": {},
                 "campaignBudget": budget_res,
+                "containsEuPoliticalAdvertising":
+                    "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
                 "networkSettings": {
                     "targetGoogleSearch": True,
                     "targetSearchNetwork": True,
@@ -1382,6 +1476,16 @@ class GoogleAdsConnector(ApiConnector):
             return None
         return results[0].get("resourceName") or None
 
+    @staticmethod
+    def _criterion_ids(data: Dict[str, Any]) -> List[str]:
+        """Trailing criterion ids from a criteria mutate (`.../{ag}~{criterion}`)."""
+        ids = []
+        for r in (data.get("results") or []):
+            rn = r.get("resourceName", "")
+            if "~" in rn:
+                ids.append(rn.split("~")[-1])
+        return ids
+
     def _add_keywords(self, cid, account, params) -> ActionResult:
         ad_group_id = self._require_id(params, "ad_group_id")
         texts = self._keyword_texts(params)
@@ -1394,10 +1498,10 @@ class GoogleAdsConnector(ApiConnector):
                 "keyword": {"text": t, "matchType": match_type},
             },
         } for t in texts]
-        self._call("POST", f"{_BASE}/customers/{cid}/adGroupCriteria:mutate",
-                   {"operations": operations})
+        data = self._mutate_call(
+            f"{_BASE}/customers/{cid}/adGroupCriteria:mutate", operations)
         after = {"ad_group_id": ad_group_id, "match_type": match_type,
-                 "keywords": texts}
+                 "keywords": texts, "criterion_ids": self._criterion_ids(data)}
         return ActionResult(
             action="add_keywords", account=account,
             summary=(f"Added {len(texts)} {match_type} keyword"
@@ -1417,8 +1521,8 @@ class GoogleAdsConnector(ApiConnector):
                 "keyword": {"text": t, "matchType": match_type},
             },
         } for t in texts]
-        self._call("POST", f"{_BASE}/customers/{cid}/campaignCriteria:mutate",
-                   {"operations": operations})
+        self._mutate_call(
+            f"{_BASE}/customers/{cid}/campaignCriteria:mutate", operations)
         after = {"campaign_id": campaign_id, "match_type": match_type,
                  "negative_keywords": texts}
         return ActionResult(
@@ -1470,15 +1574,16 @@ class GoogleAdsConnector(ApiConnector):
         before = self._campaign_bidding_before(cid, campaign_id)
         micros = int(round(cpa * 1_000_000))
         self._mutate(cid, "campaigns", {
-            "updateMask": "target_cpa.target_cpa_micros",
+            "updateMask": "maximize_conversions.target_cpa_micros",
             "update": {"resourceName": f"customers/{cid}/campaigns/{campaign_id}",
-                       "targetCpa": {"targetCpaMicros": micros}},
+                       "maximizeConversions": {"targetCpaMicros": micros}},
         })
-        after = {**before, "bidding_strategy_type": "TARGET_CPA", "target_cpa": cpa}
+        after = {**before, "bidding_strategy_type": "MAXIMIZE_CONVERSIONS",
+                 "target_cpa": cpa}
         return ActionResult(
             action="set_target_cpa", account=account,
-            summary=(f"Campaign {before.get('name') or campaign_id} set to Target "
-                     f"CPA bidding at {cpa}."),
+            summary=(f"Campaign {before.get('name') or campaign_id} set to Maximize "
+                     f"Conversions with a target CPA of {cpa}."),
             before=before, after=after,
         )
 
@@ -1487,15 +1592,17 @@ class GoogleAdsConnector(ApiConnector):
         roas = self._positive_amount(params, "target_roas")
         before = self._campaign_bidding_before(cid, campaign_id)
         self._mutate(cid, "campaigns", {
-            "updateMask": "target_roas.target_roas",
+            "updateMask": "maximize_conversion_value.target_roas",
             "update": {"resourceName": f"customers/{cid}/campaigns/{campaign_id}",
-                       "targetRoas": {"targetRoas": roas}},
+                       "maximizeConversionValue": {"targetRoas": roas}},
         })
-        after = {**before, "bidding_strategy_type": "TARGET_ROAS", "target_roas": roas}
+        after = {**before, "bidding_strategy_type": "MAXIMIZE_CONVERSION_VALUE",
+                 "target_roas": roas}
         return ActionResult(
             action="set_target_roas", account=account,
-            summary=(f"Campaign {before.get('name') or campaign_id} set to Target "
-                     f"ROAS bidding at {roas} ({roas * 100:g}%)."),
+            summary=(f"Campaign {before.get('name') or campaign_id} set to Maximize "
+                     f"Conversion Value with a target ROAS of {roas} "
+                     f"({roas * 100:g}%)."),
             before=before, after=after,
         )
 
@@ -1576,9 +1683,10 @@ class GoogleAdsConnector(ApiConnector):
             },
         })
         new_res = self._new_resource_id_full(data)
+        ad_id = new_res.split("~")[-1] if new_res and "~" in new_res else None
         after = {"ad_group_id": ad_group_id, "final_url": final_url,
                  "headlines": headlines, "descriptions": descriptions,
-                 "resource": new_res, "status": "ENABLED"}
+                 "resource": new_res, "ad_id": ad_id, "status": "ENABLED"}
         return ActionResult(
             action="create_responsive_search_ad", account=account,
             summary=(f"Created a responsive search ad in ad group {ad_group_id} "
@@ -1758,30 +1866,30 @@ class GoogleAdsConnector(ApiConnector):
         )
 
     def _set_maximize_conversions(self, cid, account, params) -> ActionResult:
-        mc: Dict[str, Any] = {}
-        mask = "maximize_conversions"
+        # Always mask the scalar leaf (target_cpa_micros), never the message —
+        # masking the bare `maximize_conversions` message raises FIELD_HAS_SUBFIELDS.
+        # 0 means "no target CPA" while still switching the strategy.
+        cpa = (self._positive_amount(params, "target_cpa")
+               if params.get("target_cpa") is not None else 0.0)
+        mc = {"targetCpaMicros": int(round(cpa * 1_000_000))}
         extra = {"bidding_strategy_type": "MAXIMIZE_CONVERSIONS"}
-        if params.get("target_cpa") is not None:
-            cpa = self._positive_amount(params, "target_cpa")
-            mc["targetCpaMicros"] = int(round(cpa * 1_000_000))
-            mask = "maximize_conversions.target_cpa_micros"
+        if cpa:
             extra["target_cpa"] = cpa
         return self._update_campaign_bidding(
             cid, account, params, "set_maximize_conversions",
-            {"maximizeConversions": mc}, mask, extra, "Maximize Conversions bidding")
+            {"maximizeConversions": mc}, "maximize_conversions.target_cpa_micros",
+            extra, "Maximize Conversions bidding")
 
     def _set_maximize_conversion_value(self, cid, account, params) -> ActionResult:
-        mcv: Dict[str, Any] = {}
-        mask = "maximize_conversion_value"
+        roas = (self._positive_amount(params, "target_roas")
+                if params.get("target_roas") is not None else 0.0)
         extra = {"bidding_strategy_type": "MAXIMIZE_CONVERSION_VALUE"}
-        if params.get("target_roas") is not None:
-            roas = self._positive_amount(params, "target_roas")
-            mcv["targetRoas"] = roas
-            mask = "maximize_conversion_value.target_roas"
+        if roas:
             extra["target_roas"] = roas
         return self._update_campaign_bidding(
             cid, account, params, "set_maximize_conversion_value",
-            {"maximizeConversionValue": mcv}, mask, extra,
+            {"maximizeConversionValue": {"targetRoas": roas}},
+            "maximize_conversion_value.target_roas", extra,
             "Maximize Conversion Value bidding")
 
     def _set_manual_cpc(self, cid, account, params) -> ActionResult:
@@ -1809,15 +1917,19 @@ class GoogleAdsConnector(ApiConnector):
             "location": location,
             "locationFractionMicros": int(round(pct / 100 * 1_000_000)),
         }
+        if params.get("cpc_bid_ceiling") is None:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "cpc_bid_ceiling is required for Target Impression "
+                           "Share bidding.",
+                           retriable=False, details={"param": "cpc_bid_ceiling"})
+        ceil = self._positive_amount(params, "cpc_bid_ceiling")
+        tis["cpcBidCeilingMicros"] = int(round(ceil * 1_000_000))
         masks = ["target_impression_share.location",
-                 "target_impression_share.location_fraction_micros"]
+                 "target_impression_share.location_fraction_micros",
+                 "target_impression_share.cpc_bid_ceiling_micros"]
         extra = {"bidding_strategy_type": "TARGET_IMPRESSION_SHARE",
-                 "location": location, "target_percentage": pct}
-        if params.get("cpc_bid_ceiling") is not None:
-            ceil = self._positive_amount(params, "cpc_bid_ceiling")
-            tis["cpcBidCeilingMicros"] = int(round(ceil * 1_000_000))
-            masks.append("target_impression_share.cpc_bid_ceiling_micros")
-            extra["cpc_bid_ceiling"] = ceil
+                 "location": location, "target_percentage": pct,
+                 "cpc_bid_ceiling": ceil}
         return self._update_campaign_bidding(
             cid, account, params, "set_target_impression_share",
             {"targetImpressionShare": tis}, ",".join(masks), extra,
@@ -1870,11 +1982,63 @@ class GoogleAdsConnector(ApiConnector):
             before=before, after=after,
         )
 
+    # -- shared budgets ----------------------------------------------------
+
+    def _create_shared_budget(self, cid, account, params) -> ActionResult:
+        name = str(params.get("name") or "").strip()
+        if not name:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS, "'name' is required.",
+                           retriable=False, details={"param": "name"})
+        amount = self._positive_amount(params, "daily_budget")
+        micros = int(round(amount * 1_000_000))
+        data = self._mutate(cid, "campaignBudgets", {
+            "create": {"name": name, "amountMicros": micros,
+                       "deliveryMethod": "STANDARD", "explicitlyShared": True},
+        })
+        new_id = self._new_resource_id(data)
+        return ActionResult(
+            action="create_shared_budget", account=account,
+            summary=f"Created shared budget {name!r} (id {new_id}) at {amount}/day.",
+            before=None,
+            after={"id": new_id, "name": name, "daily_budget": amount,
+                   "shared": True})
+
+    def _attach_campaign_to_budget(self, cid, account, params) -> ActionResult:
+        campaign_id = self._require_id(params, "campaign_id")
+        budget_id = self._require_id(params, "budget_id")
+        row = self._search_one(
+            cid,
+            f"SELECT campaign.id, campaign.name, campaign.campaign_budget "
+            f"FROM campaign WHERE campaign.id = {campaign_id}",
+        )
+        if row is None:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           f"Campaign {campaign_id} was not found in this account.",
+                           retriable=False, details={"campaign_id": campaign_id})
+        camp = row.get("campaign", {})
+        before = {"campaign_id": campaign_id, "name": camp.get("name"),
+                  "budget_resource": camp.get("campaignBudget")}
+        budget_res = f"customers/{cid}/campaignBudgets/{budget_id}"
+        self._mutate(cid, "campaigns", {
+            "updateMask": "campaign_budget",
+            "update": {"resourceName": f"customers/{cid}/campaigns/{campaign_id}",
+                       "campaignBudget": budget_res},
+        })
+        after = {**before, "budget_resource": budget_res, "budget_id": budget_id}
+        return ActionResult(
+            action="attach_campaign_to_budget", account=account,
+            summary=(f"Campaign {camp.get('name') or campaign_id} attached to "
+                     f"budget {budget_id}."),
+            before=before, after=after,
+        )
+
     # -- ad extensions (assets) -------------------------------------------
 
-    def _create_asset(self, cid, asset_body) -> str:
-        data = self._call("POST", f"{_BASE}/customers/{cid}/assets:mutate",
-                          {"operations": [{"create": asset_body}]})
+    def _create_asset(self, cid, asset_body) -> Optional[str]:
+        data = self._mutate_call(
+            f"{_BASE}/customers/{cid}/assets:mutate", [{"create": asset_body}])
+        if self._dry_run:
+            return None   # validated only; nothing created to reference
         res = self._new_resource_id_full(data)
         if not res:
             raise ApiError(ErrorCode.UPSTREAM_ERROR,
@@ -1883,12 +2047,21 @@ class GoogleAdsConnector(ApiConnector):
         return res
 
     def _link_campaign_asset(self, cid, campaign_id, asset_res, field_type) -> None:
-        self._call("POST", f"{_BASE}/customers/{cid}/campaignAssets:mutate",
-                   {"operations": [{"create": {
-                       "campaign": f"customers/{cid}/campaigns/{campaign_id}",
-                       "asset": asset_res,
-                       "fieldType": field_type,
-                   }}]})
+        self._mutate_call(f"{_BASE}/customers/{cid}/campaignAssets:mutate",
+                          [{"create": {
+                              "campaign": f"customers/{cid}/campaigns/{campaign_id}",
+                              "asset": asset_res,
+                              "fieldType": field_type,
+                          }}])
+
+    def _dry_run_partial(self, action, account, after, note) -> ActionResult:
+        """Result for a multi-step action whose first step validated in dry-run."""
+        return ActionResult(
+            action=action, account=account,
+            summary=("[dry-run — validated first step; dependent step(s) skipped] "
+                     + note),
+            before=None, after=after,
+            details={"dry_run": True, "applied": False, "partial": True})
 
     def _add_sitelink(self, cid, account, params) -> ActionResult:
         campaign_id = self._require_id(params, "campaign_id")
@@ -1905,9 +2078,13 @@ class GoogleAdsConnector(ApiConnector):
             sitelink["description2"] = str(params["description2"])
         asset_res = self._create_asset(cid, {
             "finalUrls": [final_url], "sitelinkAsset": sitelink})
-        self._link_campaign_asset(cid, campaign_id, asset_res, "SITELINK")
         after = {"campaign_id": campaign_id, "link_text": link_text,
                  "final_url": final_url, "asset": asset_res}
+        if self._dry_run:
+            return self._dry_run_partial(
+                "add_sitelink", account, after,
+                f"Validated sitelink {link_text!r} for campaign {campaign_id}.")
+        self._link_campaign_asset(cid, campaign_id, asset_res, "SITELINK")
         return ActionResult(
             action="add_sitelink", account=account,
             summary=f"Added sitelink {link_text!r} to campaign {campaign_id}.",
@@ -1921,31 +2098,39 @@ class GoogleAdsConnector(ApiConnector):
             raise ApiError(ErrorCode.INVALID_ACTION_PARAMS, "'text' is required.",
                            retriable=False, details={"param": "text"})
         asset_res = self._create_asset(cid, {"calloutAsset": {"calloutText": text}})
+        after = {"campaign_id": campaign_id, "text": text, "asset": asset_res}
+        if self._dry_run:
+            return self._dry_run_partial(
+                "add_callout", account, after,
+                f"Validated callout {text!r} for campaign {campaign_id}.")
         self._link_campaign_asset(cid, campaign_id, asset_res, "CALLOUT")
         return ActionResult(
             action="add_callout", account=account,
             summary=f"Added callout {text!r} to campaign {campaign_id}.",
-            before=None,
-            after={"campaign_id": campaign_id, "text": text, "asset": asset_res},
+            before=None, after=after,
         )
 
     def _add_structured_snippet(self, cid, account, params) -> ActionResult:
         campaign_id = self._require_id(params, "campaign_id")
         header = str(params.get("header") or "").strip()
-        values = self._text_list(params, "values", 1, 25, "values")
+        values = self._text_list(params, "values", 3, 25, "values")
         if not header:
             raise ApiError(ErrorCode.INVALID_ACTION_PARAMS, "'header' is required.",
                            retriable=False, details={"param": "header"})
         asset_res = self._create_asset(cid, {"structuredSnippetAsset": {
             "header": header, "values": values}})
+        after = {"campaign_id": campaign_id, "header": header, "values": values,
+                 "asset": asset_res}
+        if self._dry_run:
+            return self._dry_run_partial(
+                "add_structured_snippet", account, after,
+                f"Validated structured snippet {header!r} for campaign {campaign_id}.")
         self._link_campaign_asset(cid, campaign_id, asset_res, "STRUCTURED_SNIPPET")
         return ActionResult(
             action="add_structured_snippet", account=account,
             summary=(f"Added structured snippet {header!r} ({len(values)} values) "
                      f"to campaign {campaign_id}."),
-            before=None,
-            after={"campaign_id": campaign_id, "header": header, "values": values,
-                   "asset": asset_res},
+            before=None, after=after,
         )
 
     # -- Customer Match audiences -----------------------------------------
@@ -1960,12 +2145,13 @@ class GoogleAdsConnector(ApiConnector):
         if not name:
             raise ApiError(ErrorCode.INVALID_ACTION_PARAMS, "'name' is required.",
                            retriable=False, details={"param": "name"})
-        data = self._call("POST", f"{_BASE}/customers/{cid}/userLists:mutate",
-                          {"operations": [{"create": {
-                              "name": name,
-                              "membershipStatus": "OPEN",
-                              "crmBasedUserList": {"uploadKeyType": "CONTACT_INFO"},
-                          }}]})
+        data = self._mutate_call(
+            f"{_BASE}/customers/{cid}/userLists:mutate",
+            [{"create": {
+                "name": name,
+                "membershipStatus": "OPEN",
+                "crmBasedUserList": {"uploadKeyType": "CONTACT_INFO"},
+            }}])
         new_id = self._new_resource_id(data)
         return ActionResult(
             action="create_customer_list", account=account,
@@ -1992,6 +2178,12 @@ class GoogleAdsConnector(ApiConnector):
             raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
                            "Provide at least one email or phone number.",
                            retriable=False)
+        if self._dry_run:
+            return self._dry_run_partial(
+                "add_customer_list_members", account,
+                {"user_list_id": user_list_id, "member_count": len(identifiers)},
+                f"Validated {len(identifiers)} member identifier(s) for list "
+                f"{user_list_id}; no upload performed.")
         user_list_res = f"customers/{cid}/userLists/{user_list_id}"
         # Offline user-data job: create -> add operations -> run.
         created = self._call(
@@ -2020,17 +2212,20 @@ class GoogleAdsConnector(ApiConnector):
     def _attach_audience(self, cid, account, params) -> ActionResult:
         ad_group_id = self._require_id(params, "ad_group_id")
         user_list_id = self._require_id(params, "user_list_id")
-        self._call("POST", f"{_BASE}/customers/{cid}/adGroupCriteria:mutate",
-                   {"operations": [{"create": {
-                       "adGroup": f"customers/{cid}/adGroups/{ad_group_id}",
-                       "status": "ENABLED",
-                       "userList": {"userList": f"customers/{cid}/userLists/{user_list_id}"},
-                   }}]})
+        data = self._mutate_call(
+            f"{_BASE}/customers/{cid}/adGroupCriteria:mutate",
+            [{"create": {
+                "adGroup": f"customers/{cid}/adGroups/{ad_group_id}",
+                "status": "ENABLED",
+                "userList": {"userList": f"customers/{cid}/userLists/{user_list_id}"},
+            }}])
+        crit = self._criterion_ids(data)
         return ActionResult(
             action="attach_audience", account=account,
             summary=(f"Targeting user list {user_list_id} on ad group {ad_group_id}."),
             before=None,
-            after={"ad_group_id": ad_group_id, "user_list_id": user_list_id})
+            after={"ad_group_id": ad_group_id, "user_list_id": user_list_id,
+                   "criterion_id": (crit[0] if crit else None)})
 
     def _remove_audience(self, cid, account, params) -> ActionResult:
         ad_group_id = self._require_id(params, "ad_group_id")

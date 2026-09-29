@@ -280,6 +280,7 @@ def api_execute_action(request, datasource_identifier):
     action = (body.get("action") or "").strip()
     account = str(body.get("account") or "").strip()
     params = body.get("params") or {}
+    dry_run = bool(body.get("dry_run", False))
     if not action or not account:
         return _err(ApiError(
             ErrorCode.INVALID_ACTION_PARAMS,
@@ -291,14 +292,17 @@ def api_execute_action(request, datasource_identifier):
 
     try:
         connector = registry.build_connector(ds)
-        result = run_write_action(connector, action, account, params)
+        result = run_write_action(connector, action, account, params,
+                                  dry_run=dry_run)
     except ApiError as exc:
-        _record_connector_write(request, ds, action, account, params,
-                                status="error", error=exc)
+        if not dry_run:
+            _record_connector_write(request, ds, action, account, params,
+                                    status="error", error=exc)
         http_status = 403 if exc.code == ErrorCode.ACCOUNT_FORBIDDEN else 400
         return _err(exc, status=http_status)
-    _record_connector_write(request, ds, action, account, params,
-                            status="success", result=result)
+    if not dry_run:
+        _record_connector_write(request, ds, action, account, params,
+                                status="success", result=result)
     return JsonResponse({"status": "success", **result})
 
 

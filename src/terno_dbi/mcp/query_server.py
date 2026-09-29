@@ -501,6 +501,10 @@ Returns columns and data rows. Use max_rows to limit the number of rows returned
                     "account": {"type": "string", "description": "Account id from list_accounts"},
                     "params": {"type": "object",
                                "description": "Params matching the action's schema from list_actions"},
+                    "dry_run": {"type": "boolean",
+                                "description": "Validate the action with the provider "
+                                               "WITHOUT applying it (no side effects, "
+                                               "no spend). Use to check an action first."},
                 },
                 "required": ["datasource", "action", "account"]
             }
@@ -659,6 +663,7 @@ def _dispatch(name: str, arguments: Dict[str, Any]):
                 arguments["action"],
                 arguments["account"],
                 arguments.get("params") or {},
+                dry_run=bool(arguments.get("dry_run", False)),
             )
 
         else:
