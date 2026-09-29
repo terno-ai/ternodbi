@@ -577,6 +577,8 @@ class TestRegistration:
         provider = get_provider("salesforce")
         assert provider is not None
         assert "refresh_token" in provider.scope
+        # The id_token these return is where CONNECTED_EMAIL comes from.
+        assert {"openid", "email"} <= set(provider.scope.split())
         assert provider.use_pkce is True
         # Salesforce has no single host, so the org being connected supplies it
         # — a deployment-wide constant could not serve a sandbox and a

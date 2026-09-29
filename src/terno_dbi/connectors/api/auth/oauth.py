@@ -206,7 +206,8 @@ def _store_tokens(data_source, token_response: Dict[str, Any],
     # is re-read on every refresh because an org can be moved between instances.
     if token_response.get("instance_url"):
         bundle["INSTANCE_URL"] = token_response["instance_url"]
-    email = _connected_email(token_response)
+    email = (_connected_email(token_response)
+             or token_response.get("connected_email") or "")
     if email:
         bundle["CONNECTED_EMAIL"] = email
     if instance:
@@ -298,9 +299,48 @@ def complete_authorization(
     st.delete()
     return data_source
 
+_SALESFORCE_ID_URL_RE = re.compile(
+    r"^https://[a-z0-9.-]+\.salesforce\.com/id/[A-Za-z0-9]+/[A-Za-z0-9]+$")
+
+
+def _default_get_json(url: str, token: str) -> Dict[str, Any]:
+    resp = requests.get(url, headers={"Authorization": f"Bearer {token}"},
+                        timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _salesforce_identity(token_response, get_json=None):
+    """Who connected, from Salesforce's identity URL.
+
+    The id_token carries `email` only when the connected app has "Include
+    Standard Claims" switched on, so the identity service — reachable with the
+    `id` scope — is the reliable source.
+    """
+    if _connected_email(token_response):
+        return token_response
+    id_url = token_response.get("id") or ""
+    access = token_response.get("access_token")
+    if not access or not _SALESFORCE_ID_URL_RE.match(id_url):
+        return token_response
+    try:
+        identity = (get_json or _default_get_json)(id_url, access)
+    except Exception as exc:   # noqa: BLE001
+        # Only the account picker's header depends on this; never fail the
+        # connection over it.
+        logger.warning("Salesforce identity lookup failed: %s", exc)
+        return token_response
+    email = identity.get("email") or identity.get("username") or ""
+    if isinstance(email, str) and email:
+        return {**token_response, "connected_email": email}
+    return token_response
+
 
 def _post_process(connector_key, provider, token_response):
-    """Provider-specific fix-ups. Meta exchanges for a long-lived token."""
+    """Provider-specific fix-ups. Meta exchanges for a long-lived token;
+    Salesforce looks up who connected."""
+    if connector_key == "salesforce":
+        return _salesforce_identity(token_response)
     if connector_key != "meta_ads":
         return token_response
     access = token_response.get("access_token")

@@ -213,6 +213,26 @@ class TestStoreTokensExtras:
         assert bundle["CONNECTED_EMAIL"] == "who@x.com"
         assert ds.auth_status == DataSource.AuthStatus.CONNECTED
 
+    def test_salesforce_token_response_yields_email_and_api_host(
+            self, org, catalog):
+        ds = DataSource.objects.create(
+            display_name="SF", type="salesforce", connection_str="",
+            organisation=org,
+            catalog=ConnectorCatalog.objects.get(key="salesforce"),
+        )
+        # Shape of Salesforce's code exchange with `openid email` granted: no
+        # expires_in, the API host in instance_url, the user in the id_token.
+        oauth._store_tokens(ds, {
+            "access_token": "at", "refresh_token": "rt",
+            "instance_url": "https://acme.my.salesforce.com",
+            "id": "https://login.salesforce.com/id/00Dx/005x",
+            "id_token": _id_token("akansha@cloudxlab.com"),
+            "scope": "api refresh_token openid email",
+        }, instance="login.salesforce.com")
+        bundle = secrets.decrypt_dict(ds.connection_json)
+        assert bundle["CONNECTED_EMAIL"] == "akansha@cloudxlab.com"
+        assert bundle["INSTANCE_URL"] == "https://acme.my.salesforce.com"
+
     def test_refresh_without_id_token_keeps_existing_email(self, org, catalog):
         ds = DataSource.objects.create(
             display_name="GA4f", type="googleanalytics4", connection_str="",
@@ -261,3 +281,60 @@ class TestPostProcess:
         out = oauth._post_process("meta_ads", get_provider("meta_ads"),
                                   {"access_token": "short"})
         assert out["access_token"] == "short"     # original kept
+
+
+class TestSalesforceIdentity:
+    """The id_token has no email unless the app includes standard claims, so
+    the identity URL is asked instead."""
+
+    ID_URL = "https://login.salesforce.com/id/00D5j000000abcd/0055j000001xyz"
+
+    def _run(self, response, identity=None, error=None):
+        calls = []
+
+        def get_json(url, token):
+            calls.append((url, token))
+            if error:
+                raise error
+            return identity or {}
+        return oauth._salesforce_identity(response, get_json), calls
+
+    def test_email_comes_from_the_identity_url(self):
+        out, calls = self._run(
+            {"access_token": "at", "id": self.ID_URL},
+            {"email": "akansha@cloudxlab.com",
+             "username": "akansha.42d4@agentforce.com"})
+        assert out["connected_email"] == "akansha@cloudxlab.com"
+        assert calls == [(self.ID_URL, "at")]
+
+    def test_skipped_when_the_id_token_already_has_it(self):
+        out, calls = self._run({"access_token": "at", "id": self.ID_URL,
+                                "id_token": _id_token("who@x.com")})
+        assert calls == []
+        assert "connected_email" not in out
+
+    @pytest.mark.parametrize("url", [
+        "https://evil.com/id/00D/005",
+        "https://login.salesforce.com.evil.com/id/00D/005",
+        "http://login.salesforce.com/id/00D/005",
+        "",
+    ])
+    def test_never_sends_the_token_off_salesforce(self, url):
+        _, calls = self._run({"access_token": "at", "id": url})
+        assert calls == []
+
+    def test_a_failed_lookup_does_not_fail_the_connection(self):
+        response = {"access_token": "at", "id": self.ID_URL}
+        out, _ = self._run(response, error=RuntimeError("boom"))
+        assert out == response
+
+    def test_store_tokens_uses_the_looked_up_email(self, org, catalog):
+        ds = DataSource.objects.create(
+            display_name="SF2", type="salesforce", connection_str="",
+            organisation=org,
+            catalog=ConnectorCatalog.objects.get(key="salesforce"),
+        )
+        oauth._store_tokens(ds, {"access_token": "at",
+                                 "connected_email": "a@cloudxlab.com"})
+        assert secrets.decrypt_dict(ds.connection_json)[
+            "CONNECTED_EMAIL"] == "a@cloudxlab.com"

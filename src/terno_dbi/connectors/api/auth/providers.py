@@ -91,7 +91,11 @@ _SALESFORCE = OAuthProvider(
     name="salesforce",
     authorization_url="https://{instance}/services/oauth2/authorize",
     token_url="https://{instance}/services/oauth2/token",
-    scope="api refresh_token",
+    # `openid email` gets an id_token carrying the user's email, stored as
+    # CONNECTED_EMAIL so the account picker shows who connected — as the
+    # Google providers do. The connected app must allow both scopes ("openid"
+    # and the identity URL service), or Salesforce rejects the authorization.
+    scope="api refresh_token openid email",
     client_id_env="TERNO_SALESFORCE_CLIENT_ID",
     client_secret_env="TERNO_SALESFORCE_CLIENT_SECRET",
     use_pkce=True,
