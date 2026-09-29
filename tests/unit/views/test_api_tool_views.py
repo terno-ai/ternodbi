@@ -121,6 +121,18 @@ class TestListAccounts:
         # Only the permitted account is even visible.
         assert {a["id"] for a in data["accounts"]} == {"111"}
 
+    def test_reports_per_account_writes_enabled(self, env):
+        from terno_dbi.connectors.api.auth import account_selection as sel
+        from terno_dbi.connectors.api.model.types import Account
+        # Sync the fake accounts, then opt one into writes.
+        sel.sync_account_selections(env["ds"], [Account("111", "A"), Account("222", "B")])
+        sel.set_writes_enabled_accounts(env["ds"], ["111"])
+
+        resp = api_views.api_list_accounts(_req("GET", env["token"]), "GA4")
+        by_id = {a["id"]: a for a in _json(resp)["accounts"]}
+        assert by_id["111"]["writes_enabled"] is True
+        assert by_id["222"]["writes_enabled"] is False
+
 
 @pytest.mark.django_db
 class TestListFields:

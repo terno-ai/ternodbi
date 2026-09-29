@@ -108,9 +108,16 @@ def api_list_accounts(request, datasource_identifier):
     account_selection.sync_account_selections(ds, visible)
     enabled = account_selection.enabled_account_ids(ds)
     shown = [a for a in visible if enabled is None or a.id in enabled]
+
+    writable = account_selection.writes_enabled_account_ids(ds)
+    rows = []
+    for a in shown:
+        row = a.as_dict()
+        row["writes_enabled"] = a.id in writable
+        rows.append(row)
     return JsonResponse({
         "status": "success",
-        "accounts": [a.as_dict() for a in shown],
+        "accounts": rows,
         "count": len(shown),
     })
 
