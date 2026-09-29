@@ -1040,6 +1040,8 @@ class ConnectorAccountSelection(models.Model):
     account_name = models.CharField(max_length=255, blank=True)
     enabled = models.BooleanField(default=True)
     writes_enabled = models.BooleanField(default=False)
+    manager_id = models.CharField(max_length=64, blank=True, default="")
+    manager_name = models.CharField(max_length=255, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

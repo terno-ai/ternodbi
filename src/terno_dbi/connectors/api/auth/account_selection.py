@@ -16,7 +16,14 @@ from typing import Iterable, List, Optional, Set
 def sync_account_selections(data_source, accounts) -> List[dict]:
     from terno_dbi.core.models import ConnectorAccountSelection
 
-    visible = {a.id: (getattr(a, "name", "") or "") for a in accounts}
+    def _manager_of(a) -> tuple:
+        extra = getattr(a, "extra", None) or {}
+        return (str(extra.get("manager_id") or ""),
+                str(extra.get("manager_name") or ""))
+
+    visible = {
+        a.id: (getattr(a, "name", "") or "", *_manager_of(a)) for a in accounts
+    }
 
     existing = {
         row.account_id: row
@@ -32,7 +39,7 @@ def sync_account_selections(data_source, accounts) -> List[dict]:
         for aid in stale:
             existing.pop(aid, None)
 
-    for account_id, name in visible.items():
+    for account_id, (name, manager_id, manager_name) in visible.items():
         row = existing.get(account_id)
         if row is None:
             ConnectorAccountSelection.objects.create(
@@ -40,10 +47,23 @@ def sync_account_selections(data_source, accounts) -> List[dict]:
                 account_id=account_id,
                 account_name=name,
                 enabled=True,
+                manager_id=manager_id,
+                manager_name=manager_name,
             )
-        elif name and row.account_name != name:
-            row.account_name = name
-            row.save(update_fields=["account_name"])
+        else:
+            updates = []
+            if name and row.account_name != name:
+                row.account_name = name
+                updates.append("account_name")
+            # Re-discovery is authoritative for the routing path; keep it fresh.
+            if row.manager_id != manager_id:
+                row.manager_id = manager_id
+                updates.append("manager_id")
+            if row.manager_name != manager_name:
+                row.manager_name = manager_name
+                updates.append("manager_name")
+            if updates:
+                row.save(update_fields=updates)
 
     rows = ConnectorAccountSelection.objects.filter(data_source=data_source)
     return sorted(
@@ -53,6 +73,8 @@ def sync_account_selections(data_source, accounts) -> List[dict]:
                 "account_name": r.account_name,
                 "enabled": r.enabled,
                 "writes_enabled": r.writes_enabled,
+                "manager_id": r.manager_id or "",
+                "manager_name": r.manager_name or "",
             }
             for r in rows
         ),
@@ -156,6 +178,24 @@ def writes_enabled_account_ids(data_source) -> Set[str]:
     return set(rows)
 
 
+def account_manager_map(data_source) -> dict:
+    """`{account_id: manager_id}` for this connection's known accounts.
+
+    manager_id is the login-customer-id needed to reach an account through a
+    manager (MCC), or '' for a directly-reachable account. Used at query time to
+    route each account's requests through the right manager automatically, so no
+    manager id has to be entered by hand.
+    """
+    from terno_dbi.core.models import ConnectorAccountSelection
+
+    return {
+        aid: (mid or "")
+        for aid, mid in ConnectorAccountSelection.objects
+        .filter(data_source=data_source)
+        .values_list("account_id", "manager_id")
+    }
+
+
 def enabled_account_ids(data_source) -> Optional[Set[str]]:
     from terno_dbi.core.models import ConnectorAccountSelection
 
@@ -188,5 +228,6 @@ __all__ = [
     "apply_writes_deltas",
     "enabled_account_ids",
     "writes_enabled_account_ids",
+    "account_manager_map",
     "restrict_to_selection",
 ]

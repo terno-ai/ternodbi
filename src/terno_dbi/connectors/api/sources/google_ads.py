@@ -46,6 +46,10 @@ _DEVELOPER_TOKEN_ENV = "TERNO_GOOGLE_ADS_DEVELOPER_TOKEN"
 # test client accounts under a test manager). Digits only, no hyphens.
 _LOGIN_CUSTOMER_ID_ENV = "TERNO_GOOGLE_ADS_LOGIN_CUSTOMER_ID"
 
+# Sentinel: "caller passed no login_customer_id override" (distinct from "" which
+# means reach the account directly with no login-customer-id header).
+_UNSET = object()
+
 _RESOURCE: Dict[str, str] = {
     "Campaign": "campaign",
     "AdGroup": "ad_group",
@@ -342,13 +346,16 @@ def _dynamic_segment_field(field_id: str) -> Field:
 
 
 def _default_http(method: str, url: str, token: str,
-                  json_body: Optional[Dict] = None) -> Dict[str, Any]:
+                  json_body: Optional[Dict] = None,
+                  login_customer_id: Optional[str] = None) -> Dict[str, Any]:
     import requests
     headers = {"Authorization": f"Bearer {token}"}
     dev_token = os.getenv(_DEVELOPER_TOKEN_ENV, "").strip()
     if dev_token:
         headers["developer-token"] = dev_token
-    login_cid = os.getenv(_LOGIN_CUSTOMER_ID_ENV, "").strip().replace("-", "")
+
+    login_cid = (str(login_customer_id or "").strip()
+                 or os.getenv(_LOGIN_CUSTOMER_ID_ENV, "").strip()).replace("-", "")
     if login_cid:
         headers["login-customer-id"] = login_cid
     resp = requests.request(method, url, headers=headers, json=json_body, timeout=30)
@@ -895,15 +902,11 @@ class GoogleAdsConnector(ApiConnector):
                  token_refresher: Optional[Callable] = None):
         super().__init__(datasource, token_refresher=token_refresher)
         self._http = http or _default_http
-        # Field catalogue per report type, cached for the connector's lifetime.
         self._catalogue_cache: Dict[str, Dict[str, Field]] = {}
-        # Per-field `selectable_with` sets (None = unknown), for compatibility
-        # pre-validation. Cached so repeated queries don't refetch metadata.
         self._selectable_cache: Dict[str, Optional[set]] = {}
-        # Set for the duration of one execute_action call. When true, every
-        # provider mutate carries validateOnly=true, so Google validates the
-        # request but applies nothing — a real dry run with zero side effects.
         self._dry_run = False
+        self._active_login_cid: Optional[str] = None
+        self.__manager_map: Optional[Dict[str, str]] = None
 
     # -- transport ----------------------------------------------------------
 
@@ -918,9 +921,60 @@ class GoogleAdsConnector(ApiConnector):
             body["validateOnly"] = True
         return self._call("POST", url, body)
 
-    def _call(self, method: str, url: str, body: Optional[Dict] = None) -> Dict[str, Any]:
+    def _login_customer_id(self) -> str:
+        """Manager (MCC) id to send as login-customer-id for this connection.
+
+        Stored per connection in the encrypted token bundle at connect time; the
+        env var is only a fallback for single-manager deployments. Empty when the
+        account is accessed directly (no manager in the path).
+        """
         try:
-            return self._http(method, url, self.access_token(), body)
+            raw = self._tokens().get("LOGIN_CUSTOMER_ID") or ""
+        except ApiError:
+            raw = ""
+        return str(raw).strip().replace("-", "")
+
+    def _manager_map(self) -> Dict[str, str]:
+        """`{customer_id: manager_id}` for this connection, loaded once.
+
+        Populated from the stored account selections (auto-discovered on connect
+        /list). Lets a query for any account send the right login-customer-id
+        without the user entering a manager id by hand.
+        """
+        if self.__manager_map is None:
+            try:
+                from terno_dbi.connectors.api.auth import account_selection
+                raw = account_selection.account_manager_map(self.datasource)
+                self.__manager_map = {
+                    self._customer_id(k): str(v or "") for k, v in raw.items()
+                }
+            except Exception:   # noqa: BLE001 — routing map is best-effort
+                self.__manager_map = {}
+        return self.__manager_map
+
+    def _manager_for(self, account: str) -> str:
+        """Manager (login-customer-id) to reach `account`; '' for direct.
+
+        Falls back to the connection-wide stored value for accounts discovered
+        before per-account routing existed.
+        """
+        cid = self._customer_id(account)
+        mapping = self._manager_map()
+        if cid in mapping:
+            return mapping[cid]
+        return self._login_customer_id()
+
+    def _call(self, method: str, url: str, body: Optional[Dict] = None,
+              login_customer_id: Any = _UNSET) -> Dict[str, Any]:
+        if login_customer_id is _UNSET:
+            login_cid = (self._active_login_cid
+                         if self._active_login_cid is not None
+                         else self._login_customer_id())
+        else:
+            login_cid = login_customer_id
+        try:
+            return self._http(method, url, self.access_token(), body,
+                              login_customer_id=(login_cid or None))
         except _AuthError:
             raise ApiError(
                 ErrorCode.AUTH_EXPIRED,
@@ -944,14 +998,132 @@ class GoogleAdsConnector(ApiConnector):
     # -- discovery ----------------------------------------------------------
 
     def list_accounts(self) -> List[Account]:
-        data = self._call(
-            "GET", f"{_BASE}/customers:listAccessibleCustomers")
+        """Every queryable account this credential can reach, auto-discovered.
+
+        Managers are detected and expanded automatically — no manager id has to
+        be entered by hand. For each account the OAuth user can access directly
+        (`listAccessibleCustomers`), we look at its `customer_client` tree:
+
+        * a non-manager account is a normal, directly-reachable account
+          (`manager_id=''`);
+        * a manager (MCC) is expanded to its leaf client accounts, each tagged
+          with the manager id needed to reach it (`manager_id=<manager>`), which
+          the query path then sends as login-customer-id automatically.
+
+        An account reachable both directly and under a manager is kept as direct
+        (no login-customer-id needed).
+        """
+        accessible = self._accessible_customer_ids()
+        if not accessible:
+            return []
+
+        if len(accessible) > 1:
+            self.access_token()
+        contributions = self._parallel_map(accessible, self._discover_from)
+
+        discovered: Dict[str, tuple] = {}
+        for part in contributions:
+            for ccid, entry in (part or {}).items():
+                prev = discovered.get(ccid)
+                if prev is None or (prev[1] != "" and entry[1] == ""):
+                    discovered[ccid] = entry
+
         accounts: List[Account] = []
-        for name in data.get("resourceNames", []):
-            cid = name.split("/")[-1]
-            if cid:
-                accounts.append(Account(id=cid, name=cid))
+        for cid, (name, manager_id, manager_name) in discovered.items():
+            extra = {}
+            if manager_id:
+                extra["manager_id"] = manager_id
+                extra["manager_name"] = manager_name
+            accounts.append(Account(id=cid, name=name, extra=extra))
         return accounts
+
+    def _discover_from(self, cid: str) -> Dict[str, tuple]:
+        """One accessible account's contribution: {id: (name, manager_id, manager_name)}.
+
+        A single `customer` lookup gives both the account's name and whether it is
+        a manager. A plain account contributes only itself (one HTTP call total);
+        a manager additionally walks `customer_client` to surface its leaf clients,
+        each routed through it. Fanned out across accessible ids by the caller.
+        """
+        cust = self._customer_row(cid)
+        name = str(cust.get("descriptiveName") or "") or cid
+
+        if not cust.get("manager"):
+            return {cid: (name, "", "")}
+
+        out: Dict[str, tuple] = {}
+        for cc in self._customer_client_rows(cid):
+            if cc.get("manager"):
+                continue
+            ccid = str(cc.get("id") or "")
+            if not ccid or ccid == cid:
+                continue
+            out[ccid] = (cc.get("descriptiveName") or ccid, cid, name)
+        return out
+
+    def _customer_row(self, customer_id: str) -> Dict[str, Any]:
+        """The `customer` resource for `customer_id`: name + manager flag in one call.
+
+        More reliable and cheaper than reading them from `customer_client` (which
+        omits the descriptive name of the account you're logged in as). Returns {}
+        on error so discovery degrades gracefully.
+        """
+        try:
+            data = self._call(
+                "POST", f"{_BASE}/customers/{customer_id}/googleAds:search",
+                {"query": "SELECT customer.id, customer.descriptive_name, "
+                          "customer.manager FROM customer"},
+                login_customer_id=customer_id)
+        except ApiError:
+            return {}
+        for row in data.get("results", []):
+            return row.get("customer", {}) or {}
+        return {}
+
+    @staticmethod
+    def _parallel_map(items: List[str], fn: Callable) -> List[Any]:
+        """Run `fn` over `items` concurrently, preserving input order.
+
+        Bounded so a manager with many linked accounts can't open an unbounded
+        number of sockets. A single item runs inline (no pool overhead).
+        """
+        if len(items) <= 1:
+            return [fn(i) for i in items]
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(len(items), 8)) as pool:
+            return list(pool.map(fn, items))
+
+    def _accessible_customer_ids(self) -> List[str]:
+        """Customer ids the OAuth user can access directly (managers included)."""
+        data = self._call(
+            "GET", f"{_BASE}/customers:listAccessibleCustomers",
+            login_customer_id="")
+        ids: List[str] = []
+        for name in data.get("resourceNames", []):
+            cid = str(name).split("/")[-1]
+            if cid:
+                ids.append(cid)
+        return ids
+
+    def _customer_client_rows(self, customer_id: str) -> List[Dict[str, Any]]:
+        """`customer_client` rows for `customer_id` (self + any descendants).
+
+        Queried logged in as the account itself, so it works whether the account
+        is a manager (returns the whole subtree) or a plain account (returns just
+        itself). Returns [] on error so discovery degrades gracefully.
+        """
+        gaql = (
+            "SELECT customer_client.id, customer_client.descriptive_name, "
+            "customer_client.manager, customer_client.status, customer_client.level "
+            "FROM customer_client"
+        )
+        try:
+            data = self._call(
+                "POST", f"{_BASE}/customers/{customer_id}/googleAds:search",
+                {"query": gaql}, login_customer_id=customer_id)
+        except ApiError:
+            return []
+        return [row.get("customerClient", {}) or {} for row in data.get("results", [])]
 
     def list_fields(self, report_type: Optional[str] = None) -> List[Field]:
         return list(self._resource_catalogue(report_type).values())
@@ -1105,7 +1277,12 @@ class GoogleAdsConnector(ApiConnector):
         def fetch(account):
             cid = self._customer_id(account)
             url = f"{_BASE}/customers/{cid}/googleAds:search"
-            data = self._call("POST", url, {"query": gaql})
+            # Route this account through its own manager automatically.
+            self._active_login_cid = self._manager_for(account)
+            try:
+                data = self._call("POST", url, {"query": gaql})
+            finally:
+                self._active_login_cid = None
             return _parse_results(data, dimensions, metrics, catalogue,
                                   account, multi=multi)
 
@@ -1137,11 +1314,14 @@ class GoogleAdsConnector(ApiConnector):
         reference a resource that was never created.
         """
         self._dry_run = bool(dry_run)
+        # Route this account's mutates through its own manager automatically.
+        self._active_login_cid = self._manager_for(account)
         try:
             result = self._dispatch_action(action_id, account, params or {})
         finally:
             was_dry = self._dry_run
             self._dry_run = False
+            self._active_login_cid = None
         if was_dry and not (result.details or {}).get("dry_run"):
             result = replace(
                 result,

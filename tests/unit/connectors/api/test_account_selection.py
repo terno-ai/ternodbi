@@ -12,6 +12,7 @@ from terno_dbi.connectors.api.auth import account_selection as sel
 class _Acct:
     id: str
     name: str = ""
+    extra: dict = None  # type: ignore[assignment]
 
 
 def _ds(org):
@@ -39,6 +40,27 @@ def test_first_sync_enables_every_account(org):
     assert [r["account_id"] for r in rows] == ["2", "1"]      # sorted by name
     assert all(r["enabled"] for r in rows)
     assert sel.enabled_account_ids(ds) == {"1", "2"}
+
+
+@pytest.mark.django_db
+def test_sync_stores_and_refreshes_manager_id(org):
+    ds = _ds(org)
+    sel.sync_account_selections(ds, [
+        _Acct("1", "Client A", {"manager_id": "999", "manager_name": "MCC Co"}),
+        _Acct("2", "Direct"),
+    ])
+    assert sel.account_manager_map(ds) == {"1": "999", "2": ""}
+    rows = {r["account_id"]: r for r in sel.sync_account_selections(ds, [
+        _Acct("1", "Client A", {"manager_id": "999", "manager_name": "MCC Co"}),
+        _Acct("2", "Direct"),
+    ])}
+    assert rows["1"]["manager_id"] == "999"
+    assert rows["1"]["manager_name"] == "MCC Co"
+    assert rows["2"]["manager_id"] == ""
+    assert rows["2"]["manager_name"] == ""
+    # Re-discovery is authoritative: a moved account's manager updates.
+    sel.sync_account_selections(ds, [_Acct("1", "Client A", {"manager_id": "888"})])
+    assert sel.account_manager_map(ds) == {"1": "888"}
 
 
 @pytest.mark.django_db

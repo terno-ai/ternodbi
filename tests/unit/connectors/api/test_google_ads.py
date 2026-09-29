@@ -55,7 +55,7 @@ FIELDS_CAMPAIGN = {
 
 
 def _mock_http(routes):
-    def http(method, url, token, body=None):
+    def http(method, url, token, body=None, login_customer_id=None):
         assert token == "tok"
         for (m, needle), response in routes.items():
             if method == m and needle in url:
@@ -66,6 +66,32 @@ def _mock_http(routes):
 
 def _connector(routes):
     return GoogleAdsConnector(_DS(), http=_mock_http(routes))
+
+
+def _discovery_http(accessible, customers, trees=None):
+    """A fake transport for account discovery.
+
+    `customers`: {cid: {"descriptiveName":.., "manager": bool}} — the `customer`
+    resource reply per account. `trees`: {manager_cid: [customerClient dicts]} —
+    the `customer_client` walk for a manager. Branches on the GAQL resource so the
+    single-call direct path and the two-call manager path are both exercised
+    faithfully.
+    """
+    trees = trees or {}
+
+    def http(method, url, token, body=None, login_customer_id=None):
+        if "listAccessibleCustomers" in url:
+            return accessible
+        q = (body or {}).get("query", "")
+        cid = url.split("customers/")[1].split("/")[0]
+        if "FROM customer_client" in q:
+            return {"results": [{"customerClient": r} for r in trees.get(cid, [])]}
+        if "FROM customer" in q:
+            cust = customers.get(cid)
+            return {"results": [{"customer": cust}]} if cust else {"results": []}
+        raise AssertionError(f"unexpected query at {url}: {q}")
+
+    return http
 
 
 class TestDynamicFieldDiscovery:
@@ -164,7 +190,7 @@ class TestSegmentMetricCompatibility:
     def _http(self):
         # The field service is called twice: resource discovery, then
         # selectable_with. Distinguish by the query body.
-        def http(method, url, token, body=None):
+        def http(method, url, token, body=None, login_customer_id=None):
             if "googleAdsFields:search" in url:
                 q = (body or {}).get("query", "")
                 return self.COMPAT if "selectable_with" in q else self.DISCOVER
@@ -191,7 +217,7 @@ class TestSegmentMetricCompatibility:
         # clicks IS selectable with segments.date -> no error, query proceeds.
         calls = []
 
-        def http(method, url, token, body=None):
+        def http(method, url, token, body=None, login_customer_id=None):
             if "googleAdsFields:search" in url:
                 q = (body or {}).get("query", "")
                 return self.COMPAT if "selectable_with" in q else self.DISCOVER
@@ -218,7 +244,7 @@ class TestSegmentMetricCompatibility:
         }]}
         reached = []
 
-        def http(method, url, token, body=None):
+        def http(method, url, token, body=None, login_customer_id=None):
             if "googleAdsFields:search" in url:
                 q = (body or {}).get("query", "")
                 return compat if "selectable_with" in q else discover
@@ -240,7 +266,7 @@ class TestSegmentMetricCompatibility:
         }]}
         reached = []
 
-        def http(method, url, token, body=None):
+        def http(method, url, token, body=None, login_customer_id=None):
             if "googleAdsFields:search" in url:
                 q = (body or {}).get("query", "")
                 return {"results": []} if "selectable_with" in q else discover
@@ -253,10 +279,119 @@ class TestSegmentMetricCompatibility:
 
 
 class TestListAccounts:
-    def test_maps_accessible_customers(self):
-        conn = _connector({("GET", "listAccessibleCustomers"): ACCESSIBLE})
-        ids = {a.id for a in conn.list_accounts()}
-        assert ids == {"1112223333", "4445556666"}
+    def test_maps_directly_accessible_customers(self):
+        # Standalone accounts: one `customer` lookup each, no manager routing and
+        # no customer_client walk.
+        conn = GoogleAdsConnector(_DS(), http=_discovery_http(
+            {"resourceNames": ["customers/1112223333", "customers/4445556666"]},
+            {"1112223333": {"descriptiveName": "Acme", "manager": False},
+             "4445556666": {"descriptiveName": "Beta", "manager": False}},
+        ))
+        accts = {a.id: a for a in conn.list_accounts()}
+        assert set(accts) == {"1112223333", "4445556666"}
+        assert accts["1112223333"].name == "Acme"
+        assert all(not a.extra.get("manager_id") for a in accts.values())
+
+    def test_direct_account_name_from_customer_resource(self):
+        # A direct account's real name comes from the `customer` resource in a
+        # single call — fixing the modal "Account Name = id" bug.
+        called = {"customer_client": 0}
+
+        def http(method, url, token, body=None, login_customer_id=None):
+            if "listAccessibleCustomers" in url:
+                return {"resourceNames": ["customers/1143599360"]}
+            q = (body or {}).get("query", "")
+            if "FROM customer_client" in q:
+                called["customer_client"] += 1
+                return {"results": []}
+            if "FROM customer" in q:
+                assert login_customer_id == "1143599360"
+                return {"results": [{"customer": {"descriptiveName": "CloudXLab",
+                                                  "manager": False}}]}
+            raise AssertionError(f"unexpected: {url}")
+
+        conn = GoogleAdsConnector(_DS(), http=http)
+        accts = conn.list_accounts()
+        assert len(accts) == 1
+        assert accts[0].name == "CloudXLab"          # real name, not the id
+        # A direct account must NOT trigger a customer_client walk.
+        assert called["customer_client"] == 0
+
+    def test_auto_discovers_and_expands_manager_hierarchy(self):
+        # A manager (MCC) is detected and expanded automatically. The manager and
+        # sub-managers are skipped; each leaf client is tagged with its manager.
+        conn = GoogleAdsConnector(_DS(), http=_discovery_http(
+            {"resourceNames": ["customers/2064533644"]},
+            {"2064533644": {"descriptiveName": "CloudXLab", "manager": True}},
+            {"2064533644": [
+                {"id": "2064533644", "manager": True, "level": "0"},
+                {"id": "1445584958", "descriptiveName": "Client A",
+                 "manager": False, "level": "1"}]},
+        ))
+        accts = conn.list_accounts()
+        assert {a.id for a in accts} == {"1445584958"}   # manager itself skipped
+        assert accts[0].name == "Client A"
+        assert accts[0].extra.get("manager_id") == "2064533644"
+        assert accts[0].extra.get("manager_name") == "CloudXLab"   # name, not id
+
+    def test_nested_manager_hierarchy_flattens_to_leaf_clients(self):
+        # customer_client returns the WHOLE subtree (every level), so a top MCC
+        # with a sub-MCC underneath flattens to all leaf clients — the sub-manager
+        # is never surfaced, and every client routes through the top manager.
+        conn = GoogleAdsConnector(_DS(), http=_discovery_http(
+            {"resourceNames": ["customers/1000000000"]},
+            {"1000000000": {"descriptiveName": "Top", "manager": True}},
+            {"1000000000": [
+                {"id": "1000000000", "manager": True, "level": "0"},
+                {"id": "2000000000", "manager": True, "level": "1"},
+                {"id": "3000000001", "descriptiveName": "Client 1",
+                 "manager": False, "level": "2"},
+                {"id": "3000000002", "descriptiveName": "Client 2",
+                 "manager": False, "level": "2"},
+                {"id": "3000000003", "descriptiveName": "Client 3",
+                 "manager": False, "level": "1"}]},
+        ))
+        accts = {a.id: a for a in conn.list_accounts()}
+        assert set(accts) == {"3000000001", "3000000002", "3000000003"}
+        assert "2000000000" not in accts   # sub-manager not exposed
+        assert all(a.extra.get("manager_id") == "1000000000" for a in accts.values())
+
+    def test_two_managers_keep_their_own_clients(self):
+        # Two separate MCCs: each client is tagged with the manager it lives under.
+        conn = GoogleAdsConnector(_DS(), http=_discovery_http(
+            {"resourceNames": ["customers/1000000000", "customers/2000000000"]},
+            {"1000000000": {"descriptiveName": "MCC A", "manager": True},
+             "2000000000": {"descriptiveName": "MCC B", "manager": True}},
+            {"1000000000": [
+                {"id": "1000000000", "manager": True},
+                {"id": "3000000001", "manager": False, "descriptiveName": "A-1"},
+                {"id": "3000000002", "manager": False, "descriptiveName": "A-2"}],
+             "2000000000": [
+                {"id": "2000000000", "manager": True},
+                {"id": "3000000003", "manager": False, "descriptiveName": "B-3"}]},
+        ))
+        by_id = {a.id: a.extra.get("manager_id") for a in conn.list_accounts()}
+        assert by_id == {
+            "3000000001": "1000000000",
+            "3000000002": "1000000000",
+            "3000000003": "2000000000",
+        }
+
+    def test_direct_access_wins_over_manager_routing(self):
+        # An account reachable both directly and under a manager keeps direct
+        # access (no login-customer-id needed).
+        conn = GoogleAdsConnector(_DS(), http=_discovery_http(
+            {"resourceNames": ["customers/9990001111", "customers/2064533644"]},
+            {"9990001111": {"descriptiveName": "Direct", "manager": False},
+             "2064533644": {"descriptiveName": "MCC", "manager": True}},
+            {"2064533644": [
+                {"id": "2064533644", "manager": True},
+                {"id": "9990001111", "manager": False,
+                 "descriptiveName": "Also under mgr"}]},
+        ))
+        by_id = {a.id: a for a in conn.list_accounts()}
+        assert set(by_id) == {"9990001111"}
+        assert not by_id["9990001111"].extra.get("manager_id")   # direct wins
 
 
 class TestListFields:
@@ -328,7 +463,7 @@ class TestRunReport:
     def test_builds_gaql_with_resource_dates_and_order(self):
         captured = {}
 
-        def http(method, url, token, body=None):
+        def http(method, url, token, body=None, login_customer_id=None):
             if "listAccessibleCustomers" in url:
                 return ACCESSIBLE
             if "googleAdsFields:search" in url:
@@ -348,7 +483,7 @@ class TestRunReport:
     def test_breakdown_orders_by_first_metric_desc(self):
         captured = {}
 
-        def http(method, url, token, body=None):
+        def http(method, url, token, body=None, login_customer_id=None):
             captured["body"] = body
             return {"results": []}
 
@@ -371,6 +506,48 @@ class TestRunReport:
         assert row["metrics.clicks"] == 40           # string coerced to int
         assert row["metrics.cost_micros"] == 12.5     # 12_500_000 micros -> 12.5
 
+    def test_query_routes_each_account_through_its_own_manager(self):
+        # Proves routing is genuinely per account, not global: a direct account
+        # sends NO login-customer-id; a client account sends its MCC's.
+        import re
+        captured: dict = {}
+
+        def http(method, url, token, body=None, login_customer_id=None):
+            if "googleAdsFields:search" in url:
+                return FIELDS_CAMPAIGN
+            m = re.search(r"customers/(\d+)/googleAds:search", url)
+            captured[m.group(1)] = login_customer_id
+            return {"results": []}
+
+        conn = GoogleAdsConnector(_DS(), http=http)
+        conn._manager_map = lambda: {           # bypass the DB layer
+            "1112223333": "",                   # direct
+            "1445584958": "2064533644",         # under MCC
+        }
+        conn.query(self._spec(
+            fields=("campaign.name", "metrics.clicks"),
+            accounts=("1112223333", "1445584958")))
+        assert captured["1112223333"] is None            # direct → no header
+        assert captured["1445584958"] == "2064533644"    # client → MCC's id
+
+    def test_unknown_account_falls_back_to_direct_when_no_manager_stored(self):
+        # Fallback safety: an account not in the map, with no connection-wide
+        # manager stored, uses direct access — never a stale/foreign MCC.
+        import re
+        captured: dict = {}
+
+        def http(method, url, token, body=None, login_customer_id=None):
+            if "googleAdsFields:search" in url:
+                return FIELDS_CAMPAIGN
+            m = re.search(r"customers/(\d+)/googleAds:search", url)
+            captured[m.group(1)] = login_customer_id
+            return {"results": []}
+
+        conn = GoogleAdsConnector(_DS(), http=http)   # _DS has no LOGIN_CUSTOMER_ID
+        conn._manager_map = lambda: {}
+        conn.query(self._spec(fields=("campaign.name", "metrics.clicks")))
+        assert captured["1112223333"] is None
+
     def test_unknown_field_is_rejected_with_a_suggestion(self):
         conn = _connector({("POST", "googleAds:search"): SEARCH})
         spec = self._spec(fields=("campaign.name", "metrics.clickz"))
@@ -391,7 +568,7 @@ class TestRunReport:
     def test_customer_id_is_normalised(self):
         seen = {}
 
-        def http(method, url, token, body=None):
+        def http(method, url, token, body=None, login_customer_id=None):
             if "googleAdsFields:search" in url:
                 return FIELDS_CAMPAIGN
             seen["url"] = url
@@ -406,7 +583,7 @@ class TestAuthMapping:
     def test_401_becomes_auth_expired(self):
         from terno_dbi.connectors.api.sources.google_ads import _AuthError
 
-        def http(method, url, token, body=None):
+        def http(method, url, token, body=None, login_customer_id=None):
             raise _AuthError()
 
         conn = GoogleAdsConnector(_DS(), http=http)
@@ -420,7 +597,7 @@ class TestPartialSuccess:
         good = "1112223333"
         bad = "4445556666"
 
-        def http(method, url, token, body=None):
+        def http(method, url, token, body=None, login_customer_id=None):
             if "listAccessibleCustomers" in url:
                 return ACCESSIBLE
             if "googleAdsFields:search" in url:
@@ -520,6 +697,18 @@ class TestErrorSurfacing:
         ga._default_http("GET", "https://x", "tok")
         assert captured["headers"]["login-customer-id"] == "8570544175"
 
+        # A per-connection value wins over the env fallback.
+        ga._default_http("GET", "https://x", "tok", login_customer_id="206-453-3644")
+        assert captured["headers"]["login-customer-id"] == "2064533644"
+
+    def test_login_customer_id_read_from_connection_bundle(self):
+        class _DSWithMgr(_DS):
+            connection_json = {"ACCESS_TOKEN": "tok", "LOGIN_CUSTOMER_ID": "206-453-3644"}
+        conn = GoogleAdsConnector(_DSWithMgr(), http=_mock_http({}))
+        assert conn._login_customer_id() == "2064533644"   # hyphens stripped
+        # Absent bundle key -> empty (direct access, no manager).
+        assert GoogleAdsConnector(_DS(), http=_mock_http({}))._login_customer_id() == ""
+
 
 class TestRegistration:
     def test_google_ads_is_registered_at_startup(self):
@@ -538,7 +727,7 @@ def _recording_http(routes):
     """Like _mock_http but records every (method, url, body) for assertions."""
     calls = []
 
-    def http(method, url, token, body=None):
+    def http(method, url, token, body=None, login_customer_id=None):
         assert token == "tok"
         calls.append({"method": method, "url": url, "body": body})
         for (m, needle), response in routes.items():

@@ -18,7 +18,7 @@ from django.shortcuts import redirect
 from django.utils.html import escape
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods
-from terno_dbi.services.secrets import decrypt_dict
+from terno_dbi.services.secrets import decrypt_dict, encrypt_dict
 from terno_dbi.connectors.api import registry
 from terno_dbi.connectors.api.auth import account_selection, rbac
 
@@ -389,6 +389,11 @@ def connector_accounts(request, connector_key):
         except (json.JSONDecodeError, ValueError):
             return HttpResponseBadRequest("Invalid JSON.")
 
+        result = {"status": "saved"}
+        if "login_customer_id" in body:
+            _set_login_customer_id(ds, str(body.get("login_customer_id") or ""))
+            result["login_customer_id"] = _get_login_customer_id(ds)
+
         # Delta shape takes precedence when either key is present: apply only the
         # named accounts, so concurrent edits to different accounts don't clobber.
         if "enabled_deltas" in body or "writes_deltas" in body:
@@ -397,7 +402,6 @@ def connector_accounts(request, connector_key):
             if not isinstance(enabled_deltas, dict) or not isinstance(writes_deltas, dict):
                 return HttpResponseBadRequest(
                     "enabled_deltas and writes_deltas must be objects.")
-            result = {"status": "saved"}
             if "enabled_deltas" in body:
                 result["enabled_count"] = account_selection.apply_enabled_deltas(
                     ds, enabled_deltas)
@@ -406,20 +410,20 @@ def connector_accounts(request, connector_key):
                     ds, writes_deltas)
             return JsonResponse(result)
 
-        account_ids = body.get("account_ids") or []
-        if not isinstance(account_ids, list):
-            return HttpResponseBadRequest("account_ids must be a list.")
-        count = account_selection.set_enabled_accounts(ds, account_ids)
-        result = {"status": "saved", "enabled_count": count}
-        # Optional and separate: only touch write flags when the key is present,
-        # so existing read-only callers never change write enablement.
-        if "writes_account_ids" in body:
-            writes_ids = body.get("writes_account_ids") or []
-            if not isinstance(writes_ids, list):
-                return HttpResponseBadRequest("writes_account_ids must be a list.")
-            result["writes_enabled_count"] = (
-                account_selection.set_writes_enabled_accounts(ds, writes_ids)
-            )
+        if "account_ids" in body:
+            account_ids = body.get("account_ids") or []
+            if not isinstance(account_ids, list):
+                return HttpResponseBadRequest("account_ids must be a list.")
+            result["enabled_count"] = account_selection.set_enabled_accounts(
+                ds, account_ids)
+            if "writes_account_ids" in body:
+                writes_ids = body.get("writes_account_ids") or []
+                if not isinstance(writes_ids, list):
+                    return HttpResponseBadRequest("writes_account_ids must be a list.")
+                result["writes_enabled_count"] = (
+                    account_selection.set_writes_enabled_accounts(ds, writes_ids)
+                )
+
         return JsonResponse(result)
 
     try:
@@ -437,6 +441,7 @@ def connector_accounts(request, connector_key):
         "enabled_count": sum(1 for r in rows if r["enabled"]),
         "writes_enabled_count": sum(1 for r in rows if r.get("writes_enabled")),
         "email": _connected_email(ds),
+        "login_customer_id": _get_login_customer_id(ds),
     })
 
 
@@ -448,6 +453,34 @@ def _connected_email(ds) -> str:
     if not isinstance(bundle, dict):
         return ""
     return bundle.get("CONNECTED_EMAIL", "") or ""
+
+
+def _get_login_customer_id(ds) -> str:
+    """The per-connection manager (MCC) id, digits only, or ''."""
+    try:
+        bundle = decrypt_dict(ds.connection_json) or {}
+    except Exception:   # noqa: BLE001
+        return ""
+    if not isinstance(bundle, dict):
+        return ""
+    return str(bundle.get("LOGIN_CUSTOMER_ID", "") or "").replace("-", "")
+
+
+def _set_login_customer_id(ds, value: str) -> None:
+    """Store (or clear, when blank) the manager id in the encrypted bundle."""
+    try:
+        bundle = decrypt_dict(ds.connection_json) or {}
+    except Exception:   # noqa: BLE001
+        bundle = {}
+    if not isinstance(bundle, dict):
+        return
+    cid = str(value or "").strip().replace("-", "")
+    if cid:
+        bundle["LOGIN_CUSTOMER_ID"] = cid
+    else:
+        bundle.pop("LOGIN_CUSTOMER_ID", None)
+    ds.connection_json = encrypt_dict(bundle)
+    ds.save(update_fields=["connection_json"])
 
 
 __all__ = [
