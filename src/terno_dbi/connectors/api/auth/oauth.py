@@ -165,10 +165,26 @@ def _callback_instance(provider, connector_key: str,
     return host
 
 
-def _default_post(url: str, data: Dict[str, str]) -> Dict[str, Any]:
-    resp = requests.post(url, data=data, timeout=15)
+def _default_post(url: str, data: Dict[str, str],
+                  auth: Optional[Tuple[str, str]] = None) -> Dict[str, Any]:
+    resp = requests.post(url, data=data, auth=auth, timeout=15)
     resp.raise_for_status()
     return resp.json()
+
+
+def _post_token(http_post, provider, token_url: str,
+                body: Dict[str, str]) -> Dict[str, Any]:
+    """POST a token request, authenticating the client the way the provider wants.
+
+    Most take the client credentials in the body. A `token_auth_basic` provider
+    (Pipedrive) takes them as HTTP Basic instead, so they are moved out of the
+    body — `http_post` then receives them as `auth`.
+    """
+    if not provider.token_auth_basic:
+        return http_post(token_url, body)
+    body = {k: v for k, v in body.items() if k not in ("client_id", "client_secret")}
+    return http_post(token_url, body,
+                     auth=(provider.client_id(), provider.client_secret()))
 
 
 def _connected_email(token_response: Dict[str, Any]) -> str:
@@ -210,7 +226,8 @@ def _store_tokens(data_source, token_response: Dict[str, Any],
         bundle["CONNECTED_EMAIL"] = email
     if instance:
         bundle["INSTANCE"] = instance
-    # Zoho names the regional API host its data lives on (www.zohoapis.eu, …).
+    # The API host the connection's data lives on: Zoho names its regional one
+    # (www.zohoapis.eu, …), Pipedrive the company's own (acme.pipedrive.com).
     if token_response.get("api_domain"):
         bundle["API_DOMAIN"] = token_response["api_domain"]
     expires_in = token_response.get("expires_in")
@@ -269,7 +286,7 @@ def complete_authorization(
                  if provider.uses_instance else provider.token_url)
 
     try:
-        token_response = http_post(token_url, exchange)
+        token_response = _post_token(http_post, provider, token_url, exchange)
     except Exception as exc:   # noqa: BLE001
         logger.warning("Token exchange failed for %s: %s", st.connector_key, exc)
         raise ApiError(
@@ -381,7 +398,7 @@ def refresh_access_token(
     body.update(provider.extra_token_params)   # e.g. Shopify `expiring=1`
 
     try:
-        token_response = http_post(token_url, body)
+        token_response = _post_token(http_post, provider, token_url, body)
     except Exception as exc:   # noqa: BLE001
         _mark_expired(data_source, "Token refresh failed; reconnect the source.")
         raise ApiError(ErrorCode.AUTH_EXPIRED,

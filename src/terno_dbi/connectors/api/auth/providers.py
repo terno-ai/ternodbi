@@ -40,6 +40,10 @@ class OAuthProvider:
     # untrusted, and the token POST carries our client secret.
     callback_instance_param: str = ""
     callback_instances: FrozenSet[str] = frozenset()
+    # When True, the token exchange and refresh authenticate the client with an
+    # HTTP Basic header rather than `client_id`/`client_secret` in the body
+    # (Pipedrive accepts the body form but advises against it).
+    token_auth_basic: bool = False
 
     @property
     def uses_instance(self) -> bool:
@@ -212,6 +216,23 @@ _ZOHO = OAuthProvider(
 )
 
 
+_PIPEDRIVE = OAuthProvider(
+    name="pipedrive",
+    authorization_url="https://oauth.pipedrive.com/oauth/authorize",
+    token_url="https://oauth.pipedrive.com/oauth/token",
+    # Pipedrive takes no scope at consent: the app's scopes are chosen in its
+    # Developer Hub settings — deals:full, contacts:full, activities:full,
+    # leads:full and users:read. `:full` is Pipedrive's only write scope and
+    # includes delete; the connector itself never deletes or archives. The token
+    # response reports what was granted.
+    scope="",
+    client_id_env="TERNO_PIPEDRIVE_CLIENT_ID",
+    client_secret_env="TERNO_PIPEDRIVE_CLIENT_SECRET",
+    use_pkce=False,
+    token_auth_basic=True,
+)
+
+
 def _google_with_scope(scope: str) -> OAuthProvider:
     from dataclasses import replace
     return replace(_GOOGLE, scope=f"openid email {scope}")
@@ -249,6 +270,7 @@ _PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
     "amazon_ads": _AMAZON_ADS,
     "shopify": _SHOPIFY,
     "zoho_crm": _ZOHO,
+    "pipedrive": _PIPEDRIVE,
 }
 
 

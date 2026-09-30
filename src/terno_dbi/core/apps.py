@@ -66,6 +66,7 @@ def _register_api_connectors():
     from terno_dbi.connectors.api.sources.amazon_ads import make_amazon_ads_connector
     from terno_dbi.connectors.api.sources.shopify import make_shopify_connector
     from terno_dbi.connectors.api.sources.zoho_crm import make_zoho_crm_connector
+    from terno_dbi.connectors.api.sources.pipedrive import make_pipedrive_connector
 
     registry.register("googleanalytics4", make_ga4_connector)
     registry.register("google_search_console", make_gsc_connector)
@@ -81,3 +82,4 @@ def _register_api_connectors():
     registry.register("amazon_ads", make_amazon_ads_connector)
     registry.register("shopify", make_shopify_connector)
     registry.register("zoho_crm", make_zoho_crm_connector)
+    registry.register("pipedrive", make_pipedrive_connector)

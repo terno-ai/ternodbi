@@ -58,6 +58,21 @@ def _sf_date_field(help_text: str = "") -> ReportSetting:
     )
 
 
+def _pd_date_field(*others: str) -> ReportSetting:
+    """The optional `date_field` a Pipedrive report accepts.
+
+    Pipedrive's list endpoints cannot filter on a date, so each report accepts
+    only the dates the connector can apply a range to — `add_time` (the
+    default) and `others`.
+    """
+    return ReportSetting(
+        "date_field", label="Date field", required=False,
+        help_text="Which date the date range filters on. Defaults to add_time "
+                  "(when the record was created); also accepts "
+                  + ", ".join(others) + ".",
+    )
+
+
 # --------------------------------------------------------------------------
 # Databases — family=database
 # --------------------------------------------------------------------------
@@ -440,6 +455,46 @@ _APIS: List[ConnectorSpec] = [
         rate_limit_per_second=10,
         rate_limit_per_day=10000,
         default_enabled=False,   # enable once the Zoho OAuth client is registered
+    ),
+    ConnectorSpec(
+        key="pipedrive",
+        display_name="Pipedrive",
+        provider="Pipedrive",
+        category="CRM",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Deals, leads, people, organizations and sales activities "
+                    "from Pipedrive — including custom fields — for pipeline, "
+                    "win-rate, revenue and rep-activity analytics.",
+        scopes_label="Pipedrive access to read, create and update deals, leads, "
+                     "people, organizations and activities; read-only access "
+                     "to users",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=True,
+        account_label_singular="Company",
+        account_label_plural="Companies",
+        report_types=[
+            ReportType("Deals", "Deals", settings=[_pd_date_field(
+                "won_time", "lost_time", "close_time", "stage_change_time",
+                "update_time", "expected_close_date")]),
+            ReportType("Leads", "Leads", settings=[_pd_date_field(
+                "update_time", "expected_close_date")]),
+            ReportType("Persons", "People", settings=[_pd_date_field(
+                "update_time")]),
+            ReportType("Organizations", "Organizations", settings=[_pd_date_field(
+                "update_time")]),
+            ReportType("Activities", "Activities", settings=[_pd_date_field(
+                "due_date", "marked_as_done_time", "update_time")]),
+        ],
+        default_report_type="Deals",
+        # Pipedrive meters a daily API-token budget per company (30,000 x plan
+        # multiplier x seats) shared with every other integration, and one query
+        # here costs a few list calls. The per-day guard keeps this connector to
+        # a fraction of a typical company's budget.
+        rate_limit_per_second=10,
+        rate_limit_per_day=1000,
+        default_enabled=False,   # enable once the Pipedrive app is registered
     ),
     ConnectorSpec(
         key="amazon_ads",

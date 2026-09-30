@@ -370,3 +370,94 @@ class TestZohoRegionalServer:
         assert posted["url"] == "https://accounts.zoho.in/oauth/v2/token"
         assert bundle["ACCESS_TOKEN"] == "new"
         assert bundle["REFRESH_TOKEN"] == "rt"
+
+
+@pytest.mark.django_db
+class TestPipedriveBasicAuth:
+    """Pipedrive authenticates the client at its token endpoint with HTTP Basic,
+    takes no scope at consent (the app's scopes are set in its Developer Hub),
+    and names the company's own API host in the token response."""
+
+    @pytest.fixture(autouse=True)
+    def pipedrive_creds(self, monkeypatch):
+        monkeypatch.setenv("TERNO_PIPEDRIVE_CLIENT_ID", "pd-id")
+        monkeypatch.setenv("TERNO_PIPEDRIVE_CLIENT_SECRET", "pd-secret")
+
+    def _start(self, org):
+        return oauth.start_authorization(
+            connector_key="pipedrive",
+            redirect_uri="https://acme.app.terno.ai/callback",
+            organisation=org,
+        )
+
+    def test_consent_url_carries_no_scope_and_no_pkce(self, org, catalog):
+        from urllib.parse import urlparse, parse_qs
+
+        url = self._start(org)["authorization_url"]
+        assert url.startswith("https://oauth.pipedrive.com/oauth/authorize?")
+        qs = parse_qs(urlparse(url).query)
+        assert qs["client_id"] == ["pd-id"]
+        assert "scope" not in qs
+        assert "code_challenge" not in qs
+
+    def test_exchange_sends_the_secret_only_as_basic_auth(self, org, catalog):
+        started = self._start(org)
+        posted = {}
+
+        def fake_post(url, data, auth=None):
+            posted.update(url=url, data=data, auth=auth)
+            return {"access_token": "at", "refresh_token": "rt",
+                    "scope": "base,deals:read,users:read",
+                    "api_domain": "https://acme.pipedrive.com", "expires_in": 3599}
+
+        ds = oauth.complete_authorization(
+            state=started["state"], code="c", http_post=fake_post)
+        assert posted["url"] == "https://oauth.pipedrive.com/oauth/token"
+        assert posted["auth"] == ("pd-id", "pd-secret")
+        assert posted["data"] == {
+            "grant_type": "authorization_code", "code": "c",
+            "redirect_uri": "https://acme.app.terno.ai/callback"}
+        bundle = secrets.decrypt_dict(ds.connection_json)
+        assert bundle["API_DOMAIN"] == "https://acme.pipedrive.com"
+        assert bundle["GRANTED_SCOPES"] == "base,deals:read,users:read"
+
+    def test_refresh_sends_the_secret_only_as_basic_auth(self, org, catalog):
+        ds = DataSource.objects.create(
+            display_name="Pipedrive", type="pipedrive", connection_str="",
+            organisation=org,
+            catalog=ConnectorCatalog.objects.get(key="pipedrive"),
+        )
+        ds.connection_json = secrets.encrypt_dict({
+            "ACCESS_TOKEN": "old", "REFRESH_TOKEN": "rt",
+            "API_DOMAIN": "https://acme.pipedrive.com",
+            "TOKEN_EXPIRES_AT": str(time.time() - 1),
+        })
+        ds.save()
+        posted = {}
+
+        def fake_post(url, data, auth=None):
+            posted.update(url=url, data=data, auth=auth)
+            return {"access_token": "new", "refresh_token": "rt",
+                    "api_domain": "https://acme.pipedrive.com", "expires_in": 3599}
+
+        bundle = oauth.refresh_access_token(ds, http_post=fake_post)
+        assert posted["url"] == "https://oauth.pipedrive.com/oauth/token"
+        assert posted["auth"] == ("pd-id", "pd-secret")
+        assert posted["data"] == {"grant_type": "refresh_token", "refresh_token": "rt"}
+        assert bundle["ACCESS_TOKEN"] == "new"
+
+    def test_default_post_passes_basic_auth_to_requests(self, monkeypatch):
+        seen = {}
+
+        class _Resp:
+            def raise_for_status(self): pass
+            def json(self): return {"access_token": "at"}
+
+        def fake_post(url, data=None, auth=None, timeout=None):
+            seen.update(url=url, data=data, auth=auth)
+            return _Resp()
+
+        monkeypatch.setattr(oauth.requests, "post", fake_post)
+        oauth._default_post("https://oauth.pipedrive.com/oauth/token",
+                            {"grant_type": "refresh_token"}, auth=("i", "s"))
+        assert seen["auth"] == ("i", "s")
