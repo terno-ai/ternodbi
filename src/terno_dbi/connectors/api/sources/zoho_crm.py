@@ -12,6 +12,9 @@ Implements the `ApiConnector` interface against the Zoho CRM REST API v8:
   module, filtered to the date range on `Created_Time` and paged with
   `LIMIT offset, count`. User lookups (Owner, Created_By, …) are resolved to
   names via `GET /crm/v8/users`.
+- `list_actions()` / `execute_action()` — `create_record` (`POST /crm/v8/{module}`)
+  and `update_record` (`PUT /crm/v8/{module}/{id}`, after reading the record's
+  current values). There is deliberately no delete.
 
 Zoho CRM differs from the other connectors:
   * **Data is regional.** An org lives in one data centre (US, EU, IN, AU, JP, CN,
@@ -34,7 +37,9 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 from terno_dbi.connectors.api.model.base import ApiConnector
 from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode, invalid_field
-from terno_dbi.connectors.api.model.types import Account, Field, QueryResult, QuerySpec
+from terno_dbi.connectors.api.model.types import (
+    Account, Action, ActionResult, Field, QueryResult, QuerySpec,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +73,64 @@ _USER_TYPES = frozenset({"ownerlookup", "userlookup"})
 _INTEGER_TYPES = frozenset({"integer", "bigint"})
 _NUMBER_TYPES = frozenset({"double", "decimal"})
 _DATE_TYPES = frozenset({"date", "datetime"})
+
+# Fields Zoho maintains itself, and computed field types — never writable.
+_SYSTEM_FIELDS = frozenset({
+    "id", "Created_Time", "Modified_Time", "Created_By", "Modified_By",
+    "Last_Activity_Time",
+})
+_COMPUTED_TYPES = frozenset({"formula", "rollup_summary", "autonumber", "auto_number"})
+_RECORD_ID_RE = re.compile(r"^\d{1,20}$")   # Zoho record ids are numeric strings
+
+# --- write actions ----------------------------------------------------------
+
+_MODULE_PROP = {"type": "string", "enum": list(_MODULES),
+                "description": "The module the record belongs to (the report type)."}
+_FIELDS_PROP = {
+    "type": "object", "minProperties": 1,
+    "description": "Field API names (ids from list_fields for the module) mapped to "
+                   "values. Lookups take {\"id\": \"<record id>\"}; dates "
+                   "'YYYY-MM-DD'; date-times ISO 8601 with an offset; picklists an "
+                   "existing option's value.",
+}
+
+_ACTIONS: List[Action] = [
+    Action(
+        "create_record", "Create a record",
+        "Create one record in a Zoho CRM module — e.g. a lead, contact, deal or "
+        "task. Mandatory fields depend on the module and the org's layout (e.g. "
+        "Last_Name for Leads); Zoho names any that are missing.",
+        schema={"type": "object",
+                "properties": {"module": _MODULE_PROP, "fields": _FIELDS_PROP},
+                "required": ["module", "fields"], "additionalProperties": False},
+        destructive=False,
+    ),
+    Action(
+        "update_record", "Update a record",
+        "Change field values on one existing record — e.g. move a deal to another "
+        "stage or reassign its owner. Only the fields given are changed.",
+        schema={"type": "object",
+                "properties": {
+                    "module": _MODULE_PROP,
+                    "record_id": {"type": "string",
+                                  "description": "The record's id (the `id` field "
+                                                 "from data_query)."},
+                    "fields": _FIELDS_PROP,
+                },
+                "required": ["module", "record_id", "fields"],
+                "additionalProperties": False},
+    ),
+]
+_ACTIONS_BY_ID: Dict[str, Action] = {a.id: a for a in _ACTIONS}
+
+# Zoho has no validate-only mode for record writes, so a dry run checks what can
+# be checked here and says plainly what it did not.
+def _dry_run_details(checked: str) -> Dict[str, Any]:
+    return {
+        "dry_run": True, "applied": False,
+        "validated": f"{checked}; Zoho checks mandatory fields and value formats "
+                     f"only when the change is applied",
+    }
 
 # --- curated catalogues per module -----------------------------------------
 
@@ -280,7 +343,7 @@ def _zoho_error(resp) -> Exception:
             body = body["data"][0]   # record APIs wrap errors per record
         if isinstance(body, dict):
             code = str(body.get("code") or "")
-            message = str(body.get("message") or "")
+            message = str(body.get("message") or "") + _detail_suffix(body.get("details"))
     except ValueError:
         message = (resp.text or "")[:200]   # non-JSON (e.g. an HTML error page)
 
@@ -301,6 +364,41 @@ def _zoho_error(resp) -> Exception:
     )
 
 
+def _detail_suffix(details) -> str:
+    """' (api_name=Email, expected_data_type=email)' from Zoho's error details.
+
+    The details name the field a write failed on, which is the actionable part.
+    """
+    if not isinstance(details, dict):
+        return ""
+    parts = [f"{k}={v}" for k, v in details.items()
+             if isinstance(v, (str, int, float, bool))]
+    return f" ({', '.join(parts)})" if parts else ""
+
+
+def _write_outcome(data: Dict[str, Any]) -> Dict[str, Any]:
+    """The `details` of a record write, or the reason Zoho refused it.
+
+    Zoho reports a write per record, and a refusal can arrive in a 2xx body, so
+    the record's own `status` decides — not the HTTP status.
+    """
+    rows = data.get("data") or []
+    row = rows[0] if rows and isinstance(rows[0], dict) else None
+    if row is None:
+        raise ApiError(ErrorCode.UPSTREAM_ERROR,
+                       "Zoho CRM returned no result for the change.")
+    if str(row.get("status") or "").lower() != "success":
+        code = str(row.get("code") or "UNKNOWN")
+        raise ApiError(
+            ErrorCode.INVALID_ACTION_PARAMS,
+            f"Zoho CRM rejected the change ({code}): "
+            f"{row.get('message') or 'no reason given'}"
+            f"{_detail_suffix(row.get('details'))}",
+            retriable=False, details={"zoho_code": code},
+        )
+    return row.get("details") or {}
+
+
 class _AuthError(Exception):
     """Internal marker for a 401 from Zoho, mapped to AUTH_EXPIRED."""
 
@@ -314,6 +412,8 @@ class ZohoCRMConnector(ApiConnector):
         # connector's lifetime so a query does not refetch metadata.
         self._catalogue_cache: Dict[str, Dict[str, Field]] = {}
         self._user_fields: Dict[str, Set[str]] = {}
+        # Fields Zoho's metadata marks read-only or computed, per module.
+        self._read_only: Dict[str, Set[str]] = {}
 
     # -- transport ----------------------------------------------------------
 
@@ -391,10 +491,12 @@ class ZohoCRMConnector(ApiConnector):
                 "catalogue.", module, exc)
             self._catalogue_cache[module] = curated
             self._user_fields[module] = set(_COMMON_USER_FIELDS)
+            self._read_only[module] = set()
             return curated
 
         catalogue: Dict[str, Field] = {_ID.id: _ID}
         user_fields: Set[str] = set()
+        read_only: Set[str] = set()
         for meta in metas:
             api = meta.get("api_name")
             ztype = meta.get("data_type") or ""
@@ -407,8 +509,12 @@ class ZohoCRMConnector(ApiConnector):
             catalogue[api] = replace(known, name=discovered.name) if known else discovered
             if ztype in _USER_TYPES:
                 user_fields.add(api)
+            if (meta.get("read_only") or meta.get("field_read_only")
+                    or ztype in _COMPUTED_TYPES):
+                read_only.add(api)
         self._catalogue_cache[module] = catalogue
         self._user_fields[module] = user_fields
+        self._read_only[module] = read_only
         return catalogue
 
     def _discover_fields(self, module: str) -> List[Dict[str, Any]]:
@@ -517,6 +623,138 @@ class ZohoCRMConnector(ApiConnector):
                    f"date range (UTC)."],
             warnings=warnings,
         )
+
+    # -- write actions ------------------------------------------------------
+
+    def list_actions(self) -> List[Action]:
+        return list(_ACTIONS)
+
+    def execute_action(
+        self, action_id: str, account: str,
+        params: Optional[Dict[str, Any]] = None, dry_run: bool = False,
+    ) -> ActionResult:
+        """Perform one write action. Account authorisation happens upstream.
+
+        The token is scoped to one org, so `account` is recorded, not routed on.
+        Every parameter is checked before any write: the module, the field names
+        against the module's metadata, and (for an update) that the record
+        exists — read first, so `before` shows exactly what changes.
+        """
+        action = _ACTIONS_BY_ID.get(action_id)
+        if action is None:
+            raise ApiError(
+                ErrorCode.UNKNOWN_ACTION,
+                f"Unknown action {action_id!r}. Available: "
+                f"{', '.join(_ACTIONS_BY_ID)}.",
+                retriable=False,
+            )
+        params = params or {}
+        extra = sorted(set(params) - set(action.schema["properties"]))
+        if extra:
+            raise ApiError(
+                ErrorCode.INVALID_ACTION_PARAMS,
+                f"{action_id} does not accept: {', '.join(extra)}.",
+                retriable=False, details={"unexpected": extra},
+            )
+        module = params.get("module")
+        if module not in _MODULES:
+            raise ApiError(
+                ErrorCode.INVALID_ACTION_PARAMS,
+                f"'module' must be one of: {', '.join(_MODULES)}.",
+                retriable=False, details={"param": "module"},
+            )
+        record_id = _record_id(params) if action_id == "update_record" else None
+        values = self._writable_values(module, params.get("fields"))
+        if record_id is None:
+            return self._create_record(module, account, values, dry_run)
+        return self._update_record(module, account, record_id, values, dry_run)
+
+    def _writable_values(self, module: str, fields) -> Dict[str, Any]:
+        """`fields`, once every name is known to the module and writable."""
+        if not isinstance(fields, dict) or not fields:
+            raise ApiError(
+                ErrorCode.INVALID_ACTION_PARAMS,
+                "'fields' must be a non-empty object of field API names to values.",
+                retriable=False, details={"param": "fields"},
+            )
+        catalogue = self._module_catalogue(module)
+        locked = _SYSTEM_FIELDS | self._read_only.get(module, set())
+        for name in fields:
+            if name not in catalogue:
+                raise invalid_field(name, [f for f in catalogue if f not in locked])
+            if name in locked:
+                raise ApiError(
+                    ErrorCode.INVALID_ACTION_PARAMS,
+                    f"{name!r} is read-only in Zoho CRM and cannot be set.",
+                    retriable=False, details={"field": name},
+                )
+        return dict(fields)
+
+    def _create_record(self, module, account, values, dry_run) -> ActionResult:
+        names = ", ".join(values)
+        if dry_run:
+            return ActionResult(
+                action="create_record", account=account,
+                summary=f"[dry-run — not applied] Would create a {module} record "
+                        f"with: {names}.",
+                after=dict(values),
+                details=_dry_run_details("field names and writability"),
+            )
+        outcome = _write_outcome(self._call(
+            "POST", f"{self._api_base()}/{module}", {"data": [values]}))
+        record_id = str(outcome.get("id") or "")
+        return ActionResult(
+            action="create_record", account=account,
+            summary=f"Created {module} record {record_id} with: {names}.",
+            after={"id": record_id, **values},
+            details={"module": module, "record_id": record_id},
+        )
+
+    def _update_record(self, module, account, record_id, values,
+                       dry_run) -> ActionResult:
+        base = self._api_base()
+        data = self._call("GET", f"{base}/{module}/{record_id}",
+                          {"fields": ",".join(values)})
+        rows = data.get("data") or []
+        if not rows:
+            raise ApiError(
+                ErrorCode.INVALID_ACTION_PARAMS,
+                f"No {module} record with id {record_id} was found.",
+                retriable=False, details={"record_id": record_id},
+            )
+        before = {"id": record_id, **{f: rows[0].get(f) for f in values}}
+        after = {"id": record_id, **values}
+        names = ", ".join(values)
+        if dry_run:
+            return ActionResult(
+                action="update_record", account=account,
+                summary=f"[dry-run — not applied] Would update {module} record "
+                        f"{record_id}: {names}.",
+                before=before, after=after,
+                details=_dry_run_details(
+                    "field names, writability and that the record exists"),
+            )
+        _write_outcome(self._call(
+            "PUT", f"{base}/{module}/{record_id}", {"data": [values]}))
+        return ActionResult(
+            action="update_record", account=account,
+            summary=f"Updated {module} record {record_id}: {names}.",
+            before=before, after=after,
+            details={"module": module, "record_id": record_id},
+        )
+
+
+def _record_id(params: Dict[str, Any]) -> str:
+    """The update target — digits only, as it is placed in the request path."""
+    raw = str(params.get("record_id") or "").strip()
+    if not _RECORD_ID_RE.match(raw):
+        raise ApiError(
+            ErrorCode.INVALID_ACTION_PARAMS,
+            f"'record_id' must be a numeric Zoho record id, got {raw!r}. Use the "
+            f"`id` field from data_query.",
+            retriable=False, details={"param": "record_id"},
+        )
+    return raw
 
 
 def _value(field_id, raw, catalogue, users: Optional[Dict[str, str]]):

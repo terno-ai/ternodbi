@@ -74,6 +74,9 @@ DEAL_FIELDS = {"fields": [
     {"api_name": "Line_Items", "field_label": "Line Items", "data_type": "subform"},
     {"api_name": "Secret", "field_label": "Secret", "data_type": "text",
      "visible": False},
+    # Selectable, but Zoho marks it read-only — it can be read, never written.
+    {"api_name": "Legacy_Ref", "field_label": "Legacy ref", "data_type": "text",
+     "field_read_only": True},
 ]}
 
 USERS = {"users": [
@@ -430,3 +433,175 @@ class TestRegistration:
         from terno_dbi.connectors.api.sources.zoho_crm import make_zoho_crm_connector
         conn = make_zoho_crm_connector(_DS())
         assert conn._token_refresher is not None
+
+
+def _ok(record_id):
+    return {"data": [{"code": "SUCCESS", "status": "success",
+                      "message": "record updated", "details": {"id": record_id}}]}
+
+
+class TestWriteActions:
+    ACCOUNT = "808232144"
+
+    def _conn(self, extra=None, calls=None):
+        routes = {("GET", "settings/fields"): DEAL_FIELDS}
+        routes.update(extra or {})
+        return _connector(routes, calls)
+
+    @staticmethod
+    def _writes(calls):
+        return [c for c in calls if c[0] in ("POST", "PUT")]
+
+    def test_offers_create_and_update_but_no_delete(self):
+        actions = {a.id: a for a in _connector({}).list_actions()}
+        assert set(actions) == {"create_record", "update_record"}
+        assert actions["create_record"].destructive is False
+        assert actions["update_record"].destructive is True
+        assert actions["update_record"].schema["required"] == [
+            "module", "record_id", "fields"]
+
+    def test_create_posts_one_record_and_returns_its_id(self):
+        calls = []
+        conn = self._conn({("POST", "/Deals"): _ok("9100")}, calls)
+        result = conn.execute_action("create_record", self.ACCOUNT, {
+            "module": "Deals", "fields": {"Deal_Name": "New", "Amount": 500}})
+        [(method, url, body)] = self._writes(calls)
+        assert (method, url) == ("POST", f"{API}/Deals")
+        assert body == {"data": [{"Deal_Name": "New", "Amount": 500}]}
+        assert result.after == {"id": "9100", "Deal_Name": "New", "Amount": 500}
+        assert result.before is None
+        assert "9100" in result.summary
+
+    def test_update_reads_the_record_before_writing(self):
+        calls = []
+        record = {"data": [{"id": "9001", "Stage": "Qualification"}]}
+        conn = self._conn({("GET", "/Deals/9001"): record,
+                           ("PUT", "/Deals/9001"): _ok("9001")}, calls)
+        result = conn.execute_action("update_record", self.ACCOUNT, {
+            "module": "Deals", "record_id": "9001",
+            "fields": {"Stage": "Closed Won"}})
+        touched = [(c[0], c[1], c[2]) for c in calls if "/Deals/9001" in c[1]]
+        assert touched == [
+            ("GET", f"{API}/Deals/9001", {"fields": "Stage"}),
+            ("PUT", f"{API}/Deals/9001", {"data": [{"Stage": "Closed Won"}]}),
+        ]
+        assert result.before == {"id": "9001", "Stage": "Qualification"}
+        assert result.after == {"id": "9001", "Stage": "Closed Won"}
+
+    def test_dry_run_create_sends_nothing(self):
+        calls = []
+        conn = self._conn({}, calls)
+        result = conn.execute_action("create_record", self.ACCOUNT, {
+            "module": "Deals", "fields": {"Deal_Name": "New"}}, dry_run=True)
+        assert self._writes(calls) == []
+        assert result.summary.startswith("[dry-run")
+        assert result.details["applied"] is False
+        # A new record has no target to check — the details must not claim one.
+        assert "record exists" not in result.details["validated"]
+
+    def test_dry_run_update_reads_but_does_not_write(self):
+        calls = []
+        record = {"data": [{"id": "9001", "Stage": "Qualification"}]}
+        conn = self._conn({("GET", "/Deals/9001"): record}, calls)
+        result = conn.execute_action("update_record", self.ACCOUNT, {
+            "module": "Deals", "record_id": "9001",
+            "fields": {"Stage": "Closed Won"}}, dry_run=True)
+        assert self._writes(calls) == []
+        assert result.before == {"id": "9001", "Stage": "Qualification"}
+        assert result.details["dry_run"] is True
+        assert "record exists" in result.details["validated"]
+
+    def test_update_of_a_missing_record_is_refused(self):
+        calls = []
+        conn = self._conn({("GET", "/Deals/9001"): {}}, calls)   # 204 -> {}
+        with pytest.raises(ApiError) as exc:
+            conn.execute_action("update_record", self.ACCOUNT, {
+                "module": "Deals", "record_id": "9001", "fields": {"Stage": "X"}})
+        assert exc.value.code == ErrorCode.INVALID_ACTION_PARAMS
+        assert "No Deals record with id 9001" in exc.value.message
+        assert self._writes(calls) == []
+
+    @pytest.mark.parametrize("record_id", ["9001/../Leads", "abc", "", "1 OR 1"])
+    def test_non_numeric_record_id_is_refused_before_any_call(self, record_id):
+        calls = []
+        conn = self._conn({}, calls)
+        with pytest.raises(ApiError) as exc:
+            conn.execute_action("update_record", self.ACCOUNT, {
+                "module": "Deals", "record_id": record_id, "fields": {"Stage": "X"}})
+        assert exc.value.code == ErrorCode.INVALID_ACTION_PARAMS
+        assert calls == []
+
+    def test_unknown_field_is_refused_with_a_suggestion(self):
+        calls = []
+        conn = self._conn({}, calls)
+        with pytest.raises(ApiError) as exc:
+            conn.execute_action("create_record", self.ACCOUNT, {
+                "module": "Deals", "fields": {"Stagee": "X"}})
+        assert exc.value.code == ErrorCode.INVALID_FIELD
+        assert "Stage" in exc.value.message
+        assert self._writes(calls) == []
+
+    @pytest.mark.parametrize("field", ["Created_Time", "Created_By", "id",
+                                       "Margin", "Legacy_Ref"])
+    def test_read_only_fields_are_refused(self, field):
+        # System fields, a formula, and a field Zoho flags read-only.
+        calls = []
+        conn = self._conn({}, calls)
+        with pytest.raises(ApiError) as exc:
+            conn.execute_action("create_record", self.ACCOUNT, {
+                "module": "Deals", "fields": {"Deal_Name": "A", field: "x"}})
+        assert exc.value.code == ErrorCode.INVALID_ACTION_PARAMS
+        assert "read-only" in exc.value.message
+        assert self._writes(calls) == []
+
+    @pytest.mark.parametrize("params, needle", [
+        ({"module": "Invoices", "fields": {"X": 1}}, "'module' must be one of"),
+        ({"module": "Deals", "fields": {}}, "non-empty object"),
+        ({"module": "Deals", "fields": "Stage=Won"}, "non-empty object"),
+        ({"module": "Deals", "fields": {"Stage": "X"}, "trigger": ["workflow"]},
+         "does not accept: trigger"),
+    ])
+    def test_malformed_params_are_refused(self, params, needle):
+        calls = []
+        conn = self._conn({}, calls)
+        with pytest.raises(ApiError) as exc:
+            conn.execute_action("create_record", self.ACCOUNT, params)
+        assert exc.value.code == ErrorCode.INVALID_ACTION_PARAMS
+        assert needle in exc.value.message
+        assert self._writes(calls) == []
+
+    def test_unknown_action_is_refused(self):
+        with pytest.raises(ApiError) as exc:
+            _connector({}).execute_action("delete_record", self.ACCOUNT, {})
+        assert exc.value.code == ErrorCode.UNKNOWN_ACTION
+        assert "create_record" in exc.value.message
+
+    def test_a_refusal_inside_a_2xx_body_is_surfaced(self):
+        # Zoho reports writes per record; a refusal can arrive with HTTP 2xx.
+        refused = {"data": [{"code": "MANDATORY_NOT_FOUND", "status": "error",
+                             "message": "required field not found",
+                             "details": {"api_name": "Stage"}}]}
+        conn = self._conn({("POST", "/Deals"): refused})
+        with pytest.raises(ApiError) as exc:
+            conn.execute_action("create_record", self.ACCOUNT, {
+                "module": "Deals", "fields": {"Deal_Name": "New"}})
+        assert exc.value.code == ErrorCode.INVALID_ACTION_PARAMS
+        assert "MANDATORY_NOT_FOUND" in exc.value.message
+        assert "api_name=Stage" in exc.value.message
+        assert exc.value.retriable is False
+
+
+class TestWriteErrorTransport:
+    def test_http_error_names_the_failing_field(self, monkeypatch):
+        import requests
+
+        body = {"data": [{"code": "INVALID_DATA", "status": "error",
+                          "message": "invalid data",
+                          "details": {"api_name": "Email",
+                                      "expected_data_type": "email"}}]}
+        monkeypatch.setattr(requests, "request",
+                            lambda *a, **k: _Resp(400, body))
+        with pytest.raises(ApiError) as exc:
+            _default_http("POST", f"{API}/Leads", "tok", {"data": [{}]})
+        assert "INVALID_DATA" in exc.value.message
+        assert "api_name=Email" in exc.value.message
