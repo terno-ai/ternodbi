@@ -49,7 +49,6 @@ ORG = {
         "Id": "00D5j000000abcdEAA",
         "Name": "Acme Corp",
         "OrganizationType": "Enterprise Edition",
-        "DefaultCurrencyIsoCode": "GBP",
         "TimeZoneSidKey": "Europe/London",
     }],
 }
@@ -206,11 +205,22 @@ class TestListAccounts:
         assert len(accounts) == 1
         assert accounts[0].id == "00D5j000000abcdEAA"
         assert accounts[0].name == "Acme Corp"
-        # Currency is load-bearing: the dispatch layer refuses to sum money
-        # across accounts that bill differently.
-        assert accounts[0].currency == "GBP"
         assert accounts[0].timezone == "Europe/London"
         assert accounts[0].extra["edition"] == "Enterprise Edition"
+
+    def test_the_query_selects_only_universally_present_fields(self):
+        """Regression: DefaultCurrencyIsoCode 400s a single-currency org.
+
+        It exists on Organization only when multi-currency is enabled, and
+        selecting an absent field fails the entire query with INVALID_FIELD
+        rather than returning null — so discovery broke for every standard org.
+        """
+        conn, calls = _capture()
+        conn.list_accounts()
+        soql = next(c["params"]["q"] for c in calls
+                    if "FROM Organization" in c["params"].get("q", ""))
+        assert "DefaultCurrencyIsoCode" not in soql
+        assert "CurrencyIsoCode" not in soql
 
     def test_the_org_is_looked_up_once(self):
         conn, calls = _capture()
@@ -562,24 +572,62 @@ class TestRegistration:
         conn = make_salesforce_connector(_DS())
         assert conn._token_refresher is not None
 
-    def test_oauth_provider_asks_for_a_refresh_token(self):
+    def test_oauth_provider_is_templated_per_org(self):
         from terno_dbi.connectors.api.auth.providers import get_provider
         provider = get_provider("salesforce")
         assert provider is not None
         assert "refresh_token" in provider.scope
+        # The id_token these return is where CONNECTED_EMAIL comes from.
+        assert {"openid", "email"} <= set(provider.scope.split())
         assert provider.use_pkce is True
-        assert "login.salesforce.com" in provider.authorization_url
-
-    def test_the_login_host_can_be_pointed_at_a_sandbox(self, monkeypatch):
-        from terno_dbi.connectors.api.auth.providers import get_provider
-
-        monkeypatch.setenv("TERNO_SALESFORCE_LOGIN_URL",
-                           "https://test.salesforce.com")
-        provider = get_provider("salesforce")
+        # Salesforce has no single host, so the org being connected supplies it
+        # — a deployment-wide constant could not serve a sandbox and a
+        # production org at the same time.
+        assert provider.requires_instance is True
         assert provider.authorization_url == (
-            "https://test.salesforce.com/services/oauth2/authorize")
-        assert provider.token_url == (
-            "https://test.salesforce.com/services/oauth2/token")
+            "https://{instance}/services/oauth2/authorize")
+        assert provider.token_url == "https://{instance}/services/oauth2/token"
+
+
+class TestInstanceValidation:
+    """The instance is templated into a URL the server calls: SSRF guard."""
+
+    def _check(self, value):
+        from terno_dbi.connectors.api.auth.oauth import _validated_instance
+        from terno_dbi.connectors.api.auth.providers import get_provider
+        return _validated_instance(get_provider("salesforce"), "salesforce",
+                                   value)
+
+    @pytest.mark.parametrize("host", [
+        "login.salesforce.com",
+        "test.salesforce.com",
+        "acme.my.salesforce.com",
+        "orgfarm-029045543d-dev-ed.develop.my.salesforce.com",
+    ])
+    def test_accepts_login_sandbox_and_my_domain_hosts(self, host):
+        assert self._check(host) == host
+
+    def test_normalises_case_and_whitespace(self):
+        assert self._check("  LOGIN.Salesforce.COM ") == "login.salesforce.com"
+
+    def test_blank_defaults_to_the_generic_login_host(self):
+        # The simple path: Salesforce itself works out which org the user is in.
+        assert self._check("") == "login.salesforce.com"
+
+    def test_accepts_a_pasted_url(self):
+        assert self._check("https://acme.my.salesforce.com/") == (
+            "acme.my.salesforce.com")
+
+    @pytest.mark.parametrize("bad", [
+        "evil.com",
+        "login.salesforce.com.evil.com",   # suffix smuggling
+        "acme.my.salesforce.com.evil.com",
+        "acme",                            # no suffix to assume, unlike Shopify
+        "a b",
+    ])
+    def test_rejects_anything_else(self, bad):
+        with pytest.raises(ApiError):
+            self._check(bad)
 
 
 class TestTokenStorage:

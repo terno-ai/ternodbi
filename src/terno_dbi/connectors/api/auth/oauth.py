@@ -116,27 +116,49 @@ def start_authorization(
     }
 
 
-# A Shopify store host: '<store>.myshopify.com'. The instance is templated into a
-# URL we call server-side, so it must be validated strictly (SSRF guard) — only a
-# myshopify.com subdomain is ever allowed.
+# Hosts an instance-templated provider may be called at. The instance goes into
+# a URL we request server-side, so each of these is an SSRF guard, not a
+# convenience check — only hosts the provider actually serves are ever allowed.
 _MYSHOPIFY_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,59}\.myshopify\.com$")
+# Salesforce's two login hosts, or any My Domain / sandbox host, e.g.
+# 'acme.develop.my.salesforce.com'.
+_SALESFORCE_DEFAULT_LOGIN = "login.salesforce.com"
+_SALESFORCE_RE = re.compile(r"^(?:login|test)\.salesforce\.com$"
+                            r"|^[a-z0-9][a-z0-9.-]{0,99}\.my\.salesforce\.com$")
 
 
 def _validated_instance(provider, connector_key: str, instance: str) -> str:
     from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
     if not provider.requires_instance:
         return ""
-    shop = (instance or "").strip().lower()
+    host = (instance or "").strip().lower()
+
+    if connector_key == "salesforce":
+        # Most users give nothing: login.salesforce.com works out which org they
+        # belong to, and the token response names the org's API host. A custom
+        # (My Domain) host is only for orgs that block that generic login.
+        host = re.sub(r"^https?://", "", host).split("/", 1)[0]
+        if not host:
+            return _SALESFORCE_DEFAULT_LOGIN
+        if not _SALESFORCE_RE.match(host):
+            raise ApiError(
+                ErrorCode.UPSTREAM_ERROR,
+                f"{connector_key} custom domain must be your org's My Domain, "
+                f"e.g. 'acme.my.salesforce.com'.",
+                retriable=False,
+            )
+        return host
+
     # Accept a bare store name too, then normalise to the full host.
-    if shop and "." not in shop:
-        shop = f"{shop}.myshopify.com"
-    if not _MYSHOPIFY_RE.match(shop):
+    if host and "." not in host:
+        host = f"{host}.myshopify.com"
+    if not _MYSHOPIFY_RE.match(host):
         raise ApiError(
             ErrorCode.UPSTREAM_ERROR,
             f"{connector_key} needs a valid store, e.g. 'your-store.myshopify.com'.",
             retriable=False,
         )
-    return shop
+    return host
 
 
 def _callback_instance(provider, connector_key: str,
@@ -221,7 +243,8 @@ def _store_tokens(data_source, token_response: Dict[str, Any],
         bundle["GRANTED_SCOPES"] = token_response["scope"]
     if token_response.get("instance_url"):
         bundle["INSTANCE_URL"] = token_response["instance_url"]
-    email = _connected_email(token_response)
+    email = (_connected_email(token_response)
+             or token_response.get("connected_email") or "")
     if email:
         bundle["CONNECTED_EMAIL"] = email
     if instance:
@@ -321,9 +344,48 @@ def complete_authorization(
     st.delete()
     return data_source
 
+_SALESFORCE_ID_URL_RE = re.compile(
+    r"^https://[a-z0-9.-]+\.salesforce\.com/id/[A-Za-z0-9]+/[A-Za-z0-9]+$")
+
+
+def _default_get_json(url: str, token: str) -> Dict[str, Any]:
+    resp = requests.get(url, headers={"Authorization": f"Bearer {token}"},
+                        timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _salesforce_identity(token_response, get_json=None):
+    """Who connected, from Salesforce's identity URL.
+
+    The id_token carries `email` only when the connected app has "Include
+    Standard Claims" switched on, so the identity service — reachable with the
+    `id` scope — is the reliable source.
+    """
+    if _connected_email(token_response):
+        return token_response
+    id_url = token_response.get("id") or ""
+    access = token_response.get("access_token")
+    if not access or not _SALESFORCE_ID_URL_RE.match(id_url):
+        return token_response
+    try:
+        identity = (get_json or _default_get_json)(id_url, access)
+    except Exception as exc:   # noqa: BLE001
+        # Only the account picker's header depends on this; never fail the
+        # connection over it.
+        logger.warning("Salesforce identity lookup failed: %s", exc)
+        return token_response
+    email = identity.get("email") or identity.get("username") or ""
+    if isinstance(email, str) and email:
+        return {**token_response, "connected_email": email}
+    return token_response
+
 
 def _post_process(connector_key, provider, token_response):
-    """Provider-specific fix-ups. Meta exchanges for a long-lived token."""
+    """Provider-specific fix-ups. Meta exchanges for a long-lived token;
+    Salesforce looks up who connected."""
+    if connector_key == "salesforce":
+        return _salesforce_identity(token_response)
     if connector_key != "meta_ads":
         return token_response
     access = token_response.get("access_token")

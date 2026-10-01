@@ -657,10 +657,11 @@ _APIS: List[ConnectorSpec] = [
         category="Productivity",
         family=Family.API,
         auth_type=AuthType.OAUTH,
-        description="File and folder metadata from My Drive and shared drives "
-                    "— names, owners, types, sizes and modification times.",
-        scopes_label="Google Drive metadata read-only access (file names and "
-                     "properties, never file contents)",
+        description="Files and folders in My Drive and shared drives — names, "
+                    "owners, types, sizes and modification times — and the "
+                    "text of Docs, Sheets, Slides and plain-text files.",
+        scopes_label="Google Drive read-only access to My Drive and shared "
+                     "drives (never edits or deletes files)",
         has_account_list=True,
         has_fields=True,
         # A drive is current state, not a time series: the connector has no date
@@ -780,6 +781,23 @@ _APIS: List[ConnectorSpec] = [
                     ),
                 ],
             ),
+            ReportType(
+                "FileContent", "File content", is_date_range_required=False,
+                settings=[
+                    ReportSetting(
+                        "file_id", label="File ID", required=True,
+                        help_text="The file to read — the `id` from the Files "
+                                  "or SharedWithMe report. Query it with the "
+                                  "account that holds it: 'myDrive', or the "
+                                  "shared drive's id.",
+                    ),
+                    ReportSetting(
+                        "max_chars", label="Max characters", required=False,
+                        help_text="Cut the content at this many characters. "
+                                  "Defaults to 50,000; at most 200,000.",
+                    ),
+                ],
+            ),
         ],
         default_report_type="Files",
         # Drive's default user quota is ~200 requests/second; stay well under it
@@ -797,8 +815,8 @@ _APIS: List[ConnectorSpec] = [
         auth_type=AuthType.OAUTH,
         description="Read rows from Google Sheets spreadsheets as tabular "
                     "data, using each sheet's header row as its columns.",
-        scopes_label="Google Sheets read-only access, plus Drive file metadata "
-                     "to find your spreadsheets",
+        scopes_label="Google Sheets read-only access, plus Google Drive "
+                     "read-only access to find your spreadsheets",
         has_account_list=True,
         has_fields=True,
         # A spreadsheet is current state, not a time series; the connector has

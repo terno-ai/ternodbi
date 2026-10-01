@@ -9,7 +9,10 @@ Implements the `ApiConnector` interface against the Drive API v3 directly:
   fixed resource shape with no metadata endpoint to discover, so this mirrors
   Search Console rather than GA4.
 - `_run()`          — `GET /files`, with the report type choosing the base `q`
-  clause (files, folders, shared-with-me, trashed).
+  clause (files, folders, shared-with-me, trashed). The `FileContent` report
+  instead reads one file's contents: `GET /files/{id}?alt=media` for an
+  uploaded text file, `GET /files/{id}/export` for a Google Doc, Sheet or Slides
+  deck, which have no bytes of their own to download.
 
 The scope is `drive.readonly`, which covers all three calls this connector
 makes — `files.list`, `drives.list`, and file content. The narrower
@@ -57,6 +60,40 @@ _DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 
 # Drive caps a page at 1000 regardless of what we ask for.
 _MAX_PAGE_SIZE = 1000
+
+# -- file content -----------------------------------------------------------
+
+_CONTENT_REPORT = "FileContent"
+
+# Google-native files have no stored bytes; Drive exports them instead. Each is
+# exported to the plain-text form an agent can read. A Sheet exports only its
+# first tab as CSV — the Sheets connector is the tool for the rest.
+_EXPORT_MIME: Dict[str, str] = {
+    "application/vnd.google-apps.document": "text/plain",
+    "application/vnd.google-apps.spreadsheet": "text/csv",
+    "application/vnd.google-apps.presentation": "text/plain",
+}
+
+# Uploaded files whose bytes are text, beyond the whole `text/*` family.
+_TEXT_MIME = frozenset({
+    "application/json",
+    "application/xml",
+    "application/javascript",
+    "application/x-yaml",
+    "application/yaml",
+    "application/csv",
+    "application/sql",
+    "application/x-sh",
+})
+
+# Drive refuses to export anything over 10 MB, and a download is held in memory
+# whole, so the same ceiling applies to both.
+_MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024
+
+# What a caller gets back unless it asks for less. Enough for a long document,
+# small enough not to swamp an agent's context.
+_DEFAULT_MAX_CHARS = 50_000
+_MAX_MAX_CHARS = 200_000
 
 
 # -- field catalogue --------------------------------------------------------
@@ -166,6 +203,22 @@ _BY_ID: Dict[str, _DriveField] = {f.field.id: f for f in _FIELDS}
 # file without dragging the whole resource back.
 _DEFAULT_FIELDS = ["id", "name", "mimeType", "modifiedTime", "size", "webViewLink"]
 
+# The `FileContent` report's own columns: one row, the file and its text.
+_CONTENT_FIELDS: List[Field] = [
+    Field("id", "File ID", "dimension", "The file's Drive ID."),
+    Field("name", "Name", "dimension", "The file name as shown in Drive."),
+    Field("mimeType", "MIME type", "dimension", "The file's MIME type."),
+    Field("content", "Content", "dimension",
+          "The file's text. Google Docs and Slides are exported as plain text, "
+          "a Google Sheet's first tab as CSV."),
+    Field("characters", "Characters returned", "metric",
+          "Length of `content` in characters.", data_type="integer",
+          is_non_aggregatable=True),
+    Field("truncated", "Truncated", "dimension",
+          "Whether `content` was cut at max_chars.", data_type="boolean"),
+]
+_CONTENT_FIELD_IDS = [f.id for f in _CONTENT_FIELDS]
+
 
 # -- report types -----------------------------------------------------------
 
@@ -206,6 +259,41 @@ def _default_http(method: str, url: str, token: str,
     if resp.status_code >= 400:
         raise _drive_error(resp, params)
     return resp.json()
+
+
+def _default_download(url: str, token: str, params: Optional[Dict],
+                      max_bytes: int) -> bytes:
+    """The raw bytes at `url`, refusing anything larger than `max_bytes`.
+
+    Streamed so an oversized file is abandoned at the ceiling rather than read
+    whole — the metadata check in `_run_content` catches most, but a Google
+    export has no size until it is produced.
+    """
+    import requests
+    with requests.get(url, headers={"Authorization": f"Bearer {token}"},
+                      params=params or {}, timeout=60, stream=True) as resp:
+        if resp.status_code == 401:
+            raise _AuthError()
+        if resp.status_code >= 400:
+            raise _drive_error(resp, params)
+        chunks: List[bytes] = []
+        total = 0
+        for chunk in resp.iter_content(chunk_size=64 * 1024):
+            total += len(chunk)
+            if total > max_bytes:
+                raise _too_large(max_bytes)
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+
+def _too_large(max_bytes: int) -> ApiError:
+    return ApiError(
+        ErrorCode.INVALID_SETTING,
+        f"This file is larger than {max_bytes // (1024 * 1024)} MB, the most "
+        f"FileContent reads. Open it in Drive instead.",
+        details={"max_bytes": max_bytes},
+        retriable=False,
+    )
 
 
 def _drive_error(resp, params: Optional[Dict[str, Any]] = None) -> ApiError:
@@ -263,6 +351,7 @@ def _quote(value: Any) -> str:
 
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_FILE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 
 
 def _date_literal(value: Any, setting: str, suffix: str) -> str:
@@ -287,16 +376,28 @@ def _date_literal(value: Any, setting: str, suffix: str) -> str:
 
 class GoogleDriveConnector(ApiConnector):
     def __init__(self, datasource, http: Optional[Callable] = None,
-                 token_refresher: Optional[Callable] = None):
+                 token_refresher: Optional[Callable] = None,
+                 download: Optional[Callable] = None):
         super().__init__(datasource, token_refresher=token_refresher)
         self._http = http or _default_http
+        self._download_http = download or _default_download
 
     # -- transport ----------------------------------------------------------
 
     def _call(self, method: str, url: str,
               params: Optional[Dict] = None) -> Dict[str, Any]:
+        return self._guarded(
+            lambda token: self._http(method, url, token, params))
+
+    def _download(self, url: str, params: Optional[Dict] = None) -> bytes:
+        return self._guarded(
+            lambda token: self._download_http(
+                url, token, params, _MAX_DOWNLOAD_BYTES))
+
+    def _guarded(self, request: Callable[[str], Any]) -> Any:
+        """Run one provider request, mapping every failure to an `ApiError`."""
         try:
-            return self._http(method, url, self.access_token(), params)
+            return request(self.access_token())
         except _AuthError:
             raise ApiError(
                 ErrorCode.AUTH_EXPIRED,
@@ -379,6 +480,8 @@ class GoogleDriveConnector(ApiConnector):
         return accounts
 
     def list_fields(self, report_type: Optional[str] = None) -> List[Field]:
+        if report_type == _CONTENT_REPORT:
+            return list(_CONTENT_FIELDS)
         return [f.field for f in _FIELDS]
 
     # -- query --------------------------------------------------------------
@@ -439,6 +542,8 @@ class GoogleDriveConnector(ApiConnector):
         }
 
     def _run(self, spec: QuerySpec) -> QueryResult:
+        if spec.report_type == _CONTENT_REPORT:
+            return self._run_content(spec)
         self._require_drive_read("Listing Drive files")
         report = _report_for(spec.report_type)
 
@@ -508,6 +613,99 @@ class GoogleDriveConnector(ApiConnector):
                 break
         return rows
 
+    # -- file content -------------------------------------------------------
+
+    def _run_content(self, spec: QuerySpec) -> QueryResult:
+        """One file's text, as a single row.
+
+        The file must live in the one account the query names — My Drive for
+        the user's own and shared-with-me files, or the shared drive that holds
+        it. A file id alone would otherwise read past the account allowlist the
+        dispatch layer has just enforced on `spec.accounts`.
+        """
+        self._require_drive_read("Reading file contents")
+
+        unknown = [f for f in spec.fields if f not in _CONTENT_FIELD_IDS]
+        if unknown:
+            raise invalid_field(unknown[0], _CONTENT_FIELD_IDS)
+        requested = list(spec.fields) or list(_CONTENT_FIELD_IDS)
+
+        if len(spec.accounts) != 1:
+            raise ApiError(
+                ErrorCode.INVALID_SETTING,
+                f"{_CONTENT_REPORT} reads one file, so it takes exactly one "
+                f"account: '{MY_DRIVE}' or the shared drive holding the file.",
+                details={"accounts": list(spec.accounts)},
+                retriable=False,
+            )
+        account = spec.accounts[0]
+        settings = spec.settings or {}
+        file_id = str(settings.get("file_id") or "").strip()
+        if not _FILE_ID_RE.match(file_id):
+            # Checked, not escaped: the id becomes a URL path segment, and a
+            # "/" in it would address a different Drive endpoint.
+            raise ApiError(
+                ErrorCode.INVALID_SETTING,
+                f"file_id {file_id[:120]!r} is not a Drive file id. Use the "
+                f"`id` column from the Files or SharedWithMe report.",
+                details={"setting_id": "file_id"},
+                retriable=False,
+            )
+        max_chars = _max_chars(settings.get("max_chars"))
+
+        meta = self._call("GET", f"{_BASE}/files/{file_id}", {
+            "fields": "id,name,mimeType,size,driveId",
+            "supportsAllDrives": "true",
+        })
+        _check_account(meta, account)
+
+        mime = meta.get("mimeType") or ""
+        notes: List[str] = []
+        if mime in _EXPORT_MIME:
+            export_as = _EXPORT_MIME[mime]
+            raw = self._download(f"{_BASE}/files/{file_id}/export",
+                                 {"mimeType": export_as})
+            notes.append(f"Exported from Google's format as {export_as}.")
+            if mime == "application/vnd.google-apps.spreadsheet":
+                notes.append(
+                    "A Google Sheet exports only its first tab. Use the Google "
+                    "Sheets source to read other tabs or a cell range.")
+        elif _is_text(mime):
+            size = _int_or_none("size")(meta)
+            if isinstance(size, int) and size > _MAX_DOWNLOAD_BYTES:
+                raise _too_large(_MAX_DOWNLOAD_BYTES)
+            raw = self._download(f"{_BASE}/files/{file_id}",
+                                 {"alt": "media", "supportsAllDrives": "true"})
+        else:
+            raise _unsupported(meta)
+
+        if b"\x00" in raw[:8192]:
+            # Labelled as text but holding binary — decoding would hand the
+            # caller mojibake that reads as the file's real contents.
+            raise _unsupported(meta)
+        text = raw.decode("utf-8-sig", errors="replace")
+        truncated = len(text) > max_chars
+        if truncated:
+            text = text[:max_chars]
+            notes.append(
+                f"Content was cut at {max_chars:,} characters. Pass a larger "
+                f"max_chars (up to {_MAX_MAX_CHARS:,}) to read more.")
+
+        values = {
+            "id": meta.get("id") or file_id,
+            "name": meta.get("name"),
+            "mimeType": mime,
+            "content": text,
+            "characters": len(text),
+            "truncated": truncated,
+        }
+        return QueryResult(
+            requested_field_ids=requested,
+            rows=[{fid: values[fid] for fid in requested}],
+            row_count=1,
+            notes=notes,
+        )
+
 
 _NO_DATE_NOTE = (
     "A drive is current state, not a time series: Google Drive has no date "
@@ -541,6 +739,58 @@ def _notes(spec: QuerySpec) -> List[str]:
         f"modified_after / modified_before to see them. The query's "
         f"date_range is not a filter on this source and was ignored."
     ]
+
+
+def _max_chars(value: Any) -> int:
+    if value in (None, ""):
+        return _DEFAULT_MAX_CHARS
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = 0
+    if not 1 <= n <= _MAX_MAX_CHARS:
+        raise ApiError(
+            ErrorCode.INVALID_SETTING,
+            f"max_chars must be a whole number from 1 to {_MAX_MAX_CHARS:,}; "
+            f"got {value!r}.",
+            details={"setting_id": "max_chars", "value": str(value)[:120]},
+            retriable=False,
+        )
+    return n
+
+
+def _check_account(meta: Dict[str, Any], account: str) -> None:
+    """Refuse a file outside the queried account (see `_run_content`)."""
+    drive_id = meta.get("driveId")
+    if account == MY_DRIVE and not drive_id:
+        return
+    if drive_id and drive_id == account:
+        return
+    where = f"shared drive {drive_id!r}" if drive_id else f"'{MY_DRIVE}'"
+    raise ApiError(
+        ErrorCode.ACCOUNT_FORBIDDEN,
+        f"File {meta.get('name') or meta.get('id')!r} is in {where}, not in "
+        f"account {account!r}. Query it with that account instead.",
+        details={"account": account, "file_drive": drive_id or MY_DRIVE},
+        retriable=False,
+    )
+
+
+def _is_text(mime: str) -> bool:
+    return (mime.startswith("text/") or mime in _TEXT_MIME
+            or mime.endswith("+json") or mime.endswith("+xml"))
+
+
+def _unsupported(meta: Dict[str, Any]) -> ApiError:
+    mime = meta.get("mimeType") or "unknown"
+    return ApiError(
+        ErrorCode.INVALID_SETTING,
+        f"Cannot read the contents of {meta.get('name') or meta.get('id')!r} "
+        f"({mime}). FileContent reads Google Docs, Sheets and Slides, and "
+        f"plain-text files such as .txt, .csv, .json and .md.",
+        details={"mimeType": mime},
+        retriable=False,
+    )
 
 
 def make_google_drive_connector(datasource) -> GoogleDriveConnector:

@@ -44,7 +44,7 @@ _BASE = "https://api.linkedin.com/rest"
 # LinkedIn sunsets API versions on a rolling quarterly schedule, so this is
 # deployment-tunable rather than a constant to be edited and released.
 _VERSION_ENV = "TERNO_LINKEDIN_API_VERSION"
-_DEFAULT_VERSION = "202506"
+_DEFAULT_VERSION = "202607"
 
 # The analytics finder caps a page at 1000 rows whatever `count` asks for.
 _MAX_COUNT = 1000

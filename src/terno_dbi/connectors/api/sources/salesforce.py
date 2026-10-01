@@ -370,9 +370,12 @@ class SalesforceConnector(ApiConnector):
         """
         if self._org is not None:
             return [self._org]
+        # `DefaultCurrencyIsoCode` is deliberately absent: it exists on
+        # Organization only when multi-currency is enabled, and selecting it in
+        # a single-currency org fails the whole query with INVALID_FIELD.
         data = self._call("GET", f"{self._base()}/query", {
-            "q": "SELECT Id, Name, OrganizationType, DefaultCurrencyIsoCode, "
-                 "TimeZoneSidKey FROM Organization",
+            "q": "SELECT Id, Name, OrganizationType, TimeZoneSidKey "
+                 "FROM Organization",
         })
         records = data.get("records") or []
         if not records:
@@ -389,7 +392,6 @@ class SalesforceConnector(ApiConnector):
         self._org = Account(
             id=str(org_id),
             name=record.get("Name") or str(org_id),
-            currency=record.get("DefaultCurrencyIsoCode"),
             timezone=record.get("TimeZoneSidKey"),
             extra=extra,
         )
