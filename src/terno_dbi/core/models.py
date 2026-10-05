@@ -625,16 +625,8 @@ class ServiceToken(models.Model):
         """Hash a token key for storage."""
         return hashlib.sha256(key.encode()).hexdigest()
 
-    def get_accessible_datasources(self):
-        """
-        Returns QuerySet of datasources this token can access.
-        Priority:
-        1. Explicit datasource links (most restrictive)
-        2. Organisation scope (all DS in org)
-        3. No restrictions (supertoken - configurable)
-        """
-        from terno_dbi.core import conf
-
+    def _base_accessible_datasources(self):
+        """Token-scope datasources before any host-app filter is applied."""
         if self.datasources.exists():
             return self.datasources.filter(enabled=True)
         elif self.organisation:
@@ -659,11 +651,35 @@ class ServiceToken(models.Model):
                     enabled=True
                 )
         else:
+            from terno_dbi.core import conf
             if conf.get('ALLOW_SUPERTOKEN'):
                 logger.warning("Supertoken access granted to token '%s' (no org/ds scope)", self.name)
                 return DataSource.objects.filter(enabled=True)
             else:
                 return DataSource.objects.none()
+
+    def get_accessible_datasources(self):
+        """
+        Returns QuerySet of datasources this token can access.
+        Priority:
+        1. Explicit datasource links (most restrictive)
+        2. Organisation scope (all DS in org)
+        3. No restrictions (supertoken - configurable)
+        Then applies DBI_LAYER['DATASOURCE_ACCESS_FILTER'] if configured, so the
+        host app can enforce per-org rules (e.g. a disabled global datasource).
+        """
+        from django.utils.module_loading import import_string
+        from terno_dbi.core import conf
+
+        qs = self._base_accessible_datasources()
+        hook_path = conf.get('DATASOURCE_ACCESS_FILTER')
+        if hook_path:
+            try:
+                qs = import_string(hook_path)(self, qs)
+            except Exception:
+                logger.exception("DATASOURCE_ACCESS_FILTER failed for token '%s'", self.name)
+                return DataSource.objects.none()  # fail closed
+        return qs
 
     def has_access_to_datasource(self, datasource):
         """Check if token has access to a specific datasource."""
