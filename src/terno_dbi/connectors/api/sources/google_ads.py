@@ -12,8 +12,7 @@ GAQL (the Google Ads Query Language) directly:
 Unlike GA4/GSC, Google Ads:
   * namespaces fields (`campaign.name`, `metrics.clicks`, `segments.date`) and
     each report type selects `FROM` a different resource;
-  * returns money as integer *micros* (`cost_micros` = currency * 1e6);
-  * requires a developer token header in addition to the OAuth bearer.
+  * returns money as integer *micros* (`cost_micros` = currency * 1e6).
 """
 
 from __future__ import annotations
