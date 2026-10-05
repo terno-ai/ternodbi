@@ -192,7 +192,12 @@ def _callback_instance(provider, connector_key: str,
 def _default_post(url: str, data: Dict[str, str],
                   auth: Optional[Tuple[str, str]] = None) -> Dict[str, Any]:
     resp = requests.post(url, data=data, auth=auth, timeout=15)
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as exc:
+        detail = (resp.text or "").strip()[:500]
+        raise requests.HTTPError(
+            f"{exc} — response: {detail}", response=resp) from exc
     return resp.json()
 
 
