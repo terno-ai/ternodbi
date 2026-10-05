@@ -17,6 +17,21 @@ from terno_dbi.core.models import (
 )
 from terno_dbi.decorators import require_service_auth
 
+# --- DATASOURCE_ACCESS_FILTER test hooks (resolved via import_string) ---
+HIDDEN_DS_IDS = set()
+
+
+def hide_listed_datasources(token, qs):
+    return qs.exclude(id__in=HIDDEN_DS_IDS)
+
+
+def broken_filter(token, qs):
+    raise RuntimeError("boom")
+
+
+def _hook_path(func):
+    return f"{__name__}.{func.__name__}"
+
 
 @pytest.fixture
 def test_user(db):
@@ -1140,3 +1155,81 @@ class TestServiceTokenVisibilityChecks:
 
         # Even if the column isn't in PrivateColumnSelector, the parent table is private
         assert token.has_access_to_column(col_on_private_table) is False
+
+
+# =============================================================================
+# Test: DATASOURCE_ACCESS_FILTER hook
+# =============================================================================
+
+@pytest.mark.django_db
+class TestDatasourceAccessFilter:
+    """Host app can post-filter a token's accessible datasources via DBI_LAYER."""
+
+    @pytest.fixture
+    def global_ds(self):
+        return DataSource.objects.create(
+            display_name="Global DS Hook",
+            type="postgresql",
+            connection_str="postgresql://localhost/global_ds_hook",
+            is_global=True,
+            enabled=True,
+            organisation=None
+        )
+
+    @pytest.fixture(autouse=True)
+    def _reset_hidden(self):
+        HIDDEN_DS_IDS.clear()
+        yield
+        HIDDEN_DS_IDS.clear()
+
+    def _org_token(self, org, key_hash):
+        org.show_demo_data = True
+        return ServiceToken.objects.create(
+            name="Org Token hook",
+            key_hash=key_hash,
+            key_prefix="dbi_query_",
+            organisation=org
+        )
+
+    def test_no_hook_leaves_global_visible(self, settings, org1, ds1_org1, global_ds):
+        settings.DBI_LAYER = {}
+        token = self._org_token(org1, "testhash_hook_none")
+
+        accessible = token.get_accessible_datasources()
+        assert global_ds in accessible
+        assert ds1_org1 in accessible
+
+    def test_hook_hides_global_datasource(self, settings, org1, ds1_org1, global_ds):
+        settings.DBI_LAYER = {"DATASOURCE_ACCESS_FILTER": _hook_path(hide_listed_datasources)}
+        HIDDEN_DS_IDS.add(global_ds.id)
+        token = self._org_token(org1, "testhash_hook_hide")
+
+        accessible = token.get_accessible_datasources()
+        assert global_ds not in accessible
+        assert ds1_org1 in accessible
+
+    def test_hook_applies_to_has_access_to_datasource(self, settings, org1, global_ds):
+        settings.DBI_LAYER = {"DATASOURCE_ACCESS_FILTER": _hook_path(hide_listed_datasources)}
+        HIDDEN_DS_IDS.add(global_ds.id)
+        token = self._org_token(org1, "testhash_hook_has_access")
+
+        assert token.has_access_to_datasource(global_ds) is False
+
+    def test_hook_applies_to_explicit_ds_tokens(self, settings, org1, ds1_org1):
+        settings.DBI_LAYER = {"DATASOURCE_ACCESS_FILTER": _hook_path(hide_listed_datasources)}
+        HIDDEN_DS_IDS.add(ds1_org1.id)
+        token = ServiceToken.objects.create(
+            name="Explicit DS hook",
+            key_hash="testhash_hook_explicit",
+            key_prefix="dbi_query_",
+            organisation=org1
+        )
+        token.datasources.add(ds1_org1)
+
+        assert token.get_accessible_datasources().count() == 0
+
+    def test_failing_hook_fails_closed(self, settings, org1, ds1_org1, global_ds):
+        settings.DBI_LAYER = {"DATASOURCE_ACCESS_FILTER": _hook_path(broken_filter)}
+        token = self._org_token(org1, "testhash_hook_broken")
+
+        assert token.get_accessible_datasources().count() == 0
