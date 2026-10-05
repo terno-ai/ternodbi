@@ -49,6 +49,7 @@ def start_authorization(
     data_source=None,
     return_to: str = "",
     instance: str = "",
+    login_method: str = "",
 ) -> Dict[str, Any]:
     """Begin a connect flow. Returns `{authorization_url, state}`.
 
@@ -64,7 +65,7 @@ def start_authorization(
     from terno_dbi.connectors.api.auth.providers import get_provider
     from terno_dbi.core.models import ConnectorOAuthState
 
-    provider = get_provider(connector_key)
+    provider = get_provider(connector_key, login_method)
     if provider is None:
         raise ApiError(
             ErrorCode.UPSTREAM_ERROR,
@@ -94,6 +95,7 @@ def start_authorization(
         data_source=data_source,
         return_to=return_to,
         instance=instance,
+        login_method=login_method,
         expires_at=timezone.now() + timedelta(minutes=STATE_TTL_MINUTES),
     )
 
@@ -224,7 +226,7 @@ def _connected_email(token_response: Dict[str, Any]) -> str:
 
 
 def _store_tokens(data_source, token_response: Dict[str, Any],
-                  instance: str = "") -> None:
+                  instance: str = "", login_method: str = "") -> None:
     """Encrypt and persist the token bundle onto the datasource.
 
     Preserves an existing refresh token when the provider omits one on refresh
@@ -249,6 +251,8 @@ def _store_tokens(data_source, token_response: Dict[str, Any],
         bundle["CONNECTED_EMAIL"] = email
     if instance:
         bundle["INSTANCE"] = instance
+    if login_method:
+        bundle["LOGIN_METHOD"] = login_method
     # The API host the connection's data lives on: Zoho names its regional one
     # (www.zohoapis.eu, …), Pipedrive the company's own (acme.pipedrive.com).
     if token_response.get("api_domain"):
@@ -291,7 +295,7 @@ def complete_authorization(
             "This connect link has expired or was already used. Start again.",
         )
 
-    provider = get_provider(st.connector_key)
+    provider = get_provider(st.connector_key, st.login_method)
     exchange = {
         "grant_type": "authorization_code",
         "code": code,
@@ -317,7 +321,8 @@ def complete_authorization(
             "Could not complete the connection with the provider. Try again.",
         )
 
-    token_response = _post_process(st.connector_key, provider, token_response)
+    token_response = _post_process(
+        st.connector_key, provider, token_response, login_method=st.login_method)
 
     data_source = st.data_source
     if data_source is None:
@@ -340,7 +345,8 @@ def complete_authorization(
                 auth_status=DataSource.AuthStatus.NOT_AUTHENTICATED,
             )
 
-    _store_tokens(data_source, token_response, instance=instance)
+    _store_tokens(data_source, token_response, instance=instance,
+                  login_method=st.login_method)
     st.delete()
     return data_source
 
@@ -381,12 +387,23 @@ def _salesforce_identity(token_response, get_json=None):
     return token_response
 
 
-def _post_process(connector_key, provider, token_response):
-    """Provider-specific fix-ups. Meta exchanges for a long-lived token;
-    Salesforce looks up who connected."""
+_META_KEYS = frozenset({"meta_ads", "instagram_insights", "instagram_public"})
+_INSTAGRAM_GRAPH = "https://graph.instagram.com"
+
+
+def _post_process(connector_key, provider, token_response, login_method=""):
+    """Provider-specific fix-ups: long-lived token exchanges and identity lookups.
+
+    - Instagram Login ("instagram"): exchange via `ig_exchange_token` on
+      graph.instagram.com (its own 60-day token; no refresh token).
+    - Meta / Facebook-Login Instagram: exchange via `fb_exchange_token`.
+    - Salesforce: look up who connected.
+    """
+    if login_method == "instagram" or getattr(provider, "name", "") == "instagram_login":
+        return _exchange_instagram_long_lived(provider, token_response)
     if connector_key == "salesforce":
         return _salesforce_identity(token_response)
-    if connector_key != "meta_ads":
+    if connector_key not in _META_KEYS:
         return token_response
     access = token_response.get("access_token")
     if not access:
@@ -406,6 +423,33 @@ def _post_process(connector_key, provider, token_response):
         return {**token_response, **resp.json()}
     except Exception as exc:
         logger.warning("Meta long-lived exchange failed: %s", exc)
+        return token_response
+
+
+def _exchange_instagram_long_lived(provider, token_response):
+    """Swap Instagram Login's short-lived token for a ~60-day long-lived one.
+
+    `GET graph.instagram.com/access_token?grant_type=ig_exchange_token`. Returns
+    the original response merged with the long-lived `access_token`/`expires_in`,
+    so `_store_tokens` records the real expiry (which drives refresh timing).
+    """
+    access = token_response.get("access_token")
+    if not access:
+        return token_response
+    try:
+        resp = requests.get(
+            f"{_INSTAGRAM_GRAPH}/access_token",
+            params={
+                "grant_type": "ig_exchange_token",
+                "client_secret": provider.client_secret(),
+                "access_token": access,
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return {**token_response, **resp.json()}
+    except Exception as exc:   # noqa: BLE001
+        logger.warning("Instagram long-lived exchange failed: %s", exc)
         return token_response
 
 
@@ -437,6 +481,12 @@ def refresh_access_token(
 
     http_post = http_post or _default_post
     tokens = decrypt_dict(data_source.connection_json) or {}
+
+    # Instagram Login has no refresh token; it renews its long-lived token with a
+    # GET to graph.instagram.com. Handle that path before the standard refresh.
+    if tokens.get("LOGIN_METHOD") == "instagram":
+        return _refresh_instagram_login(data_source, tokens)
+
     refresh_token = tokens.get("REFRESH_TOKEN")
     provider = get_provider(data_source.type)
 
@@ -469,6 +519,38 @@ def refresh_access_token(
     _store_tokens(data_source, token_response, instance=instance)
     from terno_dbi.services.secrets import decrypt_dict as _d
     return _d(data_source.connection_json)
+
+
+def _refresh_instagram_login(data_source, tokens):
+    """Renew an Instagram-Login long-lived token via `ig_refresh_token`.
+
+    `GET graph.instagram.com/refresh_access_token`. Unlike Facebook Login, this
+    needs no manual reconnect — the long-lived token refreshes itself as long as
+    it is renewed before it expires (Instagram allows refresh once it is >24h
+    old and not yet expired).
+    """
+    from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
+
+    access = tokens.get("ACCESS_TOKEN")
+    if not access:
+        _mark_expired(data_source, "No Instagram token; reconnect the source.")
+        raise ApiError(ErrorCode.AUTH_EXPIRED,
+                       f"{data_source.type} needs reconnecting.")
+    try:
+        resp = requests.get(
+            f"{_INSTAGRAM_GRAPH}/refresh_access_token",
+            params={"grant_type": "ig_refresh_token", "access_token": access},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        token_response = resp.json()
+    except Exception as exc:   # noqa: BLE001
+        _mark_expired(data_source, "Instagram token refresh failed; reconnect.")
+        raise ApiError(ErrorCode.AUTH_EXPIRED,
+                       f"{data_source.type} needs reconnecting.") from exc
+
+    _store_tokens(data_source, token_response, login_method="instagram")
+    return decrypt_dict(data_source.connection_json)
 
 
 def _mark_expired(data_source, message: str) -> None:

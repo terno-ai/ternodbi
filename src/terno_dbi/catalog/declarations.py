@@ -344,6 +344,74 @@ _APIS: List[ConnectorSpec] = [
         default_enabled=False,   # Business Verification + App Review pending
     ),
     ConnectorSpec(
+        key="instagram_insights",
+        display_name="Instagram Insights",
+        provider="Meta",
+        category="Social",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Your own Instagram Business/Creator account's performance — "
+                    "reach, impressions, profile views, new followers and "
+                    "per-post engagement.",
+        scopes_label="Instagram insights read access (via a linked Facebook Page)",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=True,
+        account_label_singular="Instagram account",
+        account_label_plural="Instagram accounts",
+        report_types=[
+            ReportType("AccountInsights", "Account insights"),
+            ReportType("Media", "Media (recent posts)"),
+        ],
+        default_report_type="AccountInsights",
+        rate_limit_per_second=50,
+        rate_limit_per_day=100000,
+        default_enabled=True,   # Business Verification + App Review pending
+    ),
+    ConnectorSpec(
+        key="instagram_public",
+        display_name="Instagram Public Data",
+        provider="Meta",
+        category="Social",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Public metrics of other Instagram business/creator accounts "
+                    "(Business Discovery) and top media for a hashtag.",
+        scopes_label="Instagram public data read access (via a linked Facebook Page)",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=False,
+        account_label_singular="Instagram account",
+        account_label_plural="Instagram accounts",
+        report_types=[
+            ReportType(
+                "Profile", "Account profile (Business Discovery)",
+                is_date_range_required=False,
+                settings=[ReportSetting(
+                    "username", label="Instagram username",
+                    help_text="The public @username to look up, without the @.")],
+            ),
+            ReportType(
+                "Media", "Recent posts (Business Discovery)",
+                is_date_range_required=False,
+                settings=[ReportSetting(
+                    "username", label="Instagram username",
+                    help_text="The public @username whose posts to list.")],
+            ),
+            ReportType(
+                "Hashtag", "Top media for a hashtag",
+                is_date_range_required=False,
+                settings=[ReportSetting(
+                    "hashtag", label="Hashtag",
+                    help_text="The hashtag to search, without the #.")],
+            ),
+        ],
+        default_report_type="Profile",
+        rate_limit_per_second=50,
+        rate_limit_per_day=100000,
+        default_enabled=True,   # Business Verification + App Review pending
+    ),
+    ConnectorSpec(
         key="google_ads",
         display_name="Google Ads",
         provider="Google",

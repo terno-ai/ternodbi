@@ -102,6 +102,27 @@ _META = OAuthProvider(
     use_pkce=False,   # Meta's flow is not PKCE
 )
 
+_INSTAGRAM = OAuthProvider(
+    name="meta",
+    authorization_url="https://www.facebook.com/v25.0/dialog/oauth",
+    token_url="https://graph.facebook.com/v25.0/oauth/access_token",
+    scope="public_profile,instagram_basic,instagram_manage_insights,"
+          "pages_show_list,pages_read_engagement,business_management",
+    client_id_env="TERNO_META_APP_ID",
+    client_secret_env="TERNO_META_APP_SECRET",
+    use_pkce=False,
+)
+
+_INSTAGRAM_LOGIN = OAuthProvider(
+    name="instagram_login",
+    authorization_url="https://www.instagram.com/oauth/authorize",
+    token_url="https://api.instagram.com/oauth/access_token",
+    scope="instagram_business_basic,instagram_business_manage_insights",
+    client_id_env="TERNO_INSTAGRAM_APP_ID",
+    client_secret_env="TERNO_INSTAGRAM_APP_SECRET",
+    use_pkce=False,
+)
+
 
 _SALESFORCE = OAuthProvider(
     name="salesforce",
@@ -252,6 +273,8 @@ _PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
         "https://www.googleapis.com/auth/spreadsheets.readonly "
         "https://www.googleapis.com/auth/drive.readonly"),
     "meta_ads": _META,
+    "instagram_insights": _INSTAGRAM,
+    "instagram_public": _INSTAGRAM,
     "linkedin_ads": _LINKEDIN,
     "salesforce": _SALESFORCE,
     "microsoft_ads": _MICROSOFT,
@@ -263,9 +286,29 @@ _PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
 }
 
 
-def get_provider(connector_key: str) -> Optional[OAuthProvider]:
+_LOGIN_METHOD_PROVIDERS: Dict[tuple, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
+    ("instagram_insights", "instagram"): _INSTAGRAM_LOGIN,
+    ("instagram_insights", "facebook"): _INSTAGRAM,
+}
+
+LOGIN_METHODS: Dict[str, list] = {
+    "instagram_insights": ["instagram", "facebook"],
+}
+
+
+def login_methods(connector_key: str) -> list:
+    """Ordered login methods a connector offers (first = recommended); [] if one."""
+    return list(LOGIN_METHODS.get(connector_key, []))
+
+
+def get_provider(connector_key: str,
+                 login_method: str = "") -> Optional[OAuthProvider]:
+    if login_method:
+        entry = _LOGIN_METHOD_PROVIDERS.get((connector_key, login_method))
+        if entry is not None:
+            return entry() if callable(entry) else entry
     entry = _PROVIDERS.get(connector_key)
     return entry() if callable(entry) else entry
 
 
-__all__ = ["OAuthProvider", "get_provider"]
+__all__ = ["OAuthProvider", "get_provider", "login_methods", "LOGIN_METHODS"]

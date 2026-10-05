@@ -997,6 +997,7 @@ class ConnectorOAuthState(models.Model):
     )
     return_to = models.CharField(max_length=500, blank=True, default="")
     instance = models.CharField(max_length=255, blank=True, default="")
+    login_method = models.CharField(max_length=32, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
 

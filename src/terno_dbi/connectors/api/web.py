@@ -21,6 +21,7 @@ from django.views.decorators.http import require_http_methods
 from terno_dbi.services.secrets import decrypt_dict, encrypt_dict
 from terno_dbi.connectors.api import registry
 from terno_dbi.connectors.api.auth import account_selection, rbac
+from terno_dbi.connectors.api.auth.providers import login_methods
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,10 @@ def connect(request):
         url = datasource_setup_url(org.subdomain)
         return redirect(url or "/admin/")
 
+    requested_method = request.GET.get("login_method", "")
+    allowed_methods = login_methods(connector_key)
+    login_method = requested_method if requested_method in allowed_methods else ""
+
     try:
         started = start_authorization(
             connector_key=connector_key,
@@ -155,6 +160,7 @@ def connect(request):
             organisation=org,
             return_to=return_to,
             instance=request.GET.get("shop", ""),
+            login_method=login_method,
         )
     except ApiError as exc:
         return HttpResponse(exc.message, status=400)
