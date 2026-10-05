@@ -320,7 +320,9 @@ def complete_authorization(
     try:
         token_response = _post_token(http_post, provider, token_url, exchange)
     except Exception as exc:   # noqa: BLE001
-        logger.warning("Token exchange failed for %s: %s", st.connector_key, exc)
+        logger.warning(
+            "Token exchange failed for %s (redirect_uri=%r): %s",
+            st.connector_key, st.redirect_uri, exc)
         raise ApiError(
             ErrorCode.UPSTREAM_ERROR,
             "Could not complete the connection with the provider. Try again.",
