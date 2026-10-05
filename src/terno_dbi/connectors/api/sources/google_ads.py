@@ -330,15 +330,12 @@ def _dynamic_segment_field(field_id: str) -> Field:
 def _default_http(method: str, url: str, token: str,
                   json_body: Optional[Dict] = None) -> Dict[str, Any]:
     import requests
+    # Google sunset developer tokens on 2026-09-09: optional and ignored, with
+    # access level now following the Cloud project behind the OAuth client.
     dev_token = os.getenv(_DEVELOPER_TOKEN_ENV, "").strip()
-    if not dev_token:
-        raise ApiError(
-            ErrorCode.UPSTREAM_ERROR,
-            f"Google Ads is not configured on the server: {_DEVELOPER_TOKEN_ENV} "
-            "is unset. Set the developer token and restart.",
-            retriable=False,
-        )
-    headers = {"Authorization": f"Bearer {token}", "developer-token": dev_token}
+    headers = {"Authorization": f"Bearer {token}"}
+    if dev_token:
+        headers["developer-token"] = dev_token
     resp = requests.request(method, url, headers=headers, json=json_body, timeout=30)
     if resp.status_code == 401:
         raise _AuthError()

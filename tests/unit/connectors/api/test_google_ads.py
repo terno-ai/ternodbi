@@ -487,13 +487,25 @@ class TestErrorSurfacing:
         err = _ads_error(self._Resp(503, {"error": {"message": "backend"}}))
         assert err.retriable is True
 
-    def test_missing_developer_token_is_a_clear_config_error(self, monkeypatch):
+    def test_developer_token_is_optional_and_forwarded_only_when_set(self, monkeypatch):
+        import requests
         from terno_dbi.connectors.api.sources import google_ads as ga
+
+        seen = {}
+
+        def _fake_request(method, url, headers=None, json=None, timeout=None):
+            seen["headers"] = headers
+            return self._Resp(200, {"ok": True})
+
+        monkeypatch.setattr(requests, "request", _fake_request)
+
         monkeypatch.delenv(ga._DEVELOPER_TOKEN_ENV, raising=False)
-        with pytest.raises(ApiError) as exc:
-            ga._default_http("GET", "https://x", "tok")
-        assert exc.value.retriable is False
-        assert ga._DEVELOPER_TOKEN_ENV in exc.value.message
+        assert ga._default_http("GET", "https://x", "tok") == {"ok": True}
+        assert "developer-token" not in seen["headers"]
+
+        monkeypatch.setenv(ga._DEVELOPER_TOKEN_ENV, "dev-123")
+        ga._default_http("GET", "https://x", "tok")
+        assert seen["headers"]["developer-token"] == "dev-123"
 
 
 class TestRegistration:
