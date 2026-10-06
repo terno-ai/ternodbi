@@ -203,6 +203,7 @@ class InstagramInsightsConnector(ApiConnector):
             metrics = [m.id for m in _ACCOUNT_TOTAL_METRICS]
         base_params = {
             "metric_type": "total_value",
+            "period": "day",
             "since": spec.date_range.start,
             "until": spec.date_range.end,
         }
