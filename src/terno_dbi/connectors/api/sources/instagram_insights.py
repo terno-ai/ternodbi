@@ -35,8 +35,6 @@ logger = logging.getLogger(__name__)
 _ACCOUNT_METRICS: List[Field] = [
     Field("reach", "Reach", "metric", "Unique accounts that saw any content.",
           data_type="integer"),
-    Field("impressions", "Impressions", "metric",
-          "Total times content was shown.", data_type="integer"),
     Field("profile_views", "Profile views", "metric",
           "Times the profile was viewed.", data_type="integer"),
     Field("website_clicks", "Website clicks", "metric",
@@ -150,26 +148,55 @@ class InstagramInsightsConnector(ApiConnector):
         metrics = [f for f in spec.fields if f in _ACCOUNT_METRIC_IDS]
         if not metrics:
             metrics = [m.id for m in _ACCOUNT_METRICS[:3]]
-        params = {
-            "metric": ",".join(metrics),
+        period_params = {
             "period": "day",
             "since": spec.date_range.start,
             "until": spec.date_range.end,
         }
         multi = len(spec.accounts) > 1
         base = self._base()
+        warnings: List[str] = []
 
         def fetch(account):
-            data = self._call("GET", f"{base}/{account}/insights", params)
-            return _pivot_account_insights(data, metrics, account, multi=multi)
+            series = self._fetch_account_series(
+                base, account, metrics, period_params, warnings)
+            return _pivot_account_insights(series, metrics, account, multi=multi)
 
-        rows, warnings = gather_accounts(spec.accounts, fetch)
+        rows, acc_warnings = gather_accounts(spec.accounts, fetch)
         return QueryResult(
             requested_field_ids=list(spec.fields) or ["date", *metrics],
             rows=rows,
             row_count=len(rows),
-            warnings=warnings,
+            warnings=warnings + acc_warnings,
         )
+
+    def _fetch_account_series(self, base, account, metrics, period_params,
+                              warnings) -> List[Dict[str, Any]]:
+        """Account-insight series, resilient to per-metric failures.
+
+        Tries all metrics in one call; if Instagram rejects the batch (a single
+        deprecated/unsupported metric hard-errors the whole request), retries
+        each metric alone and keeps the ones that succeed, recording a warning
+        for the rest. So one bad metric never sinks the whole pull.
+        """
+        url = f"{base}/{account}/insights"
+        try:
+            return self._call(
+                "GET", url, {**period_params, "metric": ",".join(metrics)},
+            ).get("data", [])
+        except ApiError:
+            pass
+        series: List[Dict[str, Any]] = []
+        for metric in metrics:
+            try:
+                data = self._call(
+                    "GET", url, {**period_params, "metric": metric})
+                series.extend(data.get("data", []))
+            except ApiError:
+                warnings.append(
+                    f"Instagram metric '{metric}' is unavailable for this "
+                    f"account/API version and was skipped.")
+        return series
 
     def _run_media(self, spec: QuerySpec, catalogue) -> QueryResult:
         requested = list(spec.fields) or ["id", "timestamp", "media_type",
@@ -178,35 +205,60 @@ class InstagramInsightsConnector(ApiConnector):
         insight_metrics = [f for f in requested if f in _MEDIA_INSIGHT_IDS]
         # `id` always comes back; ensure the plain field list is non-empty.
         api_fields = list(dict.fromkeys(["id", *plain]))
-        if insight_metrics:
-            api_fields.append(f"insights.metric({','.join(insight_metrics)})")
         params = {"fields": ",".join(api_fields), "limit": spec.max_rows}
         multi = len(spec.accounts) > 1
         base = self._base()
+        warnings: List[str] = []
 
         def fetch(account):
             data = self._call("GET", f"{base}/{account}/media", params)
-            return _parse_media(data, requested, insight_metrics, account,
+            media = data.get("data", [])
+            if insight_metrics:
+                for obj in media:
+                    obj["_insights"] = self._media_insights(
+                        base, obj.get("id"), insight_metrics, warnings)
+            return _parse_media(media, requested, insight_metrics, account,
                                 multi=multi)
 
-        rows, warnings = gather_accounts(spec.accounts, fetch)
+        rows, acc_warnings = gather_accounts(spec.accounts, fetch)
         return QueryResult(
             requested_field_ids=requested,
             rows=rows,
             row_count=len(rows),
-            warnings=warnings,
+            warnings=warnings + acc_warnings,
         )
 
+    def _media_insights(self, base, media_id, metrics, warnings) -> Dict[str, Any]:
+        """Per-media insight values `{metric: value}`, resilient to failures."""
+        if not media_id:
+            return {}
+        url = f"{base}/{media_id}/insights"
+        try:
+            data = self._call("GET", url, {"metric": ",".join(metrics)})
+            return _insight_series_to_values(data)
+        except ApiError:
+            pass
+        out: Dict[str, Any] = {}
+        for metric in metrics:
+            try:
+                data = self._call("GET", url, {"metric": metric})
+                out.update(_insight_series_to_values(data))
+            except ApiError:
+                warnings.append(
+                    f"Instagram media metric '{metric}' was unavailable for one "
+                    f"or more posts and was skipped.")
+        return out
 
-def _pivot_account_insights(data, metrics, account, *, multi=False):
-    """Pivot Graph's per-metric time series into one row per day.
 
-    Graph returns `{"data": [{"name": "reach", "values": [{"value": N,
-    "end_time": "...T07:00:00+0000"}, ...]}, ...]}`. Collapse to
+def _pivot_account_insights(series_list, metrics, account, *, multi=False):
+    """Pivot per-metric time series into one row per day.
+
+    `series_list` is Graph's `data` array: `[{"name": "reach", "values":
+    [{"value": N, "end_time": "...T07:00:00+0000"}, ...]}, ...]`. Collapse to
     `{date: {metric: value}}` keyed by the date part of `end_time`.
     """
     by_date: Dict[str, Dict[str, Any]] = {}
-    for series in data.get("data", []):
+    for series in series_list:
         name = series.get("name")
         if name not in metrics:
             continue
@@ -228,13 +280,13 @@ def _pivot_account_insights(data, metrics, account, *, multi=False):
     return rows
 
 
-def _parse_media(data, requested, insight_metrics, account, *, multi=False):
+def _parse_media(media, requested, insight_metrics, account, *, multi=False):
     rows: List[Dict[str, Any]] = []
-    for obj in data.get("data", []):
+    for obj in media:
         record: Dict[str, Any] = {}
         if multi:
             record["_account"] = account
-        insight_values = _media_insight_values(obj) if insight_metrics else {}
+        insight_values = obj.get("_insights") or {}
         for name in requested:
             if name in insight_metrics:
                 record[name] = insight_values.get(name)
@@ -244,10 +296,10 @@ def _parse_media(data, requested, insight_metrics, account, *, multi=False):
     return rows
 
 
-def _media_insight_values(obj) -> Dict[str, Any]:
-    """Flatten a media object's nested `insights` edge to `{metric: value}`."""
+def _insight_series_to_values(data) -> Dict[str, Any]:
+    """Flatten an insights `/insights` response to `{metric: value}`."""
     out: Dict[str, Any] = {}
-    for series in ((obj.get("insights") or {}).get("data", []) or []):
+    for series in (data.get("data", []) or []):
         name = series.get("name")
         values = series.get("values") or []
         if name and values:
