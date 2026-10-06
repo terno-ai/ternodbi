@@ -123,29 +123,47 @@ class TestInsights:
             {"date": "2026-08-02", "reach": 150, "profile_views": 8},
         ]
 
-    def test_media_report_flattens_nested_insights(self):
-        media = {"data": [
-            {"id": "m1", "media_type": "IMAGE", "like_count": 10,
-             "comments_count": 2,
-             "insights": {"data": [
-                 {"name": "reach", "values": [{"value": 300}]},
-                 {"name": "saved", "values": [{"value": 7}]}]}},
-        ]}
-
-        captured = {}
-
+    def test_media_report_fetches_per_media_insights(self):
         def http(method, url, token, params=None):
-            captured["params"] = params
-            return media
+            if url.endswith("/media"):
+                # The media list carries only plain fields, no nested insights.
+                assert "insights" not in params["fields"]
+                return {"data": [{"id": "m1", "media_type": "IMAGE",
+                                  "like_count": 10, "comments_count": 2}]}
+            if url.endswith("/m1/insights"):
+                assert params["metric"] == "reach,saved"
+                return {"data": [
+                    {"name": "reach", "values": [{"value": 300}]},
+                    {"name": "saved", "values": [{"value": 7}]}]}
+            raise AssertionError(url)
 
         conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
-        res = conn.query(_spec(
-            ["id", "like_count", "reach", "saved"], "Media"))
-        # reach/saved requested through the nested insights edge.
-        assert "insights.metric(reach,saved)" in captured["params"]["fields"]
+        res = conn.query(_spec(["id", "like_count", "reach", "saved"], "Media"))
         assert res.rows == [
             {"id": "m1", "like_count": 10, "reach": 300, "saved": 7},
         ]
+
+    def test_account_insights_skips_a_failing_metric_not_the_whole_pull(self):
+        # A single deprecated/unsupported metric must not sink the report: the
+        # connector retries per-metric and keeps what works, with a warning.
+        from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
+
+        def http(method, url, token, params=None):
+            metric = params.get("metric", "")
+            if "," in metric or metric == "profile_views":
+                # The combined call and the bad metric both hard-error.
+                raise ApiError(ErrorCode.UPSTREAM_ERROR, "unavailable")
+            return {"data": [{"name": metric, "values": [
+                {"value": 5, "end_time": "2026-08-01T07:00:00+0000"}]}]}
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.query(_spec(["date", "reach", "profile_views"],
+                               "AccountInsights"))
+        # reach survived; profile_views was skipped (null) with a warning.
+        assert res.rows == [
+            {"date": "2026-08-01", "reach": 5, "profile_views": None},
+        ]
+        assert any("profile_views" in w for w in res.warnings)
 
     def test_unknown_field_rejected(self):
         conn = InstagramInsightsConnector(
