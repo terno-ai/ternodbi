@@ -129,6 +129,8 @@ class TestInsights:
     def test_account_totals_returns_one_aggregate_row(self):
         def http(method, url, token, params=None):
             assert params["metric_type"] == "total_value"
+            # total_value still requires period=day (else every metric errors).
+            assert params["period"] == "day"
             return {"data": [
                 {"name": "reach", "total_value": {"value": 8078}},
                 {"name": "profile_views", "total_value": {"value": 42}}]}
