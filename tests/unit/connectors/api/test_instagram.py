@@ -23,6 +23,8 @@ _REPORT_TYPES = {
         {"id": "AccountInsights", "settings": []},
         {"id": "AccountTotals", "settings": []},
         {"id": "Media", "settings": []},
+        {"id": "Comments",
+         "settings": [{"setting_id": "media_id", "required": True}]},
     ],
     "instagram_public": [
         {"id": "Profile",
@@ -313,3 +315,182 @@ class TestProviderResolution:
         assert login_methods("instagram_public") == []
         # An unknown method falls back to the default provider.
         assert get_provider("instagram_insights", "nonsense").name == "meta"
+
+
+# --------------------------------------------------------------------------
+# Write actions (publishing + comment moderation)
+# --------------------------------------------------------------------------
+
+class TestWriteActions:
+    ACCOUNT = "178414"
+
+    def test_lists_the_expected_actions(self):
+        conn = InstagramInsightsConnector(
+            _DS("instagram_insights"), http=lambda *a, **k: {})
+        ids = {a.id for a in conn.list_actions()}
+        assert ids == {
+            "publish_photo", "publish_video", "publish_reel", "publish_carousel",
+            "reply_to_comment", "hide_comment", "delete_comment",
+            "like_media", "unlike_media", "like_comment", "unlike_comment",
+        }
+
+    def test_publish_photo_creates_container_then_publishes(self):
+        calls = []
+
+        def http(method, url, token, params=None):
+            calls.append((method, url, params))
+            if url.endswith("/media"):
+                assert params["image_url"] == "https://x/p.jpg"
+                return {"id": "CONTAINER1"}
+            if url.endswith("/media_publish"):
+                assert params["creation_id"] == "CONTAINER1"
+                return {"id": "MEDIA1"}
+            raise AssertionError(url)
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.execute_action(
+            "publish_photo", self.ACCOUNT,
+            {"image_url": "https://x/p.jpg", "caption": "hi"})
+        assert res.after["media_id"] == "MEDIA1"
+        assert any(u.endswith("/media_publish") for _, u, _ in calls)
+
+    def test_publish_photo_dry_run_builds_container_but_does_not_publish(self):
+        calls = []
+
+        def http(method, url, token, params=None):
+            calls.append(url)
+            if url.endswith("/media"):
+                return {"id": "CONTAINER1"}
+            raise AssertionError("publish must not be called in dry-run: " + url)
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.execute_action(
+            "publish_photo", self.ACCOUNT,
+            {"image_url": "https://x/p.jpg"}, dry_run=True)
+        assert res.details["dry_run"] is True
+        assert res.details["applied"] is False
+        assert "Would publish" in res.summary
+        assert not any(u.endswith("/media_publish") for u in calls)
+
+    def test_reply_to_comment(self):
+        def http(method, url, token, params=None):
+            assert method == "POST" and url.endswith("/C1/replies")
+            assert params["message"] == "thanks!"
+            return {"id": "R1"}
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.execute_action(
+            "reply_to_comment", self.ACCOUNT,
+            {"comment_id": "C1", "message": "thanks!"})
+        assert res.after["reply_id"] == "R1"
+
+    def test_delete_comment_uses_delete_verb(self):
+        seen = {}
+
+        def http(method, url, token, params=None):
+            seen["method"] = method
+            seen["url"] = url
+            return {}
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.execute_action("delete_comment", self.ACCOUNT,
+                                  {"comment_id": "C1"})
+        assert seen["method"] == "DELETE"
+        assert seen["url"].endswith("/C1")
+        assert "Deleted comment C1" in res.summary
+
+    def test_delete_comment_dry_run_does_not_call(self):
+        def http(method, url, token, params=None):
+            raise AssertionError("no call expected in dry-run")
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.execute_action("delete_comment", self.ACCOUNT,
+                                  {"comment_id": "C1"}, dry_run=True)
+        assert res.details["applied"] is False
+
+    def test_unknown_action_rejected(self):
+        conn = InstagramInsightsConnector(
+            _DS("instagram_insights"), http=lambda *a, **k: {})
+        with pytest.raises(ApiError) as exc:
+            conn.execute_action("nope", self.ACCOUNT, {})
+        assert exc.value.code == ErrorCode.UNKNOWN_ACTION
+
+    def test_missing_required_param_rejected(self):
+        conn = InstagramInsightsConnector(
+            _DS("instagram_insights"), http=lambda *a, **k: {})
+        with pytest.raises(ApiError) as exc:
+            conn.execute_action("publish_photo", self.ACCOUNT, {})
+        assert exc.value.code == ErrorCode.INVALID_ACTION_PARAMS
+
+
+class TestCommentsReport:
+    def test_lists_comments_for_a_media(self):
+        def http(method, url, token, params=None):
+            assert url.endswith("/M1/comments")
+            assert "username" in params["fields"]
+            return {"data": [
+                {"id": "C1", "text": "nice!", "username": "alice",
+                 "timestamp": "2026-10-01T00:00:00+0000", "like_count": 2},
+                {"id": "C2", "text": "👍", "username": "bob",
+                 "timestamp": "2026-10-02T00:00:00+0000", "like_count": 0}]}
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.query(_spec(
+            ["id", "text", "username"], "Comments",
+            settings={"media_id": "M1"}))
+        assert res.rows == [
+            {"id": "C1", "text": "nice!", "username": "alice"},
+            {"id": "C2", "text": "👍", "username": "bob"},
+        ]
+
+    def test_comments_requires_media_id(self):
+        conn = InstagramInsightsConnector(
+            _DS("instagram_insights"), http=lambda *a, **k: {})
+        with pytest.raises(ApiError) as exc:
+            conn.query(_spec(["id", "text"], "Comments", settings={}))
+        assert exc.value.code == ErrorCode.MISSING_SETTING
+
+
+class TestLikeActions:
+    def test_like_media_posts_to_user_likes_edge_with_media_id(self):
+        seen = {}
+
+        def http(method, url, token, params=None):
+            seen["method"] = method
+            seen["url"] = url
+            seen["params"] = params
+            return {"success": True}
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.execute_action("like_media", "178414", {"media_id": "M1"})
+        assert seen["method"] == "POST"
+        # Official: POST /{ig-user-id}/likes with media_id as a parameter.
+        assert seen["url"].endswith("/178414/likes")
+        assert seen["params"] == {"media_id": "M1"}
+        assert res.after["liked"] is True
+
+    def test_unlike_comment_uses_delete_with_comment_id(self):
+        seen = {}
+
+        def http(method, url, token, params=None):
+            seen["method"] = method
+            seen["url"] = url
+            seen["params"] = params
+            return {}
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        conn.execute_action("unlike_comment", "178414", {"comment_id": "C1"})
+        assert seen["method"] == "DELETE"
+        assert seen["url"].endswith("/178414/likes")
+        assert seen["params"] == {"comment_id": "C1"}
+
+    def test_like_actions_hidden_and_blocked_on_instagram_login(self):
+        conn = InstagramInsightsConnector(
+            _DS("instagram_insights", login_method="instagram"),
+            http=lambda *a, **k: {})
+        ids = {a.id for a in conn.list_actions()}
+        assert "like_media" not in ids          # hidden on Instagram Login
+        assert "publish_photo" in ids           # publishing still available
+        with pytest.raises(ApiError) as exc:
+            conn.execute_action("like_media", "178414", {"media_id": "M1"})
+        assert exc.value.code == ErrorCode.INVALID_ACTION_PARAMS

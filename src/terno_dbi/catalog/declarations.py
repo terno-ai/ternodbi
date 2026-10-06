@@ -363,6 +363,14 @@ _APIS: List[ConnectorSpec] = [
             ReportType("AccountInsights", "Account insights (daily)"),
             ReportType("AccountTotals", "Account totals (range)"),
             ReportType("Media", "Media (recent posts)"),
+            ReportType(
+                "Comments", "Comments on a post",
+                is_date_range_required=False,
+                settings=[ReportSetting(
+                    "media_id", label="Post / media id",
+                    help_text="The media id whose comments to list (from the "
+                              "Media report).")],
+            ),
         ],
         default_report_type="AccountInsights",
         rate_limit_per_second=50,

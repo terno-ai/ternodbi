@@ -28,21 +28,18 @@ class AuthError(Exception):
 
 def default_http(method: str, url: str, token: str,
                  params: Optional[Dict] = None) -> Dict[str, Any]:
-    """Graph API transport. Instagram calls are GET with query params."""
+    """Graph API transport.
+    """
     import requests
 
-    kwargs: Dict[str, Any] = {}
-    if method == "GET":
-        kwargs["params"] = params or {}
-    else:
-        kwargs["json"] = params
     resp = requests.request(
         method, url, headers={"Authorization": f"Bearer {token}"},
-        timeout=30, **kwargs)
+        params=params or {}, timeout=30)
     if resp.status_code == 401:
         raise AuthError()
     resp.raise_for_status()
-    return resp.json()
+    # A DELETE may return an empty body; treat that as success.
+    return resp.json() if resp.content else {"success": True}
 
 
 def discover_ig_accounts(call: Callable[..., Dict[str, Any]]) -> List[Account]:

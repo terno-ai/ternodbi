@@ -107,7 +107,8 @@ _INSTAGRAM = OAuthProvider(
     authorization_url="https://www.facebook.com/v25.0/dialog/oauth",
     token_url="https://graph.facebook.com/v25.0/oauth/access_token",
     scope="public_profile,instagram_basic,instagram_manage_insights,"
-          "pages_show_list,pages_read_engagement,business_management",
+          "pages_show_list,pages_read_engagement,business_management,"
+          "instagram_content_publish,instagram_manage_comments",
     client_id_env="TERNO_META_APP_ID",
     client_secret_env="TERNO_META_APP_SECRET",
     use_pkce=False,
@@ -117,7 +118,8 @@ _INSTAGRAM_LOGIN = OAuthProvider(
     name="instagram_login",
     authorization_url="https://www.instagram.com/oauth/authorize",
     token_url="https://api.instagram.com/oauth/access_token",
-    scope="instagram_business_basic,instagram_business_manage_insights",
+    scope="instagram_business_basic,instagram_business_manage_insights,"
+          "instagram_business_content_publish,instagram_business_manage_comments",
     client_id_env="TERNO_INSTAGRAM_APP_ID",
     client_secret_env="TERNO_INSTAGRAM_APP_SECRET",
     use_pkce=False,
@@ -128,10 +130,6 @@ _SALESFORCE = OAuthProvider(
     name="salesforce",
     authorization_url="https://{instance}/services/oauth2/authorize",
     token_url="https://{instance}/services/oauth2/token",
-    # `openid email` gets an id_token carrying the user's email, stored as
-    # CONNECTED_EMAIL so the account picker shows who connected — as the
-    # Google providers do. The connected app must allow both scopes ("openid"
-    # and the identity URL service), or Salesforce rejects the authorization.
     scope="api refresh_token openid email",
     client_id_env="TERNO_SALESFORCE_CLIENT_ID",
     client_secret_env="TERNO_SALESFORCE_CLIENT_SECRET",

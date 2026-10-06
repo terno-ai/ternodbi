@@ -20,11 +20,17 @@ comments — can be added later the way Google Ads did, behind the same
 
 from __future__ import annotations
 import logging
+import time
+from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional
 
 from terno_dbi.connectors.api.model.base import ApiConnector
-from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode, invalid_field
-from terno_dbi.connectors.api.model.types import Account, Field, QueryResult, QuerySpec
+from terno_dbi.connectors.api.model.errors import (
+    ApiError, ErrorCode, invalid_field, missing_setting,
+)
+from terno_dbi.connectors.api.model.types import (
+    Account, Action, ActionResult, Field, QueryResult, QuerySpec,
+)
 from terno_dbi.connectors.api.sources import _instagram as ig
 from terno_dbi.connectors.api.sources._multi import gather_accounts
 
@@ -93,10 +99,26 @@ _MEDIA_INSIGHT_IDS = frozenset({"reach", "saved"})
 _MEDIA_PLAIN_IDS = frozenset(
     f.id for f in _MEDIA_FIELDS) - _MEDIA_INSIGHT_IDS
 
+# --- Comments (on one of your posts) ---------------------------------------
+_COMMENT_FIELDS: List[Field] = [
+    Field("id", "Comment ID", "dimension", data_type="string"),
+    Field("text", "Text", "dimension", "The comment body.", data_type="string"),
+    Field("username", "Username", "dimension", "Who commented.",
+          data_type="string"),
+    Field("timestamp", "Posted", "dimension", data_type="string"),
+    Field("like_count", "Likes", "metric", "Likes on the comment.",
+          data_type="integer"),
+    Field("hidden", "Hidden", "dimension", "Whether the comment is hidden.",
+          data_type="boolean"),
+]
+_COMMENT_API_FIELDS = ["id", "text", "username", "timestamp", "like_count",
+                       "hidden"]
+
 _REPORTS: Dict[str, List[Field]] = {
     "AccountInsights": [*_ACCOUNT_DIMENSIONS, *_ACCOUNT_METRICS],
     "AccountTotals": list(_ACCOUNT_TOTAL_METRICS),
     "Media": list(_MEDIA_FIELDS),
+    "Comments": list(_COMMENT_FIELDS),
 }
 _DEFAULT_REPORT = "AccountInsights"
 
@@ -106,11 +128,159 @@ def _fields_for(report_type: Optional[str]) -> Dict[str, Field]:
     return {f.id: f for f in fields}
 
 
+# --- Write actions ---------------------------------------------------------
+#
+# Publishing + comment moderation. Gated upstream by `connector:write` (Org
+# Admin only) and the per-account write opt-in, and audited — this module only
+# performs an already-authorised action. Publishing is two-step (create a media
+# container, then publish it); `dry_run` creates the container and stops, so the
+# request is validated end to end with nothing going live.
+
+def _url_prop(label: str) -> Dict[str, Any]:
+    return {"type": "string", "format": "uri",
+            "description": f"Public URL of the {label}. Instagram fetches the "
+                           f"media from this URL; it must be reachable."}
+
+
+_CAPTION_PROP = {"type": "string",
+                 "description": "Caption text (optional, up to ~2,200 chars)."}
+_COMMENT_ID_PROP = {"type": "string",
+                    "description": "The target comment's id."}
+
+_ACTIONS: List[Action] = [
+    Action(
+        "publish_photo", "Publish photo",
+        "Publish a single photo to the feed. The image is fetched from a public "
+        "URL. Goes live immediately once published — confirm before applying.",
+        schema={"type": "object",
+                "properties": {"image_url": _url_prop("image (JPEG)"),
+                               "caption": _CAPTION_PROP},
+                "required": ["image_url"], "additionalProperties": False},
+        destructive=True,
+    ),
+    Action(
+        "publish_video", "Publish video",
+        "Publish a video to the feed, fetched from a public URL. Instagram must "
+        "finish processing the video before it goes live.",
+        schema={"type": "object",
+                "properties": {"video_url": _url_prop("video (MP4/MOV)"),
+                               "caption": _CAPTION_PROP},
+                "required": ["video_url"], "additionalProperties": False},
+        destructive=True,
+    ),
+    Action(
+        "publish_reel", "Publish reel",
+        "Publish a reel from a public video URL. `share_to_feed` also shows it "
+        "in the main feed.",
+        schema={"type": "object",
+                "properties": {
+                    "video_url": _url_prop("video (MP4/MOV)"),
+                    "caption": _CAPTION_PROP,
+                    "share_to_feed": {"type": "boolean",
+                                      "description": "Also show in the feed "
+                                                     "(default true)."}},
+                "required": ["video_url"], "additionalProperties": False},
+        destructive=True,
+    ),
+    Action(
+        "publish_carousel", "Publish carousel",
+        "Publish a carousel (2–10 items) from public image/video URLs.",
+        schema={"type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array", "minItems": 2, "maxItems": 10,
+                        "description": "Ordered carousel items.",
+                        "items": {
+                            "type": "object",
+                            "properties": {"image_url": {"type": "string"},
+                                           "video_url": {"type": "string"}},
+                            "additionalProperties": False}},
+                    "caption": _CAPTION_PROP},
+                "required": ["items"], "additionalProperties": False},
+        destructive=True,
+    ),
+    Action(
+        "reply_to_comment", "Reply to comment",
+        "Post a public reply to a comment on your media.",
+        schema={"type": "object",
+                "properties": {"comment_id": _COMMENT_ID_PROP,
+                               "message": {"type": "string",
+                                           "description": "Reply text."}},
+                "required": ["comment_id", "message"],
+                "additionalProperties": False},
+        destructive=True,
+    ),
+    Action(
+        "hide_comment", "Hide comment",
+        "Hide (or unhide) a comment on your media. Reversible.",
+        schema={"type": "object",
+                "properties": {"comment_id": _COMMENT_ID_PROP,
+                               "hide": {"type": "boolean",
+                                        "description": "True to hide (default), "
+                                                       "false to unhide."}},
+                "required": ["comment_id"], "additionalProperties": False},
+        destructive=True,
+    ),
+    Action(
+        "delete_comment", "Delete comment",
+        "Permanently delete a comment on your media. Not reversible.",
+        schema={"type": "object",
+                "properties": {"comment_id": _COMMENT_ID_PROP},
+                "required": ["comment_id"], "additionalProperties": False},
+        destructive=True,
+    ),
+    Action(
+        "like_media", "Like post",
+        "Like one of your media objects on behalf of the account. Reversible "
+        "with unlike_media. (Facebook Login connections only.)",
+        schema={"type": "object",
+                "properties": {"media_id": {"type": "string",
+                                            "description": "The media's id."}},
+                "required": ["media_id"], "additionalProperties": False},
+        destructive=True,
+    ),
+    Action(
+        "unlike_media", "Unlike post",
+        "Remove a like from a media object. (Facebook Login connections only.)",
+        schema={"type": "object",
+                "properties": {"media_id": {"type": "string",
+                                            "description": "The media's id."}},
+                "required": ["media_id"], "additionalProperties": False},
+        destructive=True,
+    ),
+    Action(
+        "like_comment", "Like comment",
+        "Like a comment on your media. Reversible with unlike_comment. "
+        "(Facebook Login connections only.)",
+        schema={"type": "object",
+                "properties": {"comment_id": _COMMENT_ID_PROP},
+                "required": ["comment_id"], "additionalProperties": False},
+        destructive=True,
+    ),
+    Action(
+        "unlike_comment", "Unlike comment",
+        "Remove a like from a comment. (Facebook Login connections only.)",
+        schema={"type": "object",
+                "properties": {"comment_id": _COMMENT_ID_PROP},
+                "required": ["comment_id"], "additionalProperties": False},
+        destructive=True,
+    ),
+]
+_ACTIONS_BY_ID: Dict[str, Action] = {a.id: a for a in _ACTIONS}
+_FB_LOGIN_ONLY_ACTIONS = frozenset({
+    "like_media", "unlike_media", "like_comment", "unlike_comment"})
+
+_CONTAINER_POLL_SECONDS = 2.0
+_CONTAINER_POLL_TRIES = 15
+
+
 class InstagramInsightsConnector(ApiConnector):
     def __init__(self, datasource, http: Optional[Callable] = None,
                  token_refresher: Optional[Callable] = None):
         super().__init__(datasource, token_refresher=token_refresher)
         self._http = http or ig.default_http
+
+        self._dry_run = False
 
     # -- transport ----------------------------------------------------------
 
@@ -167,7 +337,28 @@ class InstagramInsightsConnector(ApiConnector):
             return self._run_media(spec, catalogue)
         if report_type == "AccountTotals":
             return self._run_account_totals(spec, catalogue)
+        if report_type == "Comments":
+            return self._run_comments(spec, catalogue)
         return self._run_account_insights(spec, catalogue)
+
+    def _run_comments(self, spec: QuerySpec, catalogue) -> QueryResult:
+        media_id = str(spec.settings.get("media_id") or "").strip()
+        if not media_id:
+            raise missing_setting("media_id", "Post/media id", "Comments")
+        requested = list(spec.fields) or ["id", "text", "username", "timestamp"]
+        base = self._base()
+        data = self._call(
+            "GET", f"{base}/{media_id}/comments",
+            {"fields": ",".join(_COMMENT_API_FIELDS), "limit": spec.max_rows})
+        rows = []
+        for obj in data.get("data", []):
+            rows.append({name: obj.get(name) for name in requested})
+        return QueryResult(
+            requested_field_ids=requested,
+            rows=rows,
+            row_count=len(rows),
+            warnings=[],
+        )
 
     def _run_account_insights(self, spec: QuerySpec, catalogue) -> QueryResult:
         metrics = [f for f in spec.fields if f in _ACCOUNT_METRIC_IDS]
@@ -327,6 +518,258 @@ class InstagramInsightsConnector(ApiConnector):
                     f"Instagram media metric '{metric}' was unavailable for one "
                     f"or more posts and was skipped.")
         return out
+
+    # -- write actions ------------------------------------------------------
+
+    def list_actions(self) -> List[Action]:
+        if self._login_method() == "instagram":
+            return [a for a in _ACTIONS if a.id not in _FB_LOGIN_ONLY_ACTIONS]
+        return list(_ACTIONS)
+
+    def execute_action(
+        self, action_id: str, account: str,
+        params: Optional[Dict[str, Any]] = None, dry_run: bool = False,
+    ) -> ActionResult:
+        """Perform one write action. Authorisation happens upstream.
+
+        With `dry_run=True`, publishing builds the media container(s) and stops
+        before `media_publish`, so the request is fully validated with nothing
+        going live; comment actions validate their inputs and skip the mutation.
+        """
+        if action_id not in _ACTIONS_BY_ID:
+            raise ApiError(
+                ErrorCode.UNKNOWN_ACTION,
+                f"Unknown action '{action_id}'.",
+                details={"action": action_id, "available": sorted(_ACTIONS_BY_ID)},
+            )
+        if (action_id in _FB_LOGIN_ONLY_ACTIONS
+                and self._login_method() == "instagram"):
+            raise ApiError(
+                ErrorCode.INVALID_ACTION_PARAMS,
+                f"'{action_id}' (likes) needs a Facebook Login connection; "
+                f"this account is connected with Instagram Login.",
+            )
+        self._dry_run = bool(dry_run)
+        try:
+            result = self._dispatch_action(action_id, account, params or {})
+        finally:
+            was_dry = self._dry_run
+            self._dry_run = False
+        if was_dry and not (result.details or {}).get("dry_run"):
+            result = replace(
+                result,
+                summary="[dry-run — not applied] " + result.summary,
+                details={**(result.details or {}), "dry_run": True,
+                         "applied": False},
+            )
+        return result
+
+    def _dispatch_action(self, action_id, account, params) -> ActionResult:
+        base = self._base()
+        handlers = {
+            "publish_photo": self._publish_photo,
+            "publish_video": self._publish_video,
+            "publish_reel": self._publish_reel,
+            "publish_carousel": self._publish_carousel,
+            "reply_to_comment": self._reply_to_comment,
+            "hide_comment": self._hide_comment,
+            "delete_comment": self._delete_comment,
+            "like_media": self._like_media,
+            "unlike_media": self._unlike_media,
+            "like_comment": self._like_comment,
+            "unlike_comment": self._unlike_comment,
+        }
+        return handlers[action_id](base, account, params)
+
+    # -- publishing ---------------------------------------------------------
+
+    def _create_container(self, base, account, fields) -> str:
+        data = self._call("POST", f"{base}/{account}/media", fields)
+        container = data.get("id")
+        if not container:
+            raise ApiError(ErrorCode.UPSTREAM_ERROR,
+                           "Instagram did not return a media container id.")
+        return str(container)
+
+    def _publish_container(self, base, account, container, *, label, extra=None):
+        """Publish a prepared container, or report the dry-run preview."""
+        if self._dry_run:
+            return ActionResult(
+                action="publish", account=account,
+                summary=f"Would publish {label} (container {container}).",
+                details={"dry_run": True, "applied": False,
+                         "creation_id": container, **(extra or {})})
+        published = self._call(
+            "POST", f"{base}/{account}/media_publish",
+            {"creation_id": container})
+        media_id = str(published.get("id") or "")
+        return ActionResult(
+            action="publish", account=account,
+            summary=f"Published {label} (media {media_id}).",
+            after={"media_id": media_id, **(extra or {})})
+
+    def _wait_for_container(self, base, container) -> None:
+        """Poll a video/reel container until it finishes processing."""
+        if self._dry_run:
+            return
+        url = f"{base}/{container}"
+        for _ in range(_CONTAINER_POLL_TRIES):
+            data = self._call("GET", url, {"fields": "status_code"})
+            status = data.get("status_code")
+            if status == "FINISHED":
+                return
+            if status == "ERROR":
+                raise ApiError(ErrorCode.UPSTREAM_ERROR,
+                               "Instagram failed to process the video.")
+            time.sleep(_CONTAINER_POLL_SECONDS)
+        raise ApiError(ErrorCode.UPSTREAM_ERROR,
+                       "Video is still processing; try publishing again shortly.")
+
+    def _publish_photo(self, base, account, params) -> ActionResult:
+        image_url = _require(params, "image_url")
+        container = self._create_container(
+            base, account,
+            {"image_url": image_url, "caption": params.get("caption") or ""})
+        return self._publish_container(base, account, container, label="photo")
+
+    def _publish_video(self, base, account, params) -> ActionResult:
+        video_url = _require(params, "video_url")
+        container = self._create_container(
+            base, account,
+            {"media_type": "VIDEO", "video_url": video_url,
+             "caption": params.get("caption") or ""})
+        self._wait_for_container(base, container)
+        return self._publish_container(base, account, container, label="video")
+
+    def _publish_reel(self, base, account, params) -> ActionResult:
+        video_url = _require(params, "video_url")
+        fields = {"media_type": "REELS", "video_url": video_url,
+                  "caption": params.get("caption") or ""}
+        if "share_to_feed" in params:
+            fields["share_to_feed"] = bool(params["share_to_feed"])
+        container = self._create_container(base, account, fields)
+        self._wait_for_container(base, container)
+        return self._publish_container(base, account, container, label="reel")
+
+    def _publish_carousel(self, base, account, params) -> ActionResult:
+        items = params.get("items")
+        if not isinstance(items, list) or len(items) < 2:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "A carousel needs at least 2 items.")
+        child_ids: List[str] = []
+        for item in items:
+            if item.get("video_url"):
+                fields = {"media_type": "VIDEO", "video_url": item["video_url"],
+                          "is_carousel_item": "true"}
+            elif item.get("image_url"):
+                fields = {"image_url": item["image_url"],
+                          "is_carousel_item": "true"}
+            else:
+                raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                               "Each carousel item needs an image_url or video_url.")
+            child = self._create_container(base, account, fields)
+            if fields.get("media_type") == "VIDEO":
+                self._wait_for_container(base, child)
+            child_ids.append(child)
+        container = self._create_container(
+            base, account,
+            {"media_type": "CAROUSEL", "children": ",".join(child_ids),
+             "caption": params.get("caption") or ""})
+        return self._publish_container(
+            base, account, container, label=f"carousel ({len(child_ids)} items)",
+            extra={"children": child_ids})
+
+    # -- comment moderation -------------------------------------------------
+
+    def _reply_to_comment(self, base, account, params) -> ActionResult:
+        comment_id = _require(params, "comment_id")
+        message = _require(params, "message")
+        if self._dry_run:
+            return ActionResult(
+                action="reply_to_comment", account=account,
+                summary=f"Would reply to comment {comment_id}.",
+                details={"dry_run": True, "applied": False})
+        data = self._call("POST", f"{base}/{comment_id}/replies",
+                          {"message": message})
+        return ActionResult(
+            action="reply_to_comment", account=account,
+            summary=f"Replied to comment {comment_id}.",
+            after={"reply_id": str(data.get("id") or "")})
+
+    def _hide_comment(self, base, account, params) -> ActionResult:
+        comment_id = _require(params, "comment_id")
+        hide = bool(params.get("hide", True))
+        verb = "hide" if hide else "unhide"
+        if self._dry_run:
+            return ActionResult(
+                action="hide_comment", account=account,
+                summary=f"Would {verb} comment {comment_id}.",
+                details={"dry_run": True, "applied": False})
+        self._call("POST", f"{base}/{comment_id}",
+                   {"hide": "true" if hide else "false"})
+        return ActionResult(
+            action="hide_comment", account=account,
+            summary=f"{verb.capitalize()}d comment {comment_id}.",
+            after={"hidden": hide})
+
+    def _delete_comment(self, base, account, params) -> ActionResult:
+        comment_id = _require(params, "comment_id")
+        if self._dry_run:
+            return ActionResult(
+                action="delete_comment", account=account,
+                summary=f"Would delete comment {comment_id}.",
+                details={"dry_run": True, "applied": False})
+        self._call("DELETE", f"{base}/{comment_id}", {})
+        return ActionResult(
+            action="delete_comment", account=account,
+            summary=f"Deleted comment {comment_id}.",
+            before={"comment_id": comment_id})
+
+    # -- likes (Facebook Login only) ----------------------------------------
+
+    def _toggle_like(self, base, account, target_id, *, action, like, noun,
+                     param_key):
+
+        verb = "like" if like else "unlike"
+        if self._dry_run:
+            return ActionResult(
+                action=action, account=account,
+                summary=f"Would {verb} {noun} {target_id}.",
+                details={"dry_run": True, "applied": False})
+        method = "POST" if like else "DELETE"
+        self._call(method, f"{base}/{account}/likes", {param_key: target_id})
+        return ActionResult(
+            action=action, account=account,
+            summary=f"{verb.capitalize()}d {noun} {target_id}.",
+            after={"liked": like})
+
+    def _like_media(self, base, account, params) -> ActionResult:
+        return self._toggle_like(base, account, _require(params, "media_id"),
+                                 action="like_media", like=True, noun="post",
+                                 param_key="media_id")
+
+    def _unlike_media(self, base, account, params) -> ActionResult:
+        return self._toggle_like(base, account, _require(params, "media_id"),
+                                 action="unlike_media", like=False, noun="post",
+                                 param_key="media_id")
+
+    def _like_comment(self, base, account, params) -> ActionResult:
+        return self._toggle_like(base, account, _require(params, "comment_id"),
+                                 action="like_comment", like=True, noun="comment",
+                                 param_key="comment_id")
+
+    def _unlike_comment(self, base, account, params) -> ActionResult:
+        return self._toggle_like(base, account, _require(params, "comment_id"),
+                                 action="unlike_comment", like=False,
+                                 noun="comment", param_key="comment_id")
+
+
+def _require(params, key):
+    value = params.get(key)
+    if value is None or (isinstance(value, str) and not value.strip()):
+        raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                       f"'{key}' is required.")
+    return value
 
 
 def _pivot_account_insights(series_list, metrics, account, *, multi=False):
