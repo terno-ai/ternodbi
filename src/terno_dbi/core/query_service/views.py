@@ -138,6 +138,7 @@ def list_datasources(request):
             'dialect_version': ds.dialect_version,
             'family': ds.family,
             'auth_status': ds.auth_status,
+            'is_api': ds.is_api,
         }
         if ds.catalog_id:
             entry['key'] = ds.catalog.key

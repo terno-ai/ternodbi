@@ -20,9 +20,7 @@ logger = logging.getLogger(__name__)
 
 SESSION_KEY = "terno_connector_next"
 
-# Only these are worth carrying. Restricting by path means an unrelated `next`
-# cannot be captured and replayed by this code.
-AUTHORIZE_PATHS = ("/oauth/authorize",)
+AUTHORIZE_PATHS = ("/oauth/authorize", "/connect")
 
 
 def is_connector_next(url: str) -> bool:
