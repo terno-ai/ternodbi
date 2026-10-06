@@ -21,6 +21,7 @@ from terno_dbi.connectors.api.sources.instagram_public import (
 _REPORT_TYPES = {
     "instagram_insights": [
         {"id": "AccountInsights", "settings": []},
+        {"id": "AccountTotals", "settings": []},
         {"id": "Media", "settings": []},
     ],
     "instagram_public": [
@@ -101,7 +102,7 @@ class TestInsights:
             {"name": "reach", "period": "day", "values": [
                 {"value": 100, "end_time": "2026-08-01T07:00:00+0000"},
                 {"value": 150, "end_time": "2026-08-02T07:00:00+0000"}]},
-            {"name": "profile_views", "period": "day", "values": [
+            {"name": "follower_count", "period": "day", "values": [
                 {"value": 5, "end_time": "2026-08-01T07:00:00+0000"},
                 {"value": 8, "end_time": "2026-08-02T07:00:00+0000"}]},
         ]}
@@ -114,14 +115,27 @@ class TestInsights:
             return insights
 
         conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
-        res = conn.query(_spec(["date", "reach", "profile_views"],
+        res = conn.query(_spec(["date", "reach", "follower_count"],
                                "AccountInsights"))
         assert "178414/insights" in captured["url"]
         assert captured["params"]["period"] == "day"
+        # v22 daily series requires metric_type=time_series (fixes empty results).
+        assert captured["params"]["metric_type"] == "time_series"
         assert res.rows == [
-            {"date": "2026-08-01", "reach": 100, "profile_views": 5},
-            {"date": "2026-08-02", "reach": 150, "profile_views": 8},
+            {"date": "2026-08-01", "reach": 100, "follower_count": 5},
+            {"date": "2026-08-02", "reach": 150, "follower_count": 8},
         ]
+
+    def test_account_totals_returns_one_aggregate_row(self):
+        def http(method, url, token, params=None):
+            assert params["metric_type"] == "total_value"
+            return {"data": [
+                {"name": "reach", "total_value": {"value": 8078}},
+                {"name": "profile_views", "total_value": {"value": 42}}]}
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.query(_spec(["reach", "profile_views"], "AccountTotals"))
+        assert res.rows == [{"reach": 8078, "profile_views": 42}]
 
     def test_media_report_fetches_per_media_insights(self):
         def http(method, url, token, params=None):
@@ -150,20 +164,20 @@ class TestInsights:
 
         def http(method, url, token, params=None):
             metric = params.get("metric", "")
-            if "," in metric or metric == "profile_views":
+            if "," in metric or metric == "follower_count":
                 # The combined call and the bad metric both hard-error.
                 raise ApiError(ErrorCode.UPSTREAM_ERROR, "unavailable")
             return {"data": [{"name": metric, "values": [
                 {"value": 5, "end_time": "2026-08-01T07:00:00+0000"}]}]}
 
         conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
-        res = conn.query(_spec(["date", "reach", "profile_views"],
+        res = conn.query(_spec(["date", "reach", "follower_count"],
                                "AccountInsights"))
-        # reach survived; profile_views was skipped (null) with a warning.
+        # reach survived; follower_count was skipped (null) with a warning.
         assert res.rows == [
-            {"date": "2026-08-01", "reach": 5, "profile_views": None},
+            {"date": "2026-08-01", "reach": 5, "follower_count": None},
         ]
-        assert any("profile_views" in w for w in res.warnings)
+        assert any("follower_count" in w for w in res.warnings)
 
     def test_unknown_field_rejected(self):
         conn = InstagramInsightsConnector(

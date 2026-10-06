@@ -360,13 +360,14 @@ _APIS: List[ConnectorSpec] = [
         account_label_singular="Instagram account",
         account_label_plural="Instagram accounts",
         report_types=[
-            ReportType("AccountInsights", "Account insights"),
+            ReportType("AccountInsights", "Account insights (daily)"),
+            ReportType("AccountTotals", "Account totals (range)"),
             ReportType("Media", "Media (recent posts)"),
         ],
         default_report_type="AccountInsights",
         rate_limit_per_second=50,
         rate_limit_per_day=100000,
-        default_enabled=True,   # Business Verification + App Review pending
+        default_enabled=True,
     ),
     ConnectorSpec(
         key="instagram_public",

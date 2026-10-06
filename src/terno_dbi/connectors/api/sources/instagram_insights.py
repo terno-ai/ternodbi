@@ -30,15 +30,11 @@ from terno_dbi.connectors.api.sources._multi import gather_accounts
 
 logger = logging.getLogger(__name__)
 
-# --- Account insights (day-period time series) -----------------------------
+# --- Account insights ------------------------------------------------------
 
 _ACCOUNT_METRICS: List[Field] = [
     Field("reach", "Reach", "metric", "Unique accounts that saw any content.",
           data_type="integer"),
-    Field("profile_views", "Profile views", "metric",
-          "Times the profile was viewed.", data_type="integer"),
-    Field("website_clicks", "Website clicks", "metric",
-          "Taps on the website link in the profile.", data_type="integer"),
     Field("follower_count", "New followers", "metric",
           "Accounts that started following on the day.", data_type="integer"),
 ]
@@ -47,6 +43,32 @@ _ACCOUNT_DIMENSIONS: List[Field] = [
     Field("date", "Date", "dimension", "Day the stat occurred.",
           data_type="date"),
 ]
+
+# Total-value account metrics: one aggregate over the whole date range.
+_ACCOUNT_TOTAL_METRICS: List[Field] = [
+    Field("reach", "Reach", "metric", "Unique accounts reached in the range.",
+          data_type="integer"),
+    Field("profile_views", "Profile views", "metric",
+          "Times the profile was viewed.", data_type="integer"),
+    Field("website_clicks", "Website clicks", "metric",
+          "Taps on the website link in the profile.", data_type="integer"),
+    Field("accounts_engaged", "Accounts engaged", "metric",
+          "Accounts that interacted with the profile.", data_type="integer"),
+    Field("total_interactions", "Interactions", "metric",
+          "Likes, saves, comments and shares combined.", data_type="integer"),
+    Field("likes", "Likes", "metric", "Likes across content.",
+          data_type="integer"),
+    Field("comments", "Comments", "metric", "Comments across content.",
+          data_type="integer"),
+    Field("saves", "Saves", "metric", "Saves across content.",
+          data_type="integer"),
+    Field("shares", "Shares", "metric", "Shares across content.",
+          data_type="integer"),
+    Field("views", "Views", "metric",
+          "Content views (the v22 replacement for impressions).",
+          data_type="integer"),
+]
+_ACCOUNT_TOTAL_METRIC_IDS = frozenset(f.id for f in _ACCOUNT_TOTAL_METRICS)
 
 # --- Media (recent posts) --------------------------------------------------
 
@@ -73,6 +95,7 @@ _MEDIA_PLAIN_IDS = frozenset(
 
 _REPORTS: Dict[str, List[Field]] = {
     "AccountInsights": [*_ACCOUNT_DIMENSIONS, *_ACCOUNT_METRICS],
+    "AccountTotals": list(_ACCOUNT_TOTAL_METRICS),
     "Media": list(_MEDIA_FIELDS),
 }
 _DEFAULT_REPORT = "AccountInsights"
@@ -142,13 +165,16 @@ class InstagramInsightsConnector(ApiConnector):
 
         if report_type == "Media":
             return self._run_media(spec, catalogue)
+        if report_type == "AccountTotals":
+            return self._run_account_totals(spec, catalogue)
         return self._run_account_insights(spec, catalogue)
 
     def _run_account_insights(self, spec: QuerySpec, catalogue) -> QueryResult:
         metrics = [f for f in spec.fields if f in _ACCOUNT_METRIC_IDS]
         if not metrics:
-            metrics = [m.id for m in _ACCOUNT_METRICS[:3]]
-        period_params = {
+            metrics = [m.id for m in _ACCOUNT_METRICS]
+        base_params = {
+            "metric_type": "time_series",
             "period": "day",
             "since": spec.date_range.start,
             "until": spec.date_range.end,
@@ -159,7 +185,7 @@ class InstagramInsightsConnector(ApiConnector):
 
         def fetch(account):
             series = self._fetch_account_series(
-                base, account, metrics, period_params, warnings)
+                base, account, metrics, base_params, warnings)
             return _pivot_account_insights(series, metrics, account, multi=multi)
 
         rows, acc_warnings = gather_accounts(spec.accounts, fetch)
@@ -170,9 +196,41 @@ class InstagramInsightsConnector(ApiConnector):
             warnings=warnings + acc_warnings,
         )
 
-    def _fetch_account_series(self, base, account, metrics, period_params,
+    def _run_account_totals(self, spec: QuerySpec, catalogue) -> QueryResult:
+        """Total-value account metrics: one aggregate row per account."""
+        metrics = [f for f in spec.fields if f in _ACCOUNT_TOTAL_METRIC_IDS]
+        if not metrics:
+            metrics = [m.id for m in _ACCOUNT_TOTAL_METRICS]
+        base_params = {
+            "metric_type": "total_value",
+            "since": spec.date_range.start,
+            "until": spec.date_range.end,
+        }
+        multi = len(spec.accounts) > 1
+        base = self._base()
+        warnings: List[str] = []
+
+        def fetch(account):
+            values = self._fetch_account_totals(
+                base, account, metrics, base_params, warnings)
+            record: Dict[str, Any] = {}
+            if multi:
+                record["_account"] = account
+            for m in metrics:
+                record[m] = values.get(m)
+            return [record]
+
+        rows, acc_warnings = gather_accounts(spec.accounts, fetch)
+        return QueryResult(
+            requested_field_ids=list(spec.fields) or list(metrics),
+            rows=rows,
+            row_count=len(rows),
+            warnings=warnings + acc_warnings,
+        )
+
+    def _fetch_account_series(self, base, account, metrics, base_params,
                               warnings) -> List[Dict[str, Any]]:
-        """Account-insight series, resilient to per-metric failures.
+        """Daily account-insight series, resilient to per-metric failures.
 
         Tries all metrics in one call; if Instagram rejects the batch (a single
         deprecated/unsupported metric hard-errors the whole request), retries
@@ -182,21 +240,41 @@ class InstagramInsightsConnector(ApiConnector):
         url = f"{base}/{account}/insights"
         try:
             return self._call(
-                "GET", url, {**period_params, "metric": ",".join(metrics)},
+                "GET", url, {**base_params, "metric": ",".join(metrics)},
             ).get("data", [])
         except ApiError:
             pass
         series: List[Dict[str, Any]] = []
         for metric in metrics:
             try:
-                data = self._call(
-                    "GET", url, {**period_params, "metric": metric})
+                data = self._call("GET", url, {**base_params, "metric": metric})
                 series.extend(data.get("data", []))
             except ApiError:
                 warnings.append(
                     f"Instagram metric '{metric}' is unavailable for this "
                     f"account/API version and was skipped.")
         return series
+
+    def _fetch_account_totals(self, base, account, metrics, base_params,
+                              warnings) -> Dict[str, Any]:
+        """`{metric: total}` for total-value metrics, resilient to failures."""
+        url = f"{base}/{account}/insights"
+        try:
+            data = self._call(
+                "GET", url, {**base_params, "metric": ",".join(metrics)})
+            return _total_values(data)
+        except ApiError:
+            pass
+        out: Dict[str, Any] = {}
+        for metric in metrics:
+            try:
+                data = self._call("GET", url, {**base_params, "metric": metric})
+                out.update(_total_values(data))
+            except ApiError:
+                warnings.append(
+                    f"Instagram metric '{metric}' is unavailable for this "
+                    f"account/API version and was skipped.")
+        return out
 
     def _run_media(self, spec: QuerySpec, catalogue) -> QueryResult:
         requested = list(spec.fields) or ["id", "timestamp", "media_type",
@@ -294,6 +372,19 @@ def _parse_media(media, requested, insight_metrics, account, *, multi=False):
                 record[name] = obj.get(name)
         rows.append(record)
     return rows
+
+
+def _total_values(data) -> Dict[str, Any]:
+    """Flatten a `metric_type=total_value` response to `{metric: value}`.
+
+    Shape: `{"data": [{"name": "reach", "total_value": {"value": N}}, ...]}`.
+    """
+    out: Dict[str, Any] = {}
+    for series in (data.get("data", []) or []):
+        name = series.get("name")
+        if name:
+            out[name] = (series.get("total_value") or {}).get("value")
+    return out
 
 
 def _insight_series_to_values(data) -> Dict[str, Any]:
