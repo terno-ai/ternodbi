@@ -11,6 +11,7 @@ import pytest
 from django.test import RequestFactory
 
 from terno_dbi.connectors.api import web
+from terno_dbi.connectors.api import management_service
 from terno_dbi.connectors.api.model.types import Account
 from terno_dbi.services.secrets import encrypt_dict
 
@@ -48,7 +49,7 @@ def ds(org):
 
 
 def _req(method, org, monkeypatch, body=None):
-    monkeypatch.setattr(web.registry, "build_connector", lambda ds: _FakeConnector())
+    monkeypatch.setattr(management_service.registry, "build_connector", lambda ds: _FakeConnector())
     rf = RequestFactory()
     if method == "GET":
         request = rf.get("/connectors/api/google_ads/accounts/")
@@ -142,7 +143,7 @@ def test_post_rejects_invalid_json(org, ds, monkeypatch):
                       data="{not json", content_type="application/json")
     request.user = org.owner
     request.org_id = org.id
-    monkeypatch.setattr(web.registry, "build_connector", lambda ds: _FakeConnector())
+    monkeypatch.setattr(management_service.registry, "build_connector", lambda ds: _FakeConnector())
     resp = web.connector_accounts(request, "google_ads")
     assert resp.status_code == 400
 
@@ -157,7 +158,7 @@ def test_get_surfaces_connector_error(org, ds, monkeypatch):
             raise ApiError(ErrorCode.AUTH_EXPIRED, "reconnect")
 
     request = _req("GET", org, monkeypatch)
-    monkeypatch.setattr(web.registry, "build_connector", lambda ds: _Broken())
+    monkeypatch.setattr(management_service.registry, "build_connector", lambda ds: _Broken())
     resp = web.connector_accounts(request, "google_ads")
     assert resp.status_code == 400
     assert "reconnect" in json.loads(resp.content)["error"]
