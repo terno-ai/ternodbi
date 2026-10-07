@@ -241,3 +241,30 @@ def test_save_accounts_sets_login_customer_id(owner, org, ds):
     out = svc.save_accounts(owner, org, "google_ads",
                             {"login_customer_id": "123-456-7890"})
     assert out["login_customer_id"] == "1234567890"
+
+
+# --- set_connector_enabled ----------------------------------------------------
+
+@pytest.mark.django_db
+def test_set_connector_enabled_toggles_flag(owner, org, ds):
+    from terno_dbi.core.models import DataSource
+    out = svc.set_connector_enabled(owner, org, "google_ads", False)
+    assert out["enabled"] is False
+    ds.refresh_from_db()
+    assert ds.enabled is False
+    out = svc.set_connector_enabled(owner, org, "google_ads", True)
+    assert out["enabled"] is True
+    ds.refresh_from_db()
+    assert ds.enabled is True
+
+
+@pytest.mark.django_db
+def test_set_connector_enabled_non_admin_denied(member, org, ds):
+    with pytest.raises(svc.ConnectorPermissionDenied):
+        svc.set_connector_enabled(member, org, "google_ads", False)
+
+
+@pytest.mark.django_db
+def test_set_connector_enabled_not_connected_raises(owner, org, catalog):
+    with pytest.raises(svc.ConnectorNotConnected):
+        svc.set_connector_enabled(owner, org, "google_ads", False)

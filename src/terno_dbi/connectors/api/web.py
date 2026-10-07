@@ -255,6 +255,26 @@ def connector_accounts(request, connector_key):
         return _management_error_response(exc)
 
 
+@require_http_methods(["POST"])
+def connector_toggle(request, connector_key):
+    """POST ``{"enabled": bool}``: enable/disable a connected API source for
+    querying (admin-only). The connection and its tokens are kept — this only
+    flips whether the agent may query it. Addressed by connector key, never a
+    datasource id. CSRF-protected."""
+    org = _authorised_org(request)
+    if org is None:
+        return HttpResponse("Not permitted.", status=403)
+    try:
+        body = json.loads(request.body or "{}")
+    except (json.JSONDecodeError, ValueError):
+        return HttpResponseBadRequest("Invalid JSON.")
+    try:
+        return JsonResponse(management_service.set_connector_enabled(
+            request.user, org, connector_key, bool(body.get("enabled"))))
+    except ConnectorManagementError as exc:
+        return _management_error_response(exc)
+
+
 def _management_error_response(exc):
     """Map a management-service error onto this browser view's HTTP response."""
     if isinstance(exc, ConnectorPermissionDenied):
@@ -271,4 +291,5 @@ __all__ = [
     "list_api_connectors",
     "disconnect_connector",
     "connector_accounts",
+    "connector_toggle",
 ]

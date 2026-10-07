@@ -172,6 +172,7 @@ def _connector_cards(org) -> list:
             "most_popular": cat.most_popular,
             "status": _connector_status(ds),
             "datasource_id": ds.id if ds else None,
+            "enabled": bool(getattr(ds, "enabled", True)) if ds else True,
             "last_error": (getattr(ds, "auth_error", "") if ds else "") or "",
             # Connection identity + account state, only meaningful when connected.
             "connected_email": _connected_email(ds) if connected else "",
@@ -314,3 +315,17 @@ def save_accounts(user, org, connector_key, body: dict) -> dict:
             )
 
     return result
+
+
+def set_connector_enabled(user, org, connector_key, enabled) -> dict:
+    """Enable or disable a connected API source for querying (admin-only).
+
+    This toggles the datasource's ``enabled`` flag — whether the agent may query
+    it — WITHOUT touching the connection or its OAuth tokens (unlike disconnect).
+    Addressed by connector key, not datasource id, so it can never collide with
+    an unrelated local datasource id in the desktop proxy.
+    """
+    ds = _require_managed_ds(user, org, connector_key)
+    ds.enabled = bool(enabled)
+    ds.save(update_fields=["enabled"])
+    return {"status": "saved", "key": connector_key, "enabled": ds.enabled}

@@ -23,4 +23,6 @@ urlpatterns = [
          web.disconnect_connector, name="disconnect_connector"),
     path("connectors/api/<slug:connector_key>/accounts/",
          web.connector_accounts, name="connector_accounts"),
+    path("connectors/api/<slug:connector_key>/toggle/",
+         web.connector_toggle, name="connector_toggle"),
 ]
