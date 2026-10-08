@@ -28,6 +28,11 @@ class CoreOrganisation(models.Model):
     )
     verified = models.BooleanField(default=True)
     is_active = models.BooleanField(default=False)
+    provisioning_key = models.CharField(
+        max_length=255, null=True, blank=True, unique=True,
+        help_text="Stable key an external provisioner uses to create this org "
+                  "idempotently; null for orgs not created that way."
+    )
     org_prompt = models.TextField(
         blank=True, default="",
         help_text="Custom text appended to the default LLM system prompt for all users in this organisation."
