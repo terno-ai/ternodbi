@@ -108,7 +108,8 @@ _INSTAGRAM = OAuthProvider(
     token_url="https://graph.facebook.com/v25.0/oauth/access_token",
     scope="public_profile,instagram_basic,instagram_manage_insights,"
           "pages_show_list,pages_read_engagement,business_management,"
-          "instagram_content_publish,instagram_manage_comments",
+          "instagram_content_publish,instagram_manage_comments,"
+          "instagram_manage_engagement",
     client_id_env="TERNO_META_APP_ID",
     client_secret_env="TERNO_META_APP_SECRET",
     use_pkce=False,
