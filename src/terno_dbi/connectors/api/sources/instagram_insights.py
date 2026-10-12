@@ -26,7 +26,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from terno_dbi.connectors.api.model.base import ApiConnector
 from terno_dbi.connectors.api.model.errors import (
-    ApiError, ErrorCode, invalid_field, missing_setting,
+    ApiError, ErrorCode, invalid_field, invalid_setting, missing_setting,
 )
 from terno_dbi.connectors.api.model.types import (
     Account, Action, ActionResult, Field, QueryResult, QuerySpec,
@@ -114,11 +114,97 @@ _COMMENT_FIELDS: List[Field] = [
 _COMMENT_API_FIELDS = ["id", "text", "username", "timestamp", "like_count",
                        "hidden"]
 
+# --- Stories (your own, last 24h) ------------------------------------------
+# Stories live for 24h, so this report has no date range — it returns whatever
+# is currently active. Insight values come from the per-story `/insights` edge.
+_STORY_PLAIN_FIELDS: List[Field] = [
+    Field("id", "Media ID", "dimension", data_type="string"),
+    Field("timestamp", "Published", "dimension", "When the story was posted.",
+          data_type="string"),
+    Field("media_type", "Type", "dimension", "IMAGE or VIDEO."),
+    Field("permalink", "Permalink", "dimension", data_type="string"),
+    Field("caption", "Caption", "dimension", data_type="string"),
+]
+_STORY_INSIGHT_FIELDS: List[Field] = [
+    Field("reach", "Reach", "metric", "Unique accounts that saw the story.",
+          data_type="integer"),
+    Field("replies", "Replies", "metric", "Replies to the story.",
+          data_type="integer"),
+    Field("navigation", "Navigation", "metric",
+          "Navigation actions (back, forward, exit, next story).",
+          data_type="integer"),
+    Field("profile_visits", "Profile visits", "metric",
+          "Profile visits driven by the story.", data_type="integer"),
+    Field("follows", "Follows", "metric", "Accounts that followed from the story.",
+          data_type="integer"),
+    Field("shares", "Shares", "metric", "Times the story was shared.",
+          data_type="integer"),
+    Field("total_interactions", "Interactions", "metric",
+          "All interactions on the story.", data_type="integer"),
+    Field("views", "Views", "metric", "Story views.", data_type="integer"),
+]
+_STORY_FIELDS: List[Field] = [*_STORY_PLAIN_FIELDS, *_STORY_INSIGHT_FIELDS]
+_STORY_PLAIN_IDS = frozenset(f.id for f in _STORY_PLAIN_FIELDS)
+_STORY_INSIGHT_IDS = frozenset(f.id for f in _STORY_INSIGHT_FIELDS)
+
+# --- Tagged media (posts you're tagged in) ---------------------------------
+# These are other accounts' media, so only plain fields are available — you
+# cannot read insights for media you don't own.
+_TAG_FIELDS: List[Field] = [
+    Field("id", "Media ID", "dimension", data_type="string"),
+    Field("timestamp", "Published", "dimension", data_type="string"),
+    Field("media_type", "Type", "dimension", "IMAGE, VIDEO, CAROUSEL_ALBUM."),
+    Field("caption", "Caption", "dimension", data_type="string"),
+    Field("permalink", "Permalink", "dimension", data_type="string"),
+    Field("username", "Author", "dimension", "Account that posted the media.",
+          data_type="string"),
+    Field("like_count", "Likes", "metric", data_type="integer"),
+    Field("comments_count", "Comments", "metric", data_type="integer"),
+]
+_TAG_API_FIELDS = [f.id for f in _TAG_FIELDS]
+
+# --- Account profile (one row of profile facts) ----------------------------
+_PROFILE_FIELDS: List[Field] = [
+    Field("username", "Username", "dimension", data_type="string"),
+    Field("name", "Name", "dimension", data_type="string"),
+    Field("biography", "Bio", "dimension", data_type="string"),
+    Field("website", "Website", "dimension", data_type="string"),
+    Field("followers_count", "Followers", "metric", data_type="integer",
+          is_non_aggregatable=True),
+    Field("follows_count", "Following", "metric", data_type="integer",
+          is_non_aggregatable=True),
+    Field("media_count", "Posts", "metric", data_type="integer",
+          is_non_aggregatable=True),
+    Field("profile_picture_url", "Profile picture", "dimension",
+          data_type="string"),
+]
+_PROFILE_API_FIELDS = [f.id for f in _PROFILE_FIELDS]
+
+# --- Audience demographics (breakdown of followers / engaged audience) ------
+# total_value + a single breakdown; period is lifetime and the window is chosen
+# by `timeframe`, not a date range. Needs >=100 followers.
+_DEMOGRAPHIC_FIELDS: List[Field] = [
+    Field("segment", "Segment", "dimension",
+          "The breakdown value — an age band, gender, city or country.",
+          data_type="string"),
+    Field("value", "Accounts", "metric", "Accounts in this segment.",
+          data_type="integer"),
+]
+_DEMOGRAPHIC_METRICS = ("follower_demographics", "engaged_audience_demographics")
+_DEMOGRAPHIC_BREAKDOWNS = ("age", "city", "country", "gender")
+_DEMOGRAPHIC_TIMEFRAMES = ("this_week", "this_month", "prev_month",
+                           "last_14_days", "last_30_days", "last_90_days")
+
 _REPORTS: Dict[str, List[Field]] = {
     "AccountInsights": [*_ACCOUNT_DIMENSIONS, *_ACCOUNT_METRICS],
     "AccountTotals": list(_ACCOUNT_TOTAL_METRICS),
     "Media": list(_MEDIA_FIELDS),
     "Comments": list(_COMMENT_FIELDS),
+    "Stories": list(_STORY_FIELDS),
+    "TaggedMedia": list(_TAG_FIELDS),
+    "AccountProfile": list(_PROFILE_FIELDS),
+    "AudienceDemographics": list(_DEMOGRAPHIC_FIELDS),
+    "CommentReplies": list(_COMMENT_FIELDS),
 }
 _DEFAULT_REPORT = "AccountInsights"
 
@@ -200,6 +286,16 @@ _ACTIONS: List[Action] = [
         destructive=True,
     ),
     Action(
+        "publish_story", "Publish story",
+        "Publish a story (photo or video) from a public URL. Stories disappear "
+        "after 24 hours. Goes live immediately — confirm before applying.",
+        schema={"type": "object",
+                "properties": {"image_url": _url_prop("image (JPEG)"),
+                               "video_url": _url_prop("video (MP4/MOV)")},
+                "required": [], "additionalProperties": False},
+        destructive=True,
+    ),
+    Action(
         "reply_to_comment", "Reply to comment",
         "Post a public reply to a comment on your media.",
         schema={"type": "object",
@@ -227,6 +323,20 @@ _ACTIONS: List[Action] = [
         schema={"type": "object",
                 "properties": {"comment_id": _COMMENT_ID_PROP},
                 "required": ["comment_id"], "additionalProperties": False},
+        destructive=True,
+    ),
+    Action(
+        "set_comments_enabled", "Enable/disable comments",
+        "Turn commenting on or off for one of your posts. Reversible.",
+        schema={"type": "object",
+                "properties": {
+                    "media_id": {"type": "string",
+                                 "description": "The media's id."},
+                    "enabled": {"type": "boolean",
+                                "description": "True to allow comments, false "
+                                               "to turn them off."}},
+                "required": ["media_id", "enabled"],
+                "additionalProperties": False},
         destructive=True,
     ),
     Action(
@@ -339,6 +449,16 @@ class InstagramInsightsConnector(ApiConnector):
             return self._run_account_totals(spec, catalogue)
         if report_type == "Comments":
             return self._run_comments(spec, catalogue)
+        if report_type == "CommentReplies":
+            return self._run_comment_replies(spec, catalogue)
+        if report_type == "Stories":
+            return self._run_stories(spec, catalogue)
+        if report_type == "TaggedMedia":
+            return self._run_tagged_media(spec, catalogue)
+        if report_type == "AccountProfile":
+            return self._run_account_profile(spec, catalogue)
+        if report_type == "AudienceDemographics":
+            return self._run_demographics(spec, catalogue)
         return self._run_account_insights(spec, catalogue)
 
     def _run_comments(self, spec: QuerySpec, catalogue) -> QueryResult:
@@ -358,6 +478,151 @@ class InstagramInsightsConnector(ApiConnector):
             rows=rows,
             row_count=len(rows),
             warnings=[],
+        )
+
+    def _run_comment_replies(self, spec: QuerySpec, catalogue) -> QueryResult:
+        comment_id = str(spec.settings.get("comment_id") or "").strip()
+        if not comment_id:
+            raise missing_setting("comment_id", "Comment id", "CommentReplies")
+        requested = list(spec.fields) or ["id", "text", "username", "timestamp"]
+        base = self._base()
+        data = self._call(
+            "GET", f"{base}/{comment_id}/replies",
+            {"fields": ",".join(_COMMENT_API_FIELDS), "limit": spec.max_rows})
+        rows = [{name: obj.get(name) for name in requested}
+                for obj in data.get("data", [])]
+        return QueryResult(
+            requested_field_ids=requested,
+            rows=rows,
+            row_count=len(rows),
+            warnings=[],
+        )
+
+    def _run_stories(self, spec: QuerySpec, catalogue) -> QueryResult:
+        requested = list(spec.fields) or ["id", "timestamp", "media_type",
+                                          "reach", "replies", "views"]
+        plain = [f for f in requested if f in _STORY_PLAIN_IDS]
+        insight_metrics = [f for f in requested if f in _STORY_INSIGHT_IDS]
+        api_fields = list(dict.fromkeys(["id", *plain]))
+        params = {"fields": ",".join(api_fields), "limit": spec.max_rows}
+        multi = len(spec.accounts) > 1
+        base = self._base()
+        warnings: List[str] = []
+
+        def fetch(account):
+            data = self._call("GET", f"{base}/{account}/stories", params)
+            media = data.get("data", [])
+            if insight_metrics:
+                for obj in media:
+                    obj["_insights"] = self._media_insights(
+                        base, obj.get("id"), insight_metrics, warnings)
+            return _parse_media(media, requested, insight_metrics, account,
+                                multi=multi)
+
+        rows, acc_warnings = gather_accounts(spec.accounts, fetch)
+        return QueryResult(
+            requested_field_ids=requested,
+            rows=rows,
+            row_count=len(rows),
+            warnings=warnings + acc_warnings,
+        )
+
+    def _run_tagged_media(self, spec: QuerySpec, catalogue) -> QueryResult:
+        requested = list(spec.fields) or list(_TAG_API_FIELDS)
+        api_fields = list(dict.fromkeys(
+            ["id", *[f for f in requested if f in catalogue]]))
+        params = {"fields": ",".join(api_fields), "limit": spec.max_rows}
+        multi = len(spec.accounts) > 1
+        base = self._base()
+
+        def fetch(account):
+            data = self._call("GET", f"{base}/{account}/tags", params)
+            rows = []
+            for obj in data.get("data", []):
+                record: Dict[str, Any] = {}
+                if multi:
+                    record["_account"] = account
+                for name in requested:
+                    record[name] = obj.get(name)
+                rows.append(record)
+            return rows
+
+        rows, acc_warnings = gather_accounts(spec.accounts, fetch)
+        return QueryResult(
+            requested_field_ids=requested,
+            rows=rows,
+            row_count=len(rows),
+            warnings=acc_warnings,
+        )
+
+    def _run_account_profile(self, spec: QuerySpec, catalogue) -> QueryResult:
+        requested = list(spec.fields) or list(_PROFILE_API_FIELDS)
+        api_fields = list(dict.fromkeys(
+            [f for f in requested if f in catalogue]))
+        multi = len(spec.accounts) > 1
+        base = self._base()
+
+        def fetch(account):
+            data = self._call("GET", f"{base}/{account}",
+                              {"fields": ",".join(api_fields)})
+            record: Dict[str, Any] = {}
+            if multi:
+                record["_account"] = account
+            for name in requested:
+                record[name] = data.get(name)
+            return [record]
+
+        rows, acc_warnings = gather_accounts(spec.accounts, fetch)
+        return QueryResult(
+            requested_field_ids=requested,
+            rows=rows,
+            row_count=len(rows),
+            warnings=acc_warnings,
+        )
+
+    def _run_demographics(self, spec: QuerySpec, catalogue) -> QueryResult:
+        metric = str(spec.settings.get("metric")
+                     or "follower_demographics").strip()
+        if metric not in _DEMOGRAPHIC_METRICS:
+            raise invalid_setting(metric, list(_DEMOGRAPHIC_METRICS),
+                                  "AudienceDemographics")
+        breakdown = str(spec.settings.get("breakdown") or "age").strip()
+        if breakdown not in _DEMOGRAPHIC_BREAKDOWNS:
+            raise invalid_setting(breakdown, list(_DEMOGRAPHIC_BREAKDOWNS),
+                                  "AudienceDemographics")
+        timeframe = str(spec.settings.get("timeframe") or "this_month").strip()
+        if timeframe not in _DEMOGRAPHIC_TIMEFRAMES:
+            raise invalid_setting(timeframe, list(_DEMOGRAPHIC_TIMEFRAMES),
+                                  "AudienceDemographics")
+        params = {
+            "metric": metric,
+            "metric_type": "total_value",
+            "period": "lifetime",
+            "timeframe": timeframe,
+            "breakdown": breakdown,
+        }
+        multi = len(spec.accounts) > 1
+        base = self._base()
+        warnings: List[str] = []
+
+        def fetch(account):
+            try:
+                data = self._call(
+                    "GET", f"{base}/{account}/insights", params)
+            except ApiError:
+                warnings.append(
+                    f"Demographics ('{metric}') are unavailable for this "
+                    f"account — they need at least 100 followers and enough "
+                    f"data in the selected timeframe.")
+                return []
+            return _parse_demographics(data, account, multi=multi)
+
+        rows, acc_warnings = gather_accounts(spec.accounts, fetch)
+        return QueryResult(
+            requested_field_ids=["segment", "value"],
+            rows=rows,
+            row_count=len(rows),
+            warnings=warnings + acc_warnings,
         )
 
     def _run_account_insights(self, spec: QuerySpec, catalogue) -> QueryResult:
@@ -571,9 +836,11 @@ class InstagramInsightsConnector(ApiConnector):
             "publish_video": self._publish_video,
             "publish_reel": self._publish_reel,
             "publish_carousel": self._publish_carousel,
+            "publish_story": self._publish_story,
             "reply_to_comment": self._reply_to_comment,
             "hide_comment": self._hide_comment,
             "delete_comment": self._delete_comment,
+            "set_comments_enabled": self._set_comments_enabled,
             "like_media": self._like_media,
             "unlike_media": self._unlike_media,
             "like_comment": self._like_comment,
@@ -679,6 +946,23 @@ class InstagramInsightsConnector(ApiConnector):
             base, account, container, label=f"carousel ({len(child_ids)} items)",
             extra={"children": child_ids})
 
+    def _publish_story(self, base, account, params) -> ActionResult:
+        image_url = params.get("image_url")
+        video_url = params.get("video_url")
+        if bool(image_url) == bool(video_url):
+            raise ApiError(
+                ErrorCode.INVALID_ACTION_PARAMS,
+                "A story needs exactly one of image_url or video_url.")
+        fields: Dict[str, Any] = {"media_type": "STORIES"}
+        if video_url:
+            fields["video_url"] = video_url
+        else:
+            fields["image_url"] = image_url
+        container = self._create_container(base, account, fields)
+        if video_url:
+            self._wait_for_container(base, container)
+        return self._publish_container(base, account, container, label="story")
+
     # -- comment moderation -------------------------------------------------
 
     def _reply_to_comment(self, base, account, params) -> ActionResult:
@@ -724,6 +1008,26 @@ class InstagramInsightsConnector(ApiConnector):
             action="delete_comment", account=account,
             summary=f"Deleted comment {comment_id}.",
             before={"comment_id": comment_id})
+
+    def _set_comments_enabled(self, base, account, params) -> ActionResult:
+        media_id = _require(params, "media_id")
+        if "enabled" not in params:
+            raise ApiError(ErrorCode.INVALID_ACTION_PARAMS,
+                           "'enabled' is required.")
+        enabled = bool(params["enabled"])
+        verb = "enable" if enabled else "disable"
+        if self._dry_run:
+            return ActionResult(
+                action="set_comments_enabled", account=account,
+                summary=f"Would {verb} comments on media {media_id}.",
+                details={"dry_run": True, "applied": False})
+        self._call("POST", f"{base}/{media_id}",
+                   {"comment_enabled": "true" if enabled else "false"})
+        return ActionResult(
+            action="set_comments_enabled", account=account,
+            summary=f"{'Enabled' if enabled else 'Disabled'} comments on media "
+                    f"{media_id}.",
+            after={"comment_enabled": enabled})
 
     # -- likes (Facebook Login only) ----------------------------------------
 
@@ -815,6 +1119,28 @@ def _parse_media(media, requested, insight_metrics, account, *, multi=False):
             else:
                 record[name] = obj.get(name)
         rows.append(record)
+    return rows
+
+
+def _parse_demographics(data, account, *, multi=False) -> List[Dict[str, Any]]:
+    """Flatten a `total_value` demographics response into one row per segment.
+
+    Shape: `{"data": [{"name": "follower_demographics", "total_value":
+    {"breakdowns": [{"dimension_keys": ["age"], "results": [{"dimension_values":
+    ["25-34"], "value": N}, ...]}]}}]}`.
+    """
+    rows: List[Dict[str, Any]] = []
+    for series in (data.get("data", []) or []):
+        total = series.get("total_value") or {}
+        for breakdown in (total.get("breakdowns") or []):
+            for result in (breakdown.get("results") or []):
+                values = result.get("dimension_values") or []
+                record: Dict[str, Any] = {}
+                if multi:
+                    record["_account"] = account
+                record["segment"] = values[0] if values else ""
+                record["value"] = result.get("value")
+                rows.append(record)
     return rows
 
 

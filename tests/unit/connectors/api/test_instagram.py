@@ -25,6 +25,15 @@ _REPORT_TYPES = {
         {"id": "Media", "settings": []},
         {"id": "Comments",
          "settings": [{"setting_id": "media_id", "required": True}]},
+        {"id": "CommentReplies",
+         "settings": [{"setting_id": "comment_id", "required": True}]},
+        {"id": "Stories", "settings": []},
+        {"id": "TaggedMedia", "settings": []},
+        {"id": "AccountProfile", "settings": []},
+        {"id": "AudienceDemographics",
+         "settings": [{"setting_id": "metric", "required": False},
+                      {"setting_id": "breakdown", "required": False},
+                      {"setting_id": "timeframe", "required": False}]},
     ],
     "instagram_public": [
         {"id": "Profile",
@@ -330,7 +339,8 @@ class TestWriteActions:
         ids = {a.id for a in conn.list_actions()}
         assert ids == {
             "publish_photo", "publish_video", "publish_reel", "publish_carousel",
-            "reply_to_comment", "hide_comment", "delete_comment",
+            "publish_story", "reply_to_comment", "hide_comment", "delete_comment",
+            "set_comments_enabled",
             "like_media", "unlike_media", "like_comment", "unlike_comment",
         }
 
@@ -449,6 +459,202 @@ class TestCommentsReport:
         with pytest.raises(ApiError) as exc:
             conn.query(_spec(["id", "text"], "Comments", settings={}))
         assert exc.value.code == ErrorCode.MISSING_SETTING
+
+
+class TestCommentRepliesReport:
+    def test_lists_replies_for_a_comment(self):
+        def http(method, url, token, params=None):
+            assert url.endswith("/C1/replies")
+            return {"data": [
+                {"id": "R1", "text": "thanks!", "username": "me",
+                 "timestamp": "2026-10-03T00:00:00+0000"}]}
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.query(_spec(
+            ["id", "text", "username"], "CommentReplies",
+            settings={"comment_id": "C1"}))
+        assert res.rows == [{"id": "R1", "text": "thanks!", "username": "me"}]
+
+    def test_comment_replies_requires_comment_id(self):
+        conn = InstagramInsightsConnector(
+            _DS("instagram_insights"), http=lambda *a, **k: {})
+        with pytest.raises(ApiError) as exc:
+            conn.query(_spec(["id", "text"], "CommentReplies", settings={}))
+        assert exc.value.code == ErrorCode.MISSING_SETTING
+
+
+class TestStoriesReport:
+    def test_stories_fetches_media_and_per_story_insights(self):
+        def http(method, url, token, params=None):
+            if url.endswith("/178414/stories"):
+                return {"data": [{"id": "S1", "media_type": "IMAGE"}]}
+            if url.endswith("/S1/insights"):
+                return {"data": [
+                    {"name": "reach", "values": [{"value": 50}]},
+                    {"name": "replies", "values": [{"value": 3}]}]}
+            raise AssertionError(url)
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.query(_spec(["id", "media_type", "reach", "replies"],
+                               "Stories"))
+        assert res.rows == [
+            {"id": "S1", "media_type": "IMAGE", "reach": 50, "replies": 3}]
+
+    def test_stories_skips_unavailable_metric_with_warning(self):
+        def http(method, url, token, params=None):
+            if url.endswith("/178414/stories"):
+                return {"data": [{"id": "S1"}]}
+            # Batch call fails, then per-metric: reach ok, replies errors.
+            if "," in (params or {}).get("metric", ""):
+                raise ApiError(ErrorCode.UPSTREAM_ERROR, "boom")
+            if params.get("metric") == "reach":
+                return {"data": [{"name": "reach", "values": [{"value": 9}]}]}
+            raise ApiError(ErrorCode.UPSTREAM_ERROR, "not enough viewers")
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.query(_spec(["id", "reach", "replies"], "Stories"))
+        assert res.rows == [{"id": "S1", "reach": 9, "replies": None}]
+        assert any("replies" in w for w in res.warnings)
+
+
+class TestTaggedMediaReport:
+    def test_lists_tagged_media(self):
+        def http(method, url, token, params=None):
+            assert url.endswith("/178414/tags")
+            return {"data": [
+                {"id": "T1", "media_type": "IMAGE", "username": "someone",
+                 "like_count": 4}]}
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.query(_spec(["id", "username", "like_count"], "TaggedMedia"))
+        assert res.rows == [
+            {"id": "T1", "username": "someone", "like_count": 4}]
+
+
+class TestAccountProfileReport:
+    def test_returns_one_row_of_profile_facts(self):
+        def http(method, url, token, params=None):
+            assert url.endswith("/178414")
+            return {"username": "cloudxlab", "followers_count": 1200,
+                    "media_count": 87, "biography": "hi"}
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.query(_spec(
+            ["username", "followers_count", "media_count"], "AccountProfile"))
+        assert res.rows == [
+            {"username": "cloudxlab", "followers_count": 1200,
+             "media_count": 87}]
+
+
+class TestAudienceDemographicsReport:
+    def test_flattens_breakdown_into_segment_rows(self):
+        def http(method, url, token, params=None):
+            assert url.endswith("/178414/insights")
+            assert params["metric"] == "follower_demographics"
+            assert params["metric_type"] == "total_value"
+            assert params["period"] == "lifetime"
+            assert params["breakdown"] == "age"
+            return {"data": [{"name": "follower_demographics", "total_value": {
+                "breakdowns": [{"dimension_keys": ["age"], "results": [
+                    {"dimension_values": ["25-34"], "value": 300},
+                    {"dimension_values": ["35-44"], "value": 150}]}]}}]}
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.query(_spec(["segment", "value"], "AudienceDemographics"))
+        assert res.rows == [
+            {"segment": "25-34", "value": 300},
+            {"segment": "35-44", "value": 150}]
+
+    def test_rejects_unknown_breakdown(self):
+        conn = InstagramInsightsConnector(
+            _DS("instagram_insights"), http=lambda *a, **k: {})
+        with pytest.raises(ApiError) as exc:
+            conn.query(_spec(["segment", "value"], "AudienceDemographics",
+                             settings={"breakdown": "zodiac"}))
+        assert exc.value.code == ErrorCode.INVALID_SETTING
+
+    def test_unavailable_demographics_warns_not_errors(self):
+        def http(method, url, token, params=None):
+            raise ApiError(ErrorCode.UPSTREAM_ERROR, "too few followers")
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.query(_spec(["segment", "value"], "AudienceDemographics"))
+        assert res.rows == []
+        assert any("100 followers" in w for w in res.warnings)
+
+
+class TestPublishStory:
+    def test_publishes_photo_story(self):
+        calls = []
+
+        def http(method, url, token, params=None):
+            calls.append((method, url, params))
+            if url.endswith("/media"):
+                assert params["media_type"] == "STORIES"
+                assert params["image_url"] == "https://x/s.jpg"
+                return {"id": "SC1"}
+            if url.endswith("/media_publish"):
+                return {"id": "S99"}
+            raise AssertionError(url)
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.execute_action(
+            "publish_story", "178414", {"image_url": "https://x/s.jpg"})
+        assert res.after["media_id"] == "S99"
+
+    def test_story_rejects_both_or_neither_url(self):
+        conn = InstagramInsightsConnector(
+            _DS("instagram_insights"), http=lambda *a, **k: {})
+        with pytest.raises(ApiError) as exc:
+            conn.execute_action("publish_story", "178414", {})
+        assert exc.value.code == ErrorCode.INVALID_ACTION_PARAMS
+        with pytest.raises(ApiError):
+            conn.execute_action("publish_story", "178414",
+                                {"image_url": "a", "video_url": "b"})
+
+    def test_story_dry_run_builds_container_but_does_not_publish(self):
+        calls = []
+
+        def http(method, url, token, params=None):
+            calls.append(url)
+            if url.endswith("/media"):
+                return {"id": "SC1"}
+            raise AssertionError(f"should not publish: {url}")
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.execute_action(
+            "publish_story", "178414", {"image_url": "https://x/s.jpg"},
+            dry_run=True)
+        assert res.details["applied"] is False
+        assert not any(u.endswith("/media_publish") for u in calls)
+
+
+class TestSetCommentsEnabled:
+    def test_disable_posts_comment_enabled_false(self):
+        seen = {}
+
+        def http(method, url, token, params=None):
+            seen["method"] = method
+            seen["url"] = url
+            seen["params"] = params
+            return {"success": True}
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.execute_action(
+            "set_comments_enabled", "178414",
+            {"media_id": "M1", "enabled": False})
+        assert seen["method"] == "POST"
+        assert seen["url"].endswith("/M1")
+        assert seen["params"] == {"comment_enabled": "false"}
+        assert res.after["comment_enabled"] is False
+
+    def test_requires_enabled_flag(self):
+        conn = InstagramInsightsConnector(
+            _DS("instagram_insights"), http=lambda *a, **k: {})
+        with pytest.raises(ApiError) as exc:
+            conn.execute_action("set_comments_enabled", "178414",
+                                {"media_id": "M1"})
+        assert exc.value.code == ErrorCode.INVALID_ACTION_PARAMS
 
 
 class TestLikeActions:

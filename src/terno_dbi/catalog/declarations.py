@@ -371,6 +371,43 @@ _APIS: List[ConnectorSpec] = [
                     help_text="The media id whose comments to list (from the "
                               "Media report).")],
             ),
+            ReportType(
+                "CommentReplies", "Replies to a comment",
+                is_date_range_required=False,
+                settings=[ReportSetting(
+                    "comment_id", label="Comment id",
+                    help_text="The comment id whose replies to list (from the "
+                              "Comments report).")],
+            ),
+            ReportType(
+                "Stories", "Active stories (last 24h)",
+                is_date_range_required=False,
+            ),
+            ReportType(
+                "TaggedMedia", "Posts you're tagged in",
+                is_date_range_required=False,
+            ),
+            ReportType(
+                "AccountProfile", "Account profile (followers, bio, …)",
+                is_date_range_required=False,
+            ),
+            ReportType(
+                "AudienceDemographics", "Audience demographics",
+                is_date_range_required=False,
+                settings=[
+                    ReportSetting(
+                        "metric", label="Audience", required=False,
+                        help_text="follower_demographics (default) or "
+                                  "engaged_audience_demographics."),
+                    ReportSetting(
+                        "breakdown", label="Breakdown", required=False,
+                        help_text="age (default), gender, city or country."),
+                    ReportSetting(
+                        "timeframe", label="Timeframe", required=False,
+                        help_text="this_week, this_month (default), prev_month, "
+                                  "last_14_days, last_30_days or last_90_days."),
+                ],
+            ),
         ],
         default_report_type="AccountInsights",
         rate_limit_per_second=50,
