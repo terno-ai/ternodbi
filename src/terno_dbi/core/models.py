@@ -1134,3 +1134,31 @@ class ConnectorWriteLog(models.Model):
     def __str__(self):
         return (f"{self.action} {self.connector_key}:{self.account_id} "
                 f"[{self.status}] @ {self.created_at:%Y-%m-%d %H:%M}")
+
+
+class ConnectorRequest(models.Model):
+    """A user's request for a connector the catalog doesn't offer yet.
+
+    `email_snapshot` keeps the requester reachable even if the user is later
+    deleted (the FK then goes null but the row survives).
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="connector_requests",
+    )
+    email_snapshot = models.EmailField(blank=True, default="")
+    organisation = models.ForeignKey(
+        CoreOrganisation, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="connector_requests",
+    )
+    connector_name = models.CharField(max_length=120)
+    use_case = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "terno_connector_request"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.connector_name} ({self.email_snapshot or 'unknown'})"

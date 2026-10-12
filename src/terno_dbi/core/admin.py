@@ -732,3 +732,31 @@ class MemoryAdmin(OrganisationFilterMixin, reversion.admin.VersionAdmin):
                 'datasource_organisation_map_json': json.dumps(form.datasource_organisation_map),
             },
         )
+
+
+@admin.register(models.ConnectorRequest)
+class ConnectorRequestAdmin(admin.ModelAdmin):
+    """Requests span every organisation, so only superusers may see them."""
+
+    list_display = ('connector_name', 'email_snapshot', 'organisation', 'created_at')
+    list_filter = ('created_at',)
+    search_fields = ('connector_name', 'email_snapshot', 'use_case',
+                     'organisation__name')
+    readonly_fields = ('user', 'email_snapshot', 'organisation', 'connector_name',
+                       'use_case', 'created_at')
+    date_hierarchy = 'created_at'
+
+    def has_module_permission(self, request):
+        return request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser

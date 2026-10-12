@@ -19,6 +19,8 @@ urlpatterns = [
     path("connectors/oauth/callback/", web.oauth_callback, name="oauth_callback"),
     # Connector gallery (session-authenticated browser API).
     path("connectors/api/", web.list_api_connectors, name="list_api_connectors"),
+    path("connectors/api/requests/", web.request_connector,
+         name="request_connector"),
     path("connectors/api/<slug:connector_key>/disconnect/",
          web.disconnect_connector, name="disconnect_connector"),
     path("connectors/api/<slug:connector_key>/accounts/",

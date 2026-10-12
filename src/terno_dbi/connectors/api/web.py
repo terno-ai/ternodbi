@@ -25,6 +25,7 @@ from terno_dbi.connectors.api.management_service import (
     ConnectorManagementError,
     ConnectorPermissionDenied,
     ConnectorNotConnected,
+    ConnectorRateLimited,
 )
 
 logger = logging.getLogger(__name__)
@@ -275,12 +276,36 @@ def connector_toggle(request, connector_key):
         return _management_error_response(exc)
 
 
+@require_http_methods(["POST"])
+def request_connector(request):
+    """POST ``{"connector_name": str, "use_case"?: str}``: ask for a new connector.
+
+    Open to any org member; validation, rate limiting and the notification
+    signal live in `management_service.create_connector_request`. CSRF-protected.
+    """
+    org = _authorised_org(request)
+    if org is None:
+        return HttpResponse("Not permitted.", status=403)
+    try:
+        body = json.loads(request.body or "{}")
+    except (json.JSONDecodeError, ValueError):
+        return HttpResponseBadRequest("Invalid JSON.")
+    try:
+        return JsonResponse(
+            management_service.create_connector_request(request.user, org, body),
+            status=201)
+    except ConnectorManagementError as exc:
+        return _management_error_response(exc)
+
+
 def _management_error_response(exc):
     """Map a management-service error onto this browser view's HTTP response."""
     if isinstance(exc, ConnectorPermissionDenied):
         return HttpResponse(str(exc), status=403)
     if isinstance(exc, ConnectorNotConnected):
         return JsonResponse({"error": str(exc)}, status=404)
+    if isinstance(exc, ConnectorRateLimited):
+        return JsonResponse({"error": str(exc)}, status=429)
     # ConnectorBadRequest or any other expected management error.
     return JsonResponse({"error": str(exc)}, status=400)
 
@@ -292,4 +317,5 @@ __all__ = [
     "disconnect_connector",
     "connector_accounts",
     "connector_toggle",
+    "request_connector",
 ]

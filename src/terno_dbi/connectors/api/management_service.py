@@ -17,6 +17,11 @@ from django.conf import settings
 from terno_dbi.services.secrets import decrypt_dict, encrypt_dict
 from terno_dbi.connectors.api import registry
 from terno_dbi.connectors.api.auth import account_selection, rbac
+from datetime import timedelta
+from django.db import transaction
+from django.utils import timezone
+from terno_dbi.connectors.api.signals import connector_requested
+
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +42,10 @@ class ConnectorNotConnected(ConnectorManagementError):
 
 class ConnectorBadRequest(ConnectorManagementError):
     """The request payload was malformed, or the provider rejected the call."""
+
+
+class ConnectorRateLimited(ConnectorManagementError):
+    """The user has made too many requests in the current window."""
 
 
 # --- authorization ----------------------------------------------------------
@@ -329,3 +338,53 @@ def set_connector_enabled(user, org, connector_key, enabled) -> dict:
     ds.enabled = bool(enabled)
     ds.save(update_fields=["enabled"])
     return {"status": "saved", "key": connector_key, "enabled": ds.enabled}
+
+
+# --- connector requests -----------------------------------------------------
+
+REQUEST_LIMIT_PER_DAY = 10
+CONNECTOR_NAME_MAX = 120
+USE_CASE_MAX = 2000
+
+
+def create_connector_request(user, org, body: dict) -> dict:
+    """Record a user's request for a connector we don't offer yet.
+
+    Any org member may request (not admin-gated). On commit, the
+    `connector_requested` signal lets the host send notification emails, so
+    ternodbi itself needs no mail configuration. Shared by the session web view
+    and the desktop proxy so both paths validate and rate-limit identically.
+    """
+
+    from terno_dbi.core.models import ConnectorRequest
+
+    if not isinstance(body, dict):
+        raise ConnectorBadRequest("Invalid request body.")
+    name = str(body.get("connector_name") or "").strip()
+    use_case = str(body.get("use_case") or "").strip()
+    if not name:
+        raise ConnectorBadRequest("Connector name is required.")
+    if len(name) > CONNECTOR_NAME_MAX:
+        raise ConnectorBadRequest(
+            f"Connector name must be at most {CONNECTOR_NAME_MAX} characters.")
+    if len(use_case) > USE_CASE_MAX:
+        raise ConnectorBadRequest(
+            f"Use case must be at most {USE_CASE_MAX} characters.")
+
+    since = timezone.now() - timedelta(days=1)
+    if ConnectorRequest.objects.filter(
+            user=user, created_at__gte=since).count() >= REQUEST_LIMIT_PER_DAY:
+        raise ConnectorRateLimited(
+            "You've sent a lot of requests today. Please try again tomorrow.")
+
+    with transaction.atomic():
+        row = ConnectorRequest.objects.create(
+            user=user,
+            email_snapshot=user.email or "",
+            organisation=org,
+            connector_name=name,
+            use_case=use_case,
+        )
+        transaction.on_commit(lambda: connector_requested.send_robust(
+            sender=ConnectorRequest, request=row))
+    return {"status": "success", "id": row.pk}
