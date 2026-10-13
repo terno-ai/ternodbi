@@ -247,8 +247,9 @@ _ACTIONS: List[Action] = [
     ),
     Action(
         "publish_video", "Publish video",
-        "Publish a video to the feed, fetched from a public URL. Instagram must "
-        "finish processing the video before it goes live.",
+        "Publish a video to the feed, fetched from a public URL. Meta now "
+        "publishes feed videos as reels, so this posts a reel shared to the feed. "
+        "Instagram must finish processing the video before it goes live.",
         schema={"type": "object",
                 "properties": {"video_url": _url_prop("video (MP4/MOV)"),
                                "caption": _CAPTION_PROP},
@@ -865,17 +866,37 @@ class InstagramInsightsConnector(ApiConnector):
                 summary=f"Would publish {label} (container {container}).",
                 details={"dry_run": True, "applied": False,
                          "creation_id": container, **(extra or {})})
-        published = self._call(
-            "POST", f"{base}/{account}/media_publish",
-            {"creation_id": container})
-        media_id = str(published.get("id") or "")
+        media_id = self._media_publish(base, account, container)
         return ActionResult(
             action="publish", account=account,
             summary=f"Published {label} (media {media_id}).",
             after={"media_id": media_id, **(extra or {})})
 
+    def _media_publish(self, base, account, container) -> str:
+        """POST media_publish; if the container isn't ready yet, wait and retry.
+
+        Facebook-Login image containers are ready synchronously, but Instagram
+        Login needs even a photo container to finish processing first — it
+        returns "media is not ready for publishing" otherwise. Retrying the whole
+        action doesn't help (it builds a new container each time), so we poll the
+        existing container to FINISHED and publish that same one.
+        """
+        try:
+            published = self._call(
+                "POST", f"{base}/{account}/media_publish",
+                {"creation_id": container})
+        except ApiError as exc:
+            msg = (exc.message or "").lower()
+            if "not ready" not in msg and "not available" not in msg:
+                raise
+            self._wait_for_container(base, container)
+            published = self._call(
+                "POST", f"{base}/{account}/media_publish",
+                {"creation_id": container})
+        return str(published.get("id") or "")
+
     def _wait_for_container(self, base, container) -> None:
-        """Poll a video/reel container until it finishes processing."""
+        """Poll a media container until it finishes processing."""
         if self._dry_run:
             return
         url = f"{base}/{container}"
@@ -886,10 +907,10 @@ class InstagramInsightsConnector(ApiConnector):
                 return
             if status == "ERROR":
                 raise ApiError(ErrorCode.UPSTREAM_ERROR,
-                               "Instagram failed to process the video.")
+                               "Instagram failed to process the media.")
             time.sleep(_CONTAINER_POLL_SECONDS)
         raise ApiError(ErrorCode.UPSTREAM_ERROR,
-                       "Video is still processing; try publishing again shortly.")
+                       "Media is still processing; try publishing again shortly.")
 
     def _publish_photo(self, base, account, params) -> ActionResult:
         image_url = _require(params, "image_url")
@@ -902,7 +923,8 @@ class InstagramInsightsConnector(ApiConnector):
         video_url = _require(params, "video_url")
         container = self._create_container(
             base, account,
-            {"media_type": "VIDEO", "video_url": video_url,
+            {"media_type": "REELS", "video_url": video_url,
+             "share_to_feed": "true",
              "caption": params.get("caption") or ""})
         self._wait_for_container(base, container)
         return self._publish_container(base, account, container, label="video")

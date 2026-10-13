@@ -364,6 +364,32 @@ class TestWriteActions:
         assert res.after["media_id"] == "MEDIA1"
         assert any(u.endswith("/media_publish") for _, u, _ in calls)
 
+    def test_publish_photo_retries_when_container_not_ready(self):
+        # Instagram Login returns "media is not ready for publishing" until the
+        # container finishes processing; publish must poll and retry, not fail.
+        state = {"publish_attempts": 0}
+
+        def http(method, url, token, params=None):
+            if url.endswith("/media"):
+                return {"id": "C1"}
+            if url.endswith("/media_publish"):
+                state["publish_attempts"] += 1
+                if state["publish_attempts"] == 1:
+                    raise ApiError(
+                        ErrorCode.UPSTREAM_ERROR,
+                        "Instagram API error: Media ID is not available The "
+                        "media is not ready for publishing")
+                return {"id": "MEDIA1"}
+            if url.endswith("/C1") and params.get("fields") == "status_code":
+                return {"status_code": "FINISHED"}
+            raise AssertionError(url)
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.execute_action(
+            "publish_photo", self.ACCOUNT, {"image_url": "https://x/p.jpg"})
+        assert state["publish_attempts"] == 2          # retried after polling
+        assert res.after["media_id"] == "MEDIA1"
+
     def test_publish_photo_dry_run_builds_container_but_does_not_publish(self):
         calls = []
 
