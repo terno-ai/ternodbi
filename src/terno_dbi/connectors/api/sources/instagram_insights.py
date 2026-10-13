@@ -115,6 +115,8 @@ _COMMENT_FIELDS: List[Field] = [
 _COMMENT_API_FIELDS = ["id", "text", "username", "timestamp", "like_count",
                        "hidden"]
 
+_COMMENT_CORE_FIELDS = ["id", "text", "timestamp"]
+
 # --- Stories (your own, last 24h) ------------------------------------------
 # Stories live for 24h, so this report has no date range — it returns whatever
 # is currently active. Insight values come from the per-story `/insights` edge.
@@ -463,23 +465,46 @@ class InstagramInsightsConnector(ApiConnector):
             return self._run_demographics(spec, catalogue)
         return self._run_account_insights(spec, catalogue)
 
+    def _fetch_comment_edge(self, url, max_rows, warnings) -> List[Dict[str, Any]]:
+        """GET a comments/replies edge, resilient to the Instagram-Login host.
+
+        `graph.instagram.com` can return an empty list when the extra comment
+        fields (username/like_count/hidden) are requested, even though the
+        comments exist. If the full-field request comes back empty, retry with
+        the core fields the docs guarantee on both hosts.
+        """
+        data = self._call(
+            "GET", url,
+            {"fields": ",".join(_COMMENT_API_FIELDS), "limit": max_rows})
+        objs = data.get("data", [])
+        if objs:
+            return objs
+        core = self._call(
+            "GET", url,
+            {"fields": ",".join(_COMMENT_CORE_FIELDS), "limit": max_rows})
+        objs = core.get("data", [])
+        if objs:
+            warnings.append(
+                "Some comment fields (username, like_count, hidden) aren't "
+                "available on this connection (Instagram Login) and were "
+                "returned empty.")
+        return objs
+
     def _run_comments(self, spec: QuerySpec, catalogue) -> QueryResult:
         media_id = str(spec.settings.get("media_id") or "").strip()
         if not media_id:
             raise missing_setting("media_id", "Post/media id", "Comments")
         requested = list(spec.fields) or ["id", "text", "username", "timestamp"]
         base = self._base()
-        data = self._call(
-            "GET", f"{base}/{media_id}/comments",
-            {"fields": ",".join(_COMMENT_API_FIELDS), "limit": spec.max_rows})
-        rows = []
-        for obj in data.get("data", []):
-            rows.append({name: obj.get(name) for name in requested})
+        warnings: List[str] = []
+        objs = self._fetch_comment_edge(
+            f"{base}/{media_id}/comments", spec.max_rows, warnings)
+        rows = [{name: obj.get(name) for name in requested} for obj in objs]
         return QueryResult(
             requested_field_ids=requested,
             rows=rows,
             row_count=len(rows),
-            warnings=[],
+            warnings=warnings,
         )
 
     def _run_comment_replies(self, spec: QuerySpec, catalogue) -> QueryResult:
@@ -488,16 +513,15 @@ class InstagramInsightsConnector(ApiConnector):
             raise missing_setting("comment_id", "Comment id", "CommentReplies")
         requested = list(spec.fields) or ["id", "text", "username", "timestamp"]
         base = self._base()
-        data = self._call(
-            "GET", f"{base}/{comment_id}/replies",
-            {"fields": ",".join(_COMMENT_API_FIELDS), "limit": spec.max_rows})
-        rows = [{name: obj.get(name) for name in requested}
-                for obj in data.get("data", [])]
+        warnings: List[str] = []
+        objs = self._fetch_comment_edge(
+            f"{base}/{comment_id}/replies", spec.max_rows, warnings)
+        rows = [{name: obj.get(name) for name in requested} for obj in objs]
         return QueryResult(
             requested_field_ids=requested,
             rows=rows,
             row_count=len(rows),
-            warnings=[],
+            warnings=warnings,
         )
 
     def _run_stories(self, spec: QuerySpec, catalogue) -> QueryResult:

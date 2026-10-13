@@ -502,6 +502,23 @@ class TestCommentsReport:
             {"id": "C2", "text": "👍", "username": "bob"},
         ]
 
+    def test_comments_falls_back_to_core_fields_when_full_set_empty(self):
+        # Instagram Login returns an empty list when username/like_count/hidden
+        # are requested; the report retries with core fields and still gets rows.
+        def http(method, url, token, params=None):
+            assert url.endswith("/M1/comments")
+            if "username" in params["fields"]:
+                return {"data": []}            # full field set -> empty on IG Login
+            return {"data": [
+                {"id": "C1", "text": "hi", "timestamp": "2026-10-01T00:00:00+0000"}]}
+
+        conn = InstagramInsightsConnector(
+            _DS("instagram_insights", login_method="instagram"), http=http)
+        res = conn.query(_spec(
+            ["id", "text", "username"], "Comments", settings={"media_id": "M1"}))
+        assert res.rows == [{"id": "C1", "text": "hi", "username": None}]
+        assert any("Instagram Login" in w for w in res.warnings)
+
     def test_comments_requires_media_id(self):
         conn = InstagramInsightsConnector(
             _DS("instagram_insights"), http=lambda *a, **k: {})
