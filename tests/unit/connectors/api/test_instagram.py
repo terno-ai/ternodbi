@@ -364,6 +364,29 @@ class TestWriteActions:
         assert res.after["media_id"] == "MEDIA1"
         assert any(u.endswith("/media_publish") for _, u, _ in calls)
 
+    def test_publish_video_uses_reels_path_shared_to_feed(self):
+        # Meta deprecated media_type=VIDEO for single feed posts; a feed video is
+        # published as a reel shared to the feed.
+        seen = {}
+
+        def http(method, url, token, params=None):
+            if url.endswith("/media"):
+                seen.update(params)
+                return {"id": "C1"}
+            if url.endswith("/C1") and params.get("fields") == "status_code":
+                return {"status_code": "FINISHED"}
+            if url.endswith("/media_publish"):
+                return {"id": "MEDIA1"}
+            raise AssertionError(url)
+
+        conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
+        res = conn.execute_action(
+            "publish_video", self.ACCOUNT,
+            {"video_url": "https://x/v.mp4", "caption": "hi"})
+        assert seen["media_type"] == "REELS"
+        assert seen["share_to_feed"] == "true"
+        assert res.after["media_id"] == "MEDIA1"
+
     def test_publish_photo_retries_when_container_not_ready(self):
         # Instagram Login returns "media is not ready for publishing" until the
         # container finishes processing; publish must poll and retry, not fail.

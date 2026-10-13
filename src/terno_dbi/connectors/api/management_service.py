@@ -11,6 +11,7 @@ caller to its own response format.
 from __future__ import annotations
 
 import logging
+import unicodedata
 
 from django.conf import settings
 
@@ -364,6 +365,10 @@ def create_connector_request(user, org, body: dict) -> dict:
     use_case = str(body.get("use_case") or "").strip()
     if not name:
         raise ConnectorBadRequest("Connector name is required.")
+    # The name is a single line and ends up in email subjects, where a newline
+    # would be header injection (Django refuses to send it at all).
+    if any(unicodedata.category(ch)[0] == "C" for ch in name):
+        raise ConnectorBadRequest("Connector name contains invalid characters.")
     if len(name) > CONNECTOR_NAME_MAX:
         raise ConnectorBadRequest(
             f"Connector name must be at most {CONNECTOR_NAME_MAX} characters.")

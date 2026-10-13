@@ -76,6 +76,9 @@ def test_use_case_is_optional(org, member):
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("body", [{}, {"connector_name": "   "}, {"connector_name": "x" * 121},
+                                  {"connector_name": "TikTok\r\nBcc: x@evil.test"},
+                                  {"connector_name": "Tik\x00Tok"},
+                                  {"connector_name": "Tik\u202eTok"},
                                   {"connector_name": "X", "use_case": "y" * 2001}])
 def test_invalid_input_is_400(org, member, body):
     from terno_dbi.core.models import ConnectorRequest
@@ -105,3 +108,12 @@ def test_rate_limited_per_user(org, member):
             _post(member, org, {"connector_name": f"C{i}"})).status_code == 201
     resp = web.request_connector(_post(member, org, {"connector_name": "One more"}))
     assert resp.status_code == 429
+
+
+@pytest.mark.django_db
+def test_use_case_may_span_lines(org, member):
+    from terno_dbi.core.models import ConnectorRequest
+    resp = web.request_connector(_post(member, org, {
+        "connector_name": "TikTok Ads", "use_case": "Line one\nLine two"}))
+    assert resp.status_code == 201
+    assert ConnectorRequest.objects.get().use_case == "Line one\nLine two"
