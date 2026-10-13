@@ -144,11 +144,11 @@ class TestInsights:
             assert params["period"] == "day"
             return {"data": [
                 {"name": "reach", "total_value": {"value": 8078}},
-                {"name": "profile_views", "total_value": {"value": 42}}]}
+                {"name": "accounts_engaged", "total_value": {"value": 42}}]}
 
         conn = InstagramInsightsConnector(_DS("instagram_insights"), http=http)
-        res = conn.query(_spec(["reach", "profile_views"], "AccountTotals"))
-        assert res.rows == [{"reach": 8078, "profile_views": 42}]
+        res = conn.query(_spec(["reach", "accounts_engaged"], "AccountTotals"))
+        assert res.rows == [{"reach": 8078, "accounts_engaged": 42}]
 
     def test_media_report_fetches_per_media_insights(self):
         def http(method, url, token, params=None):

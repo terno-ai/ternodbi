@@ -54,10 +54,9 @@ _ACCOUNT_DIMENSIONS: List[Field] = [
 _ACCOUNT_TOTAL_METRICS: List[Field] = [
     Field("reach", "Reach", "metric", "Unique accounts reached in the range.",
           data_type="integer"),
-    Field("profile_views", "Profile views", "metric",
-          "Times the profile was viewed.", data_type="integer"),
-    Field("website_clicks", "Website clicks", "metric",
-          "Taps on the website link in the profile.", data_type="integer"),
+    Field("profile_links_taps", "Profile link taps", "metric",
+          "Taps on the profile's contact buttons (website, call, email, text). "
+          "The v22 replacement for website_clicks.", data_type="integer"),
     Field("accounts_engaged", "Accounts engaged", "metric",
           "Accounts that interacted with the profile.", data_type="integer"),
     Field("total_interactions", "Interactions", "metric",
@@ -706,10 +705,9 @@ class InstagramInsightsConnector(ApiConnector):
             try:
                 data = self._call("GET", url, {**base_params, "metric": metric})
                 series.extend(data.get("data", []))
-            except ApiError:
+            except ApiError as exc:
                 warnings.append(
-                    f"Instagram metric '{metric}' is unavailable for this "
-                    f"account/API version and was skipped.")
+                    f"Instagram metric '{metric}' was skipped — {exc.message}")
         return series
 
     def _fetch_account_totals(self, base, account, metrics, base_params,
@@ -727,10 +725,9 @@ class InstagramInsightsConnector(ApiConnector):
             try:
                 data = self._call("GET", url, {**base_params, "metric": metric})
                 out.update(_total_values(data))
-            except ApiError:
+            except ApiError as exc:
                 warnings.append(
-                    f"Instagram metric '{metric}' is unavailable for this "
-                    f"account/API version and was skipped.")
+                    f"Instagram metric '{metric}' was skipped — {exc.message}")
         return out
 
     def _run_media(self, spec: QuerySpec, catalogue) -> QueryResult:
@@ -778,10 +775,10 @@ class InstagramInsightsConnector(ApiConnector):
             try:
                 data = self._call("GET", url, {"metric": metric})
                 out.update(_insight_series_to_values(data))
-            except ApiError:
+            except ApiError as exc:
                 warnings.append(
-                    f"Instagram media metric '{metric}' was unavailable for one "
-                    f"or more posts and was skipped.")
+                    f"Instagram media metric '{metric}' was skipped — "
+                    f"{exc.message}")
         return out
 
     # -- write actions ------------------------------------------------------

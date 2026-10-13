@@ -14,6 +14,7 @@ modules stay small and focused on their own reports.
 from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 
+from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
 from terno_dbi.connectors.api.model.types import Account
 
 # Instagram is part of the Meta Graph API; keep the version pinned with meta_ads.
@@ -37,7 +38,20 @@ def default_http(method: str, url: str, token: str,
         params=params or {}, timeout=30)
     if resp.status_code == 401:
         raise AuthError()
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        detail = ""
+        try:
+            err = resp.json().get("error", {}) or {}
+            detail = err.get("message") or ""
+            if err.get("error_user_msg"):
+                detail = f"{detail} {err['error_user_msg']}".strip()
+        except Exception:
+            detail = (resp.text or "")[:300]
+        raise ApiError(
+            ErrorCode.UPSTREAM_ERROR,
+            f"Instagram API error: {detail}" if detail
+            else f"Instagram API error (HTTP {resp.status_code}).",
+            details={"status": resp.status_code})
     # A DELETE may return an empty body; treat that as success.
     return resp.json() if resp.content else {"success": True}
 
