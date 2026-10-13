@@ -92,9 +92,11 @@ _MEDIA_FIELDS: List[Field] = [
           data_type="integer"),
     Field("saved", "Saves", "metric", "Times the post was saved.",
           data_type="integer"),
+    Field("profile_visits", "Profile visits", "metric",
+          "Profile visits driven by this post.", data_type="integer"),
 ]
 # The subset that comes from the per-media `insights` edge, not plain fields.
-_MEDIA_INSIGHT_IDS = frozenset({"reach", "saved"})
+_MEDIA_INSIGHT_IDS = frozenset({"reach", "saved", "profile_visits"})
 _MEDIA_PLAIN_IDS = frozenset(
     f.id for f in _MEDIA_FIELDS) - _MEDIA_INSIGHT_IDS
 
