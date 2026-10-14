@@ -165,3 +165,41 @@ def require_scope(*required_scopes):
             return view_func(request, *args, **kwargs)
         return _wrapped_view
     return decorator
+
+
+def _target_datasource(request):
+    """The datasource a write is aimed at, whichever kind of target resolved it."""
+    if hasattr(request, "resolved_datasource"):
+        return request.resolved_datasource
+    if hasattr(request, "resolved_table"):
+        return request.resolved_table.data_source
+    if hasattr(request, "resolved_column"):
+        return request.resolved_column.table.data_source
+    return None
+
+
+def reject_global_datasource(view_func):
+    """Refuse writes to a global (shared demo) datasource.
+
+    A global datasource is shared by every organisation, so a token from any one
+    org must not rename, describe, sync or delete it for all of them. The host
+    app removes one per organisation instead; through this API it is read-only.
+
+    Note: This decorator must be used AFTER @require_service_auth().
+    """
+    @wraps(view_func)
+    def _wrapped_view(request, *args, **kwargs):
+        ds = _target_datasource(request)
+        if ds is not None and ds.is_global:
+            logger.warning(
+                "Write refused: token '%s' targeted global datasource id=%d",
+                request.service_token.name, ds.id,
+            )
+            return JsonResponse(
+                {"error": f"Datasource '{ds.display_name}' is a shared demo "
+                          f"datasource and is read-only; it cannot be changed "
+                          f"or deleted."},
+                status=403,
+            )
+        return view_func(request, *args, **kwargs)
+    return _wrapped_view

@@ -7,7 +7,7 @@ from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 from terno_dbi.core import models
 from terno_dbi.services.validation import validate_datasource_input
-from terno_dbi.decorators import require_service_auth, require_scope
+from terno_dbi.decorators import reject_global_datasource, require_service_auth, require_scope
 from terno_dbi.services import schema_utils
 from terno_dbi.services.shield import delete_cache
 from terno_dbi.services.query import execute_native_sql
@@ -268,6 +268,7 @@ def create_datasource(request):
 @csrf_exempt
 @require_service_auth()
 @require_scope('admin:write')
+@reject_global_datasource
 @require_http_methods(["PATCH"])
 def update_datasource(request, datasource_identifier):
     ds = request.resolved_datasource
@@ -312,6 +313,7 @@ def update_datasource(request, datasource_identifier):
 @csrf_exempt
 @require_service_auth()
 @require_scope('admin:write')
+@reject_global_datasource
 @require_http_methods(["DELETE"])
 def delete_datasource(request, datasource_identifier):
     ds = request.resolved_datasource
@@ -329,6 +331,7 @@ def delete_datasource(request, datasource_identifier):
 @csrf_exempt
 @require_service_auth()
 @require_scope('admin:write')
+@reject_global_datasource
 @require_http_methods(["PATCH"])
 def update_table(request, table_id):
     table = request.resolved_table
@@ -381,6 +384,7 @@ def update_table(request, table_id):
 @csrf_exempt
 @require_service_auth()
 @require_scope('admin:write')
+@reject_global_datasource
 @require_http_methods(["PATCH"])
 def update_column(request, column_id):
     column = request.resolved_column
@@ -524,6 +528,7 @@ def validate_connection(request):
 @csrf_exempt
 @require_service_auth()
 @require_scope('admin:sync')
+@reject_global_datasource
 @require_http_methods(["POST"])
 def sync_metadata(request, datasource_identifier):
     ds = request.resolved_datasource

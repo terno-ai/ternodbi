@@ -173,9 +173,13 @@ def test_the_provisioner_copy_matches():
     if not copy.is_file():
         pytest.skip("terno-web checkout not present")
 
+    from terno_dbi.oauth.login_redirect import AUTHORIZE_PATHS
+
     body = copy.read_text()
+    # Built from this module's constant so a path added here must be added there.
+    paths = ", ".join(f'"{p}"' for p in AUTHORIZE_PATHS)
     for token in ("SESSION_KEY = \"terno_connector_next\"",
-                  "AUTHORIZE_PATHS = (\"/oauth/authorize\",)",
+                  f"AUTHORIZE_PATHS = ({paths})",
                   'url.startswith("//")',
                   "def pop_next", "class ConnectorNextMiddleware"):
         assert token in body, f"provisioner copy is missing: {token}"
