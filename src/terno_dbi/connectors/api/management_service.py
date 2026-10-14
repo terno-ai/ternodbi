@@ -228,16 +228,25 @@ def disconnect_connector(user, org, connector_key) -> dict:
         raise ConnectorNotConnected("Not connected.")
 
     for ds in rows:
-        ds.connection_json = {}
-        ds.auth_status = DataSource.AuthStatus.NOT_AUTHENTICATED
-        fields = ["connection_json", "auth_status"]
-        if hasattr(ds, "auth_error"):
-            ds.auth_error = ""
-            fields.append("auth_error")
-        ds.save(update_fields=fields)
+        clear_connection(ds)
     logger.info("disconnected API connector %r for org %s (%d row(s))",
                 connector_key, org.id, len(rows))
     return {"status": "disconnected", "key": connector_key}
+
+
+def clear_connection(ds) -> None:
+    """Soft-disconnect one API datasource: drop its stored OAuth tokens and mark
+    it not-authenticated, keeping the row so its memory, account selections and
+    history survive. Reconnecting the same connector reuses this row."""
+    from terno_dbi.core.models import DataSource
+
+    ds.connection_json = {}
+    ds.auth_status = DataSource.AuthStatus.NOT_AUTHENTICATED
+    fields = ["connection_json", "auth_status"]
+    if hasattr(ds, "auth_error"):
+        ds.auth_error = ""
+        fields.append("auth_error")
+    ds.save(update_fields=fields)
 
 
 def _require_managed_ds(user, org, connector_key):

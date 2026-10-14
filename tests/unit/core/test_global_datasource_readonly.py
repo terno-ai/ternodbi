@@ -120,3 +120,32 @@ class TestGlobalDatasourceIsReadOnly:
         assert r.status_code == 200
         assert not DataSource.objects.filter(id=db_ds.id).exists()
 
+
+
+# --- deleting an API connector disconnects it instead ----------------------
+
+@pytest.mark.django_db
+def test_delete_api_connector_soft_disconnects(client, org):
+    from terno_dbi.core.models import ConnectorCatalog
+    from terno_dbi.services.secrets import encrypt_dict
+
+    cat, _ = ConnectorCatalog.objects.get_or_create(
+        key="google_ads",
+        defaults=dict(display_name="Google Ads", family="api", auth_type="oauth"),
+    )
+    ds = DataSource.objects.create(
+        display_name="Google Ads", type="google_ads", connection_str="",
+        organisation=org, catalog=cat,
+        connection_json=encrypt_dict({"ACCESS_TOKEN": "x"}),
+        auth_status=DataSource.AuthStatus.CONNECTED,
+    )
+    key = "dbi_admin_softdelete"
+    _token(org, ServiceToken.TokenType.ADMIN, key, ADMIN_SCOPES)
+
+    r = client.delete(f"/api/admin/datasources/{ds.id}/delete/", **_auth(key))
+
+    assert r.status_code == 200
+    assert "disconnected" in r.json()["message"]
+    ds.refresh_from_db()  # row kept, so its memory and selections survive
+    assert ds.auth_status == DataSource.AuthStatus.NOT_AUTHENTICATED
+    assert (ds.decrypted_connection_json or {}) == {}

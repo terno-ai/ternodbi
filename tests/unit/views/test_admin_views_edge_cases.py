@@ -164,6 +164,7 @@ class TestDeleteDatasourceEdgeCases:
         request = req_factory.delete('/')
         ds = MagicMock(spec=DataSource)
         ds.display_name = "DS"
+        ds.is_api = False
         request.resolved_datasource = ds
         
         func = delete_datasource

@@ -12,6 +12,7 @@ from terno_dbi.services import schema_utils
 from terno_dbi.services.shield import delete_cache
 from terno_dbi.services.query import execute_native_sql
 from terno_dbi.mcp.setup_link import _datasource_admin_path, setup_handoff
+from terno_dbi.connectors.api.management_service import clear_connection
 
 logger = logging.getLogger(__name__)
 
@@ -320,6 +321,15 @@ def delete_datasource(request, datasource_identifier):
     logger.info("Delete datasource request: id=%d, name='%s'", ds.id, ds.display_name)
 
     name = ds.display_name
+    if ds.is_api:
+        clear_connection(ds)
+        return JsonResponse({
+            "status": "success",
+            "message": f"Connector '{name}' has been disconnected. Its settings, "
+                       f"memories and history are kept; reconnect it in Terno "
+                       f"to use it again."
+        })
+
     ds.delete()
 
     return JsonResponse({
