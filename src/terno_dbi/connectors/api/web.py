@@ -12,6 +12,7 @@ must not be enough to connect a source to another organisation.
 from __future__ import annotations
 import json
 import logging
+import re
 from django.conf import settings
 from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import redirect
@@ -38,6 +39,29 @@ _CALLBACK_ERRORS = {
     # ask for, so Zoho offered no Accept button at all.
     "no_org": "This Zoho account has no Zoho CRM organisation. Sign in with an "
               "account that uses Zoho CRM, then connect again.",
+    # Microsoft: no such resource in the user's directory — for Dynamics 365, a
+    # mistyped environment URL or one belonging to another organisation.
+    "invalid_resource": "Microsoft could not find that Dynamics 365 environment "
+                        "in your organisation. Check the environment URL (the "
+                        "address shown when Dynamics 365 is open, e.g. "
+                        "contoso.crm.dynamics.com) and connect again.",
+}
+
+# Microsoft reports most failures with a generic `error` (invalid_client,
+# invalid_request); the cause is the AADSTS code in `error_description`.
+_AADSTS_RE = re.compile(r"\bAADSTS\d+\b")
+_AADSTS_ERRORS = {
+    # The app registration does not list the API the connector asks for.
+    "AADSTS650057": "The Microsoft app registration is missing the permission "
+                    "this connector needs. In Entra, open App registrations → "
+                    "the app → API permissions and add it (for Dynamics 365: "
+                    "Dynamics CRM → user_impersonation), then connect again.",
+    # The signing-in user's organisation has no service principal for that API.
+    "AADSTS650052": "Your Microsoft organisation does not have the service this "
+                    "connector uses (for Dynamics 365: no Dynamics 365 "
+                    "environment). Sign in with an account from the "
+                    "organisation that owns it, or ask its administrator to "
+                    "consent to the app, then connect again.",
 }
 
 
@@ -146,6 +170,9 @@ def connect(request):
             redirect_uri=_callback_uri(request),
             organisation=org,
             return_to=return_to,
+            # The host for providers with per-instance URLs: a Shopify store,
+            # a Salesforce My Domain, a Dynamics 365 environment. Named `shop`
+            # for compatibility.
             instance=request.GET.get("shop", ""),
             login_method=login_method,
         )
@@ -163,7 +190,13 @@ def oauth_callback(request):
 
     error = request.GET.get("error")
     if error:
-        message = _CALLBACK_ERRORS.get(error) or f"Authorization was declined: {escape(error)}"
+        description = request.GET.get("error_description", "")[:1000]
+        logger.warning("Connector OAuth declined: %s - %s", error, description)
+        match = _AADSTS_RE.search(description)
+        aadsts = match.group(0) if match else ""
+        message = (_AADSTS_ERRORS.get(aadsts) or _CALLBACK_ERRORS.get(error)
+                   or f"Authorization was declined: {escape(error)}"
+                   + (f" ({aadsts})" if aadsts else ""))
         return HttpResponse(message, status=400)
 
     state = request.GET.get("state", "")

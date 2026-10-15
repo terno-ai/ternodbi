@@ -29,9 +29,10 @@ class OAuthProvider:
     # uses `expiring=1` here to request an expiring offline token — non-expiring
     # offline tokens are no longer accepted by the Admin API.
     extra_token_params: Dict[str, str] = field(default_factory=dict)
-    # When True, `authorization_url` and `token_url` are templates containing
-    # `{instance}` (e.g. Shopify's per-store domain) that the flow fills in from
-    # a store name the user supplies before connecting.
+    # When True, `authorization_url`, `token_url` and `scope` are templates
+    # containing `{instance}` (Shopify's per-store domain, a Salesforce My
+    # Domain, a Dynamics 365 environment host) that the flow fills in from a
+    # host the user supplies before connecting.
     requires_instance: bool = False
     # When set, the provider names the user's regional server only at the
     # callback, in this query parameter (Zoho's `accounts-server`). `token_url`
@@ -174,6 +175,27 @@ _MICROSOFT = OAuthProvider(
 )
 
 
+_DYNAMICS365 = OAuthProvider(
+    name="dynamics365",
+    # `organizations`, not `common`: Dataverse has no personal-account users.
+    authorization_url="https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize",
+    token_url="https://login.microsoftonline.com/organizations/oauth2/v2.0/token",
+    # Every Dataverse environment is its own resource, so the scope names the one
+    # the user chose ({instance} is '<org>.crm<N>.dynamics.com').
+    # `user_impersonation` is Dataverse's only delegated permission and is both
+    # the read and the write scope: it acts as the signed-in user, so reads and
+    # the connector's create/update writes reach whatever their Dynamics 365
+    # security roles allow. There is no narrower read-only or write-only scope.
+    # `openid email` names the connected user; `offline_access` issues the
+    # refresh token.
+    scope="https://{instance}/user_impersonation offline_access openid email",
+    client_id_env="TERNO_DYNAMICS365_CLIENT_ID",
+    client_secret_env="TERNO_DYNAMICS365_CLIENT_SECRET",
+    use_pkce=True,
+    requires_instance=True,
+)
+
+
 _SHOPIFY = OAuthProvider(
     name="shopify",
     # Per-store URLs: {instance} is filled with '<store>.myshopify.com'.
@@ -277,6 +299,7 @@ _PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
     "linkedin_ads": _LINKEDIN,
     "salesforce": _SALESFORCE,
     "microsoft_ads": _MICROSOFT,
+    "dynamics365": _DYNAMICS365,
     "hubspot": _HUBSPOT,
     "amazon_ads": _AMAZON_ADS,
     "shopify": _SHOPIFY,

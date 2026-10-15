@@ -22,7 +22,7 @@ import re
 import secrets as _secrets
 import time
 from datetime import timedelta
-from typing import Any, Callable, Dict, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Mapping, NamedTuple, Optional, Tuple
 from urllib.parse import urlencode
 from django.utils import timezone
 import requests
@@ -57,8 +57,9 @@ def start_authorization(
     can tell the user "this deployment isn't set up for X" rather than sending
     them to a broken consent screen.
 
-    `instance` is the per-store host for providers whose URLs are templated
-    (Shopify) — validated and required for those, ignored for the rest.
+    `instance` is the per-store or per-environment host for providers whose URLs
+    are templated — validated for those (required for Shopify and Dynamics 365,
+    optional for Salesforce), ignored for the rest.
     """
 
     from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
@@ -79,9 +80,11 @@ def start_authorization(
         )
 
     instance = _validated_instance(provider, connector_key, instance)
-    authorization_url = (provider.authorization_url.format(instance=instance)
-                         if provider.requires_instance
-                         else provider.authorization_url)
+    authorization_url, scope = (
+        (provider.authorization_url.format(instance=instance),
+         provider.scope.format(instance=instance))
+        if provider.requires_instance
+        else (provider.authorization_url, provider.scope))
 
     verifier, challenge = _pkce_pair() if provider.use_pkce else ("", "")
     state = _secrets.token_urlsafe(32)
@@ -105,8 +108,8 @@ def start_authorization(
         "redirect_uri": redirect_uri,
         "state": state,
     }
-    if provider.scope:
-        params["scope"] = provider.scope
+    if scope:
+        params["scope"] = scope
     if provider.use_pkce:
         params["code_challenge"] = challenge
         params["code_challenge_method"] = "S256"
@@ -118,10 +121,34 @@ def start_authorization(
     }
 
 
+class _InstanceRule(NamedTuple):
+    pattern: "re.Pattern[str]"   # the full host, after normalising
+    suffix: str                  # appended to a bare name
+    noun: str
+    example: str
+    canonical: Callable[["re.Match[str]"], str]
+
+
 # Hosts an instance-templated provider may be called at. The instance goes into
-# a URL we request server-side, so each of these is an SSRF guard, not a
-# convenience check — only hosts the provider actually serves are ever allowed.
-_MYSHOPIFY_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,59}\.myshopify\.com$")
+# a URL we request server-side — and into the Dynamics 365 scope — so each of
+# these is an SSRF guard, not a convenience check: only hosts the provider
+# actually serves are ever allowed.
+_INSTANCE_RULES: Dict[str, _InstanceRule] = {
+    # A Shopify store: '<store>.myshopify.com'.
+    "shopify": _InstanceRule(
+        re.compile(r"^[a-z0-9][a-z0-9-]{0,59}\.myshopify\.com$"),
+        ".myshopify.com", "store", "your-store.myshopify.com",
+        lambda m: m.group(0)),
+    # A Dataverse environment: '<org>.crm.dynamics.com', or '.crm<N>.' outside
+    # North America (crm4 Europe, crm11 UK, …). The Web API host
+    # '<org>.api.crm<N>.dynamics.com' names the same environment and is
+    # normalised to it, since the token's audience is the environment itself.
+    "dynamics365": _InstanceRule(
+        re.compile(r"^([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.api)?"
+                   r"\.(crm\d{0,2})\.dynamics\.com$"),
+        ".crm.dynamics.com", "environment URL", "contoso.crm.dynamics.com",
+        lambda m: f"{m.group(1)}.{m.group(2)}.dynamics.com"),
+}
 # Salesforce's two login hosts, or any My Domain / sandbox host, e.g.
 # 'acme.develop.my.salesforce.com'.
 _SALESFORCE_DEFAULT_LOGIN = "login.salesforce.com"
@@ -133,13 +160,14 @@ def _validated_instance(provider, connector_key: str, instance: str) -> str:
     from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
     if not provider.requires_instance:
         return ""
-    host = (instance or "").strip().lower()
+    # Accept a pasted URL: the scheme and path are dropped.
+    host = re.sub(r"^https?://", "", (instance or "").strip().lower())
+    host = re.split(r"[/?#]", host, maxsplit=1)[0]
 
     if connector_key == "salesforce":
         # Most users give nothing: login.salesforce.com works out which org they
         # belong to, and the token response names the org's API host. A custom
         # (My Domain) host is only for orgs that block that generic login.
-        host = re.sub(r"^https?://", "", host).split("/", 1)[0]
         if not host:
             return _SALESFORCE_DEFAULT_LOGIN
         if not _SALESFORCE_RE.match(host):
@@ -151,16 +179,37 @@ def _validated_instance(provider, connector_key: str, instance: str) -> str:
             )
         return host
 
-    # Accept a bare store name too, then normalise to the full host.
+    rule = _INSTANCE_RULES[provider.name]
+    # Accept a bare name too, then normalise to the full host.
     if host and "." not in host:
-        host = f"{host}.myshopify.com"
-    if not _MYSHOPIFY_RE.match(host):
+        host += rule.suffix
+    match = rule.pattern.match(host)
+    if not match:
         raise ApiError(
             ErrorCode.UPSTREAM_ERROR,
-            f"{connector_key} needs a valid store, e.g. 'your-store.myshopify.com'.",
+            f"{connector_key} needs a valid {rule.noun}, e.g. '{rule.example}'.",
             retriable=False,
         )
-    return host
+    return rule.canonical(match)
+
+
+def needs_instance(connector_key: str) -> bool:
+    """Whether connecting cannot start until the user names a host.
+
+    True for a Shopify store or a Dynamics 365 environment; False for a provider
+    with fixed URLs, and for Salesforce, whose custom domain is optional.
+    """
+    from terno_dbi.connectors.api.model.errors import ApiError
+    from terno_dbi.connectors.api.auth.providers import get_provider
+
+    provider = get_provider(connector_key)
+    if provider is None or not provider.requires_instance:
+        return False
+    try:
+        _validated_instance(provider, connector_key, "")
+    except ApiError:
+        return True
+    return False
 
 
 def _callback_instance(provider, connector_key: str,
@@ -235,8 +284,9 @@ def _store_tokens(data_source, token_response: Dict[str, Any],
     """Encrypt and persist the token bundle onto the datasource.
 
     Preserves an existing refresh token when the provider omits one on refresh
-    (Google returns it only on the first consent). `instance` (e.g. a Shopify
-    store domain) is persisted so a per-store connector can build its API URLs.
+    (Google returns it only on the first consent). `instance` (a Shopify store
+    domain, a Dynamics 365 environment host) is persisted so the connector can
+    build its API URLs.
     """
     from terno_dbi.core.models import DataSource
     existing = decrypt_dict(data_source.connection_json) or {}
@@ -591,6 +641,7 @@ def make_ensure_token(data_source) -> Callable[[], None]:
 __all__ = [
     "complete_authorization",
     "make_ensure_token",
+    "needs_instance",
     "refresh_access_token",
     "start_authorization",
 ]

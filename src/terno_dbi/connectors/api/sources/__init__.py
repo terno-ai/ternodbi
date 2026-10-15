@@ -31,6 +31,9 @@ from terno_dbi.connectors.api.sources.instagram_public import (
 from terno_dbi.connectors.api.sources.microsoft_ads import (
     MicrosoftAdsConnector, make_microsoft_ads_connector,
 )
+from terno_dbi.connectors.api.sources.dynamics365 import (
+    Dynamics365Connector, make_dynamics365_connector,
+)
 from terno_dbi.connectors.api.sources.salesforce import (
     SalesforceConnector, make_salesforce_connector,
 )
@@ -49,6 +52,7 @@ __all__ = [
     "InstagramInsightsConnector", "make_instagram_insights_connector",
     "InstagramPublicConnector", "make_instagram_public_connector",
     "MicrosoftAdsConnector", "make_microsoft_ads_connector",
+    "Dynamics365Connector", "make_dynamics365_connector",
     "SalesforceConnector", "make_salesforce_connector",
     "YouTubeConnector", "make_youtube_connector",
 ]

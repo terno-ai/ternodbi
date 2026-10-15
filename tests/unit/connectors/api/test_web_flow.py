@@ -272,3 +272,34 @@ def test_disconnect_non_admin_is_403(org, member):
     request.org_id = org.id
     resp = web.disconnect_connector(request, "google_ads")
     assert resp.status_code == 403
+
+
+@pytest.mark.django_db
+def test_callback_invalid_resource_points_at_the_environment_url(org):
+    # Microsoft sends this when the Dynamics 365 environment named at connect
+    # does not exist in the user's directory — usually a mistyped URL.
+    resp = web.oauth_callback(RequestFactory().get("/cb?error=invalid_resource"))
+    assert resp.status_code == 400
+    assert "environment URL" in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_callback_names_the_microsoft_cause(org, caplog):
+    # Microsoft reports a missing API permission as a bare `invalid_client`; the
+    # AADSTS code in error_description is the actionable part, and is logged.
+    resp = web.oauth_callback(RequestFactory().get("/cb", {
+        "error": "invalid_client",
+        "error_description": "AADSTS650057: Invalid resource. The client has "
+                             "requested access to a resource which isn't listed."}))
+    assert resp.status_code == 400
+    assert "Dynamics CRM → user_impersonation" in resp.content.decode()
+    assert "AADSTS650057" in caplog.text
+
+
+@pytest.mark.django_db
+def test_callback_shows_an_unmapped_aadsts_code_only(org):
+    resp = web.oauth_callback(RequestFactory().get("/cb", {
+        "error": "invalid_client",
+        "error_description": "AADSTS7000215: <b>Invalid</b> client secret."}))
+    body = resp.content.decode()
+    assert body == "Authorization was declined: invalid_client (AADSTS7000215)"

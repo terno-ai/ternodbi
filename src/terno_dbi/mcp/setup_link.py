@@ -153,8 +153,11 @@ def connect_url(org_subdomain: Optional[str], catalog) -> Optional[str]:
     the host app finishes in-app (connected state, account picker) instead of the
     bare success page. Manual (database) connectors instead get the host app's
     credentials modal (`/data-connectors/datasource/<key>`), so the user lands on
-    the secure form rather than the bare Django admin. Neither URL carries a
-    credential.
+    the secure form rather than the bare Django admin. A provider that cannot
+    start consent until the user names a host (a Shopify store, a Dynamics 365
+    environment) links to the connector's detail page, which asks for it;
+    Salesforce, whose custom domain is optional, keeps the one-click link. No
+    URL carries a credential.
     """
     if catalog is None:
         return None
@@ -164,6 +167,9 @@ def connect_url(org_subdomain: Optional[str], catalog) -> Optional[str]:
     key = quote(catalog.key, safe="")
     if getattr(catalog, "auth_type", None) == "manual":
         return f"{origin}{_manual_connect_base()}/{key}"
+    from terno_dbi.connectors.api.auth.oauth import needs_instance
+    if needs_instance(catalog.key):
+        return f"{origin}{_connectors_return_path(catalog.key)}"
     return_to = quote(f"{origin}{_connectors_return_path(catalog.key)}", safe="")
     return f"{origin}/connect?connector={key}&return_to={return_to}"
 

@@ -536,3 +536,116 @@ class TestSalesforceIdentity:
                                  "connected_email": "a@cloudxlab.com"})
         assert secrets.decrypt_dict(ds.connection_json)[
             "CONNECTED_EMAIL"] == "a@cloudxlab.com"
+
+
+@pytest.mark.django_db
+class TestDynamics365Environment:
+    """Every Dataverse environment is its own OAuth resource: the user names it
+    before consent, the scope asks for that host alone, and the host is saved so
+    the connector — and only the connector — calls it."""
+
+    @pytest.fixture(autouse=True)
+    def dynamics_creds(self, monkeypatch):
+        monkeypatch.setenv("TERNO_DYNAMICS365_CLIENT_ID", "d365-id")
+        monkeypatch.setenv("TERNO_DYNAMICS365_CLIENT_SECRET", "d365-secret")
+
+    def _start(self, org, instance="contoso.crm4.dynamics.com"):
+        return oauth.start_authorization(
+            connector_key="dynamics365",
+            redirect_uri="https://acme.app.terno.ai/callback",
+            organisation=org,
+            instance=instance,
+        )
+
+    def test_consent_asks_for_the_named_environment_only(self, org, catalog):
+        from urllib.parse import urlparse, parse_qs
+
+        started = self._start(org)
+        url = started["authorization_url"]
+        assert url.startswith(
+            "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?")
+        qs = parse_qs(urlparse(url).query)
+        assert qs["scope"] == ["https://contoso.crm4.dynamics.com/user_impersonation "
+                               "offline_access openid email"]
+        assert qs["client_id"] == ["d365-id"]
+        assert qs["code_challenge_method"] == ["S256"]
+        st = ConnectorOAuthState.objects.get(state=started["state"])
+        assert st.instance == "contoso.crm4.dynamics.com"
+
+    @pytest.mark.parametrize("given, host", [
+        ("contoso", "contoso.crm.dynamics.com"),
+        ("Contoso.CRM.dynamics.com", "contoso.crm.dynamics.com"),
+        ("https://contoso.crm11.dynamics.com/main.aspx?appid=1#x",
+         "contoso.crm11.dynamics.com"),
+        ("contoso.api.crm4.dynamics.com", "contoso.crm4.dynamics.com"),
+        ("  my-org-2.crm.dynamics.com/  ", "my-org-2.crm.dynamics.com"),
+    ])
+    def test_environment_url_is_normalised(self, given, host):
+        from terno_dbi.connectors.api.auth.providers import get_provider
+        p = get_provider("dynamics365")
+        assert oauth._validated_instance(p, "dynamics365", given) == host
+
+    @pytest.mark.parametrize("bad", [
+        "", "evil.com", "contoso.crm.dynamics.com.evil.com",
+        "contoso.dynamics.com", "contoso.crm123.dynamics.com",
+        "evil.com/contoso.crm.dynamics.com", "contoso.crm.dynamics.com@evil.com",
+        "-contoso.crm.dynamics.com", "a b",
+    ])
+    def test_anything_else_is_refused_before_consent(self, org, catalog, bad):
+        with pytest.raises(ApiError) as exc:
+            self._start(org, instance=bad)
+        assert "contoso.crm.dynamics.com" in exc.value.message
+        assert not ConnectorOAuthState.objects.exists()
+
+    def test_exchange_saves_the_environment(self, org, catalog):
+        started = self._start(org)
+        posted = {}
+
+        def fake_post(url, data):
+            posted.update(url=url, data=data)
+            return {"access_token": "at", "refresh_token": "rt", "expires_in": 3599,
+                    "scope": "https://contoso.crm4.dynamics.com/user_impersonation"}
+
+        ds = oauth.complete_authorization(
+            state=started["state"], code="c", http_post=fake_post)
+        assert posted["url"] == (
+            "https://login.microsoftonline.com/organizations/oauth2/v2.0/token")
+        assert posted["data"]["client_secret"] == "d365-secret"
+        assert posted["data"]["code_verifier"]
+        bundle = secrets.decrypt_dict(ds.connection_json)
+        assert bundle["INSTANCE"] == "contoso.crm4.dynamics.com"
+        assert bundle["REFRESH_TOKEN"] == "rt"
+
+    def test_refresh_keeps_the_environment(self, org, catalog):
+        ds = DataSource.objects.create(
+            display_name="Dynamics 365", type="dynamics365", connection_str="",
+            organisation=org,
+            catalog=ConnectorCatalog.objects.get(key="dynamics365"),
+        )
+        ds.connection_json = secrets.encrypt_dict({
+            "ACCESS_TOKEN": "old", "REFRESH_TOKEN": "rt",
+            "INSTANCE": "contoso.crm4.dynamics.com",
+            "TOKEN_EXPIRES_AT": str(time.time() - 1),
+        })
+        ds.save()
+        posted = {}
+
+        def fake_post(url, data):
+            posted["url"] = url
+            return {"access_token": "new", "refresh_token": "rt2", "expires_in": 3599}
+
+        bundle = oauth.refresh_access_token(ds, http_post=fake_post)
+        assert posted["url"] == (
+            "https://login.microsoftonline.com/organizations/oauth2/v2.0/token")
+        assert bundle["ACCESS_TOKEN"] == "new"
+        assert bundle["REFRESH_TOKEN"] == "rt2"
+        assert bundle["INSTANCE"] == "contoso.crm4.dynamics.com"
+
+    def test_ships_disabled_until_the_entra_app_is_registered(self, catalog):
+        row = ConnectorCatalog.objects.get(key="dynamics365")
+        assert row.enabled is False
+        assert row.category == "CRM"
+        ids = [r["id"] for r in row.report_types]
+        assert ids[-1] == "Custom" and "Opportunities" in ids
+        custom = row.report_types[-1]["settings"]
+        assert {"setting_id": "table", "required": True}.items() <= custom[0].items()

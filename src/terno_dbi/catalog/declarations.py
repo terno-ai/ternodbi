@@ -73,6 +73,22 @@ def _pd_date_field(*others: str) -> ReportSetting:
     )
 
 
+def _d365_date_field(help_text: str = "") -> ReportSetting:
+    """The optional `date_field` a Dynamics 365 report accepts.
+
+    Every Dataverse table has `createdon`, the default; any other date column
+    (including custom ones) can be named instead.
+    """
+    return ReportSetting(
+        "date_field", label="Date field", required=False,
+        help_text=help_text or (
+            "Which date column the date range filters on. Defaults to "
+            "createdon (when the record was created); any date or date/time "
+            "column on the table is valid, including custom ones, e.g. "
+            "modifiedon."),
+    )
+
+
 # --------------------------------------------------------------------------
 # Databases — family=database
 # --------------------------------------------------------------------------
@@ -609,6 +625,67 @@ _APIS: List[ConnectorSpec] = [
         rate_limit_per_second=10,
         rate_limit_per_day=1000,
         default_enabled=False,   # enable once the Pipedrive app is registered
+    ),
+    ConnectorSpec(
+        key="dynamics365",
+        display_name="Microsoft Dynamics 365",
+        provider="Microsoft",
+        category="CRM",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Accounts, contacts, leads, opportunities, cases and "
+                    "activities from Dynamics 365 Sales and Customer Service — "
+                    "plus any other Dataverse table, including custom ones — "
+                    "for pipeline, revenue, lead and support analytics.",
+        scopes_label="Dynamics 365 access on your behalf to read, create and "
+                     "update records, limited to what your Dynamics 365 "
+                     "security roles already allow",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=True,
+        # A connection reaches exactly one environment (the one whose URL was
+        # given at connect), but the account machinery is still what the
+        # allowlist, write opt-in and currency guard hang off.
+        account_label_singular="Environment",
+        account_label_plural="Environments",
+        report_types=[
+            ReportType("Accounts", "Accounts", settings=[_d365_date_field()]),
+            ReportType("Contacts", "Contacts", settings=[_d365_date_field()]),
+            ReportType("Leads", "Leads", settings=[_d365_date_field()]),
+            ReportType("Opportunities", "Opportunities", settings=[_d365_date_field(
+                "Defaults to createdon — when the opportunity was opened. Use "
+                "actualclosedate for deals won or lost in the period, or "
+                "estimatedclosedate for the forecast.")]),
+            ReportType("Cases", "Cases", settings=[_d365_date_field()]),
+            ReportType("Tasks", "Tasks", settings=[_d365_date_field()]),
+            ReportType("PhoneCalls", "Phone calls", settings=[_d365_date_field()]),
+            ReportType("Appointments", "Appointments", settings=[_d365_date_field()]),
+            ReportType(
+                "Custom", "Any other table",
+                settings=[
+                    ReportSetting(
+                        "table", label="Table logical name",
+                        help_text="The logical name of the Dataverse table to "
+                                  "read, e.g. 'quote', 'salesorder', 'invoice' "
+                                  "or a custom table such as 'new_project' "
+                                  "(custom tables start with their publisher "
+                                  "prefix).",
+                    ),
+                    _d365_date_field(
+                        "Defaults to createdon. If the table has no such "
+                        "column, the date range is not applied and every row "
+                        "is returned — the result says so in its notes."),
+                ],
+            ),
+        ],
+        default_report_type="Opportunities",
+        # Dataverse's service protection allows ~6,000 requests per user per five
+        # minutes, and licences carry a daily request entitlement shared with
+        # every other integration. The per-day guard keeps this connector well
+        # inside a typical entitlement.
+        rate_limit_per_second=10,
+        rate_limit_per_day=10000,
+        default_enabled=False,   # enable once the Entra app is registered
     ),
     ConnectorSpec(
         key="amazon_ads",

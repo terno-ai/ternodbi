@@ -110,6 +110,24 @@ class TestReturnPath:
         url = connect_url(None, _Catalog())
         assert "%2Fcustom%2Fconn%2Fgoogle-ads" in url
 
+    @override_settings(ENABLE_SUBDOMAIN=False, MAIN_DOMAIN="http://127.0.0.1:8000")
+    @pytest.mark.parametrize("key, slug", [("dynamics365", "dynamics365"),
+                                           ("shopify", "shopify")])
+    def test_per_instance_provider_links_to_the_detail_page(self, key, slug):
+        # Consent cannot start until the user names the store or environment,
+        # which the detail page asks for — a bare /connect link would fail.
+        catalog = type("C", (), {"key": key, "auth_type": "oauth"})()
+        assert connect_url(None, catalog) == (
+            f"http://127.0.0.1:8000/data-connectors/connectors/{slug}")
+
+    @override_settings(ENABLE_SUBDOMAIN=False, MAIN_DOMAIN="http://127.0.0.1:8000")
+    def test_an_optional_instance_keeps_the_one_click_link(self):
+        # Salesforce's custom domain is optional (login.salesforce.com otherwise),
+        # so its link still goes straight to consent.
+        catalog = type("C", (), {"key": "salesforce", "auth_type": "oauth"})()
+        assert connect_url(None, catalog).startswith(
+            "http://127.0.0.1:8000/connect?connector=salesforce&return_to=")
+
 
 class TestUnconfigured:
     @override_settings(ENABLE_SUBDOMAIN=False, MAIN_DOMAIN="")
