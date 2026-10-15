@@ -11,7 +11,7 @@ from pathlib import Path
 from terno_dbi.mcp import merged_server
 from terno_dbi.mcp.profiles import PREVIEW, STABLE, use_profile
 from terno_dbi.oauth.scopes import ALL_SCOPES
-from tests.unit.mcp.manifest_snapshot import snapshot
+from .manifest_snapshot import snapshot
 
 FIXTURE = Path(__file__).parent / "fixtures" / "stable_manifest.json"
 
