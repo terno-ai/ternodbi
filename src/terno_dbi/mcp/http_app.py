@@ -22,6 +22,7 @@ import logging
 from typing import Any, Awaitable, Callable, Dict, Optional
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from terno_dbi.mcp.context import request_credentials, require_request_credentials
+from terno_dbi.mcp.profiles import STABLE, Profile, use_profile
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,15 @@ MCP_PATH = "/mcp"
 # RFC 9728: the 401 response points clients to the resource metadata, where
 # they can discover the authorization server and start the authentication flow.
 PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource"
+
+
+def resource_metadata_path(profile: Profile) -> str:
+    """Where an endpoint's resource metadata lives: the bare path for `/mcp`
+    (where it has always been), with the endpoint path appended for the
+    others (RFC 9728)."""
+    if profile is STABLE:
+        return PROTECTED_RESOURCE_METADATA_PATH
+    return f"{PROTECTED_RESOURCE_METADATA_PATH}{profile.path}"
 
 
 class TokenRejected(Exception):
@@ -95,8 +105,13 @@ def build_asgi_app(
     stateless: bool = False,
     strict_credentials: bool = True,
     in_process: bool = False,
+    profile: Profile = STABLE,
 ):
     """Return a raw ASGI app that serves server over Streamable HTTP.
+
+        profile fixes which tool surface this endpoint exposes (see
+        `profiles`). Mount one app per endpoint; each gets its own session
+        manager, so sessions never cross endpoints.
 
         token_resolver can be injected for testing and defaults to the real
         ServiceToken lookup.
@@ -157,7 +172,7 @@ def build_asgi_app(
                 {
                     "WWW-Authenticate": (
                         'Bearer realm="terno", '
-                        f'resource_metadata="{base_url or ""}{PROTECTED_RESOURCE_METADATA_PATH}"'
+                        f'resource_metadata="{base_url or ""}{resource_metadata_path(profile)}"'
                     )
                 },
             )
@@ -183,7 +198,7 @@ def build_asgi_app(
             # everything, so returning None here would accidentally grant full access.
             scopes=resolved.get("scopes", frozenset()),
             org_subdomain=resolved.get("org_subdomain"),
-        ):
+        ), use_profile(profile):
             await manager.handle_request(scope, receive, send)
 
     return app

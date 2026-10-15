@@ -35,7 +35,7 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
     async def test_call_tool_dispatch(self):
         """Should dispatch query tools to client."""
         with patch('terno_dbi.mcp.query_server.client') as mock_client, \
-             patch('terno_dbi.mcp.query_server._api_mcp_tools_enabled',
+             patch('terno_dbi.mcp.query_server._connectors_exposed',
                    return_value=True):
             # 0. get_org_prompt
             mock_client.get_org_prompt.return_value = {"org_prompt": "Always answer in French."}
@@ -121,7 +121,7 @@ class TestQueryServer(unittest.IsolatedAsyncioTestCase):
     async def test_call_tool_dispatches_api_source_tools(self):
         """The marketing/analytics API tools dispatch to their client methods."""
         with patch('terno_dbi.mcp.query_server.client') as mock_client, \
-             patch('terno_dbi.mcp.query_server._api_mcp_tools_enabled',
+             patch('terno_dbi.mcp.query_server._connectors_exposed',
                    return_value=True):
             mock_client.get_today.return_value = {"today": "2026-01-01"}
             result = await call_tool("get_today", {"timezone": "UTC"})

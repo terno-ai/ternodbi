@@ -1,10 +1,9 @@
-"""The API-source MCP tools are gated by TERNO_ENABLE_API_MCP_TOOLS.
+"""The connector tools exist only on the `preview` endpoint.
 
-A production deploy can carry the new connector code while the submitted
-`mcp.terno.ai` tool manifest stays exactly as reviewed: with the flag off, the
-API tools are neither advertised nor callable, and `list_datasources` keeps its
-original description. The flag turns them on once the directory listings are
-approved.
+`/mcp` (the `stable` channel) keeps its released surface: the API-source
+tools, `list_connectors` and the connector
+write tools are neither advertised nor callable there, and `list_datasources`
+keeps its original description and response shape. `/mcp/preview` exposes them.
 """
 
 import asyncio
@@ -12,9 +11,13 @@ import asyncio
 import pytest
 
 from terno_dbi.mcp import query_server
+from terno_dbi.mcp.profiles import PREVIEW, STABLE, use_profile
 
 _API_TOOLS = {"get_today", "list_accounts", "list_fields", "data_query",
               "get_query_results"}
+_CONNECTOR_TOOLS = {"list_connectors"}
+_WRITE_TOOLS = {"list_actions", "execute_action"}
+_PREVIEW_ONLY = _API_TOOLS | _CONNECTOR_TOOLS | _WRITE_TOOLS
 
 
 def _tool_names():
@@ -25,23 +28,33 @@ def _list_ds_description():
     return next(t for t in query_server.own_tools() if t.name == "list_datasources").description
 
 
-class TestGateOff:
-    @pytest.fixture(autouse=True)
-    def _off(self, monkeypatch):
-        monkeypatch.setenv("TERNO_ENABLE_API_MCP_TOOLS", "")
+def _error_text(result):
+    return " ".join(b.text for b in result.content).lower()
 
-    def test_api_tools_are_not_advertised(self):
-        assert _API_TOOLS.isdisjoint(_tool_names())
+
+def test_stable_is_the_default_outside_a_request():
+    from terno_dbi.mcp.profiles import current_profile
+    assert current_profile() is STABLE
+
+
+class TestStable:
+    @pytest.fixture(autouse=True)
+    def _stable(self):
+        with use_profile(STABLE):
+            yield
+
+    def test_connector_tools_are_not_advertised(self):
+        assert _PREVIEW_ONLY.isdisjoint(_tool_names())
 
     def test_list_datasources_keeps_the_reviewed_description(self):
         assert _list_ds_description() == query_server._LIST_DATASOURCES_DESC_STABLE
 
-    def test_api_tool_call_is_rejected_as_unknown(self):
-        # Defence in depth: even called by name, a gated tool must not run.
-        result = asyncio.run(query_server.call_tool("data_query", {}))
+    @pytest.mark.parametrize("name", sorted(_PREVIEW_ONLY))
+    def test_connector_tool_call_is_rejected_as_unknown(self, name):
+        # Defence in depth: even called by name, a hidden tool must not run.
+        result = asyncio.run(query_server.call_tool(name, {}))
         assert result.isError
-        text = " ".join(b.text for b in result.content).lower()
-        assert "unknown tool" in text
+        assert "unknown tool" in _error_text(result)
 
     def test_list_datasources_response_is_frozen_to_1_0_2_shape(self, monkeypatch):
         # The frozen response carries only the original fields, database-family
@@ -76,38 +89,37 @@ class TestGateOff:
         assert "family" not in entry and "auth_status" not in entry
 
 
-class TestGateOn:
+class TestPreview:
     @pytest.fixture(autouse=True)
-    def _on(self, monkeypatch):
-        monkeypatch.setenv("TERNO_ENABLE_API_MCP_TOOLS", "true")
+    def _preview(self):
+        with use_profile(PREVIEW):
+            yield
 
-    def test_api_tools_are_advertised(self):
-        assert _API_TOOLS <= _tool_names()
+    def test_every_connector_tool_is_advertised(self):
+        assert _PREVIEW_ONLY <= _tool_names()
 
     def test_list_datasources_uses_the_richer_description(self):
         assert _list_ds_description() != query_server._LIST_DATASOURCES_DESC_STABLE
         assert "data_query" in _list_ds_description()
 
 
-_WRITE_TOOLS = {"list_actions", "execute_action"}
+def test_profiles_do_not_leak_between_concurrent_requests():
+    """Both endpoints share one server object; the profile is per request."""
+    seen = {}
 
+    async def probe(profile, key, gate):
+        with use_profile(profile):
+            await gate.wait()
+            seen[key] = _tool_names()
 
-class TestConnectorWriteGate:
-    """execute_action/list_actions ride their own flag, independent of the API
-    flag, so enabling reads never implicitly exposes the write tools."""
+    async def main():
+        gate = asyncio.Event()
+        tasks = [asyncio.create_task(probe(STABLE, "stable", gate)),
+                 asyncio.create_task(probe(PREVIEW, "preview", gate))]
+        await asyncio.sleep(0)
+        gate.set()
+        await asyncio.gather(*tasks)
 
-    def test_write_tools_hidden_even_when_api_tools_are_on(self, monkeypatch):
-        monkeypatch.setenv("TERNO_ENABLE_API_MCP_TOOLS", "true")
-        monkeypatch.setenv("TERNO_ENABLE_CONNECTOR_WRITE_TOOLS", "")
-        assert _WRITE_TOOLS.isdisjoint(_tool_names())
-
-    def test_write_tool_call_is_rejected_when_gated_off(self, monkeypatch):
-        monkeypatch.setenv("TERNO_ENABLE_CONNECTOR_WRITE_TOOLS", "")
-        result = asyncio.run(query_server.call_tool("execute_action", {}))
-        assert result.isError
-        text = " ".join(b.text for b in result.content).lower()
-        assert "unknown tool" in text
-
-    def test_write_tools_appear_only_when_their_flag_is_on(self, monkeypatch):
-        monkeypatch.setenv("TERNO_ENABLE_CONNECTOR_WRITE_TOOLS", "true")
-        assert _WRITE_TOOLS <= _tool_names()
+    asyncio.run(main())
+    assert _PREVIEW_ONLY.isdisjoint(seen["stable"])
+    assert _PREVIEW_ONLY <= seen["preview"]

@@ -28,7 +28,7 @@ whoever started the process.
 """
 
 
-def _run_http(server, host: str, port: int) -> None:
+def _run_http(server, host: str, port: int, profile) -> None:
     try:
         import uvicorn
     except ImportError:
@@ -40,8 +40,8 @@ def _run_http(server, host: str, port: int) -> None:
 
     from terno_dbi.mcp.http_app import build_asgi_app
 
-    app = build_asgi_app(server, base_url=f"http://{host}:{port}")
-    print(f"Terno MCP server on http://{host}:{port}/mcp", file=sys.stderr)
+    app = build_asgi_app(server, base_url=f"http://{host}:{port}", profile=profile)
+    print(f"Terno MCP server on http://{host}:{port}/mcp ({profile.name})", file=sys.stderr)
     uvicorn.run(app, host=host, port=port)
 
 
@@ -61,7 +61,17 @@ def main():
     )
     parser.add_argument("--host", default="127.0.0.1", help="HTTP bind host")
     parser.add_argument("--port", type=int, default=8377, help="HTTP bind port")
+    parser.add_argument(
+        "--profile",
+        choices=["stable", "preview"],
+        default="stable",
+        help="release channel: stable (default) or preview (adds tools not "
+             "yet released on stable, such as the API-source connector tools)",
+    )
     args = parser.parse_args()
+
+    from terno_dbi.mcp.profiles import PROFILES, set_process_profile
+    profile = PROFILES[args.profile]
 
     logger.info("Starting MCP server: type='%s' transport='%s'", args.server, args.transport)
 
@@ -72,8 +82,10 @@ def main():
             from terno_dbi.mcp.admin_server import server
         else:
             from terno_dbi.mcp.merged_server import server
-        _run_http(server, args.host, args.port)
+        _run_http(server, args.host, args.port, profile)
         return
+
+    set_process_profile(profile)
 
     if args.server == "query":
         from terno_dbi.mcp.query_server import main as run

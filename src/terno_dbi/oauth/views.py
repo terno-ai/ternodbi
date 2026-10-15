@@ -14,9 +14,13 @@ installed.
 import json
 import logging
 import time
+from django import forms as django_forms
+from django.apps import apps
 from django.conf import settings
+from django.core.cache import cache
 from django.http import HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from terno_dbi.mcp.profiles import STABLE, profile_for_resource
 from terno_dbi.oauth.dcr import (
     InvalidRegistration,
     registration_response,
@@ -25,8 +29,16 @@ from terno_dbi.oauth.dcr import (
 from terno_dbi.oauth.metadata import (
     authorization_server_metadata,
     protected_resource_metadata,
+    scope_consent_rows,
 )
-from terno_dbi.oauth.scopes import UnknownScope
+from terno_dbi.oauth.minting import resolve_membership, user_can_write
+from terno_dbi.oauth.org_choice import (
+    merge_into_claims,
+    organisation_choices,
+    validate_choice,
+)
+from terno_dbi.oauth.provisioning import ensure_organisation
+from terno_dbi.oauth.scopes import WRITE_SCOPES, UnknownScope
 
 logger = logging.getLogger(__name__)
 
@@ -71,14 +83,15 @@ def _cors(response: JsonResponse) -> JsonResponse:
     return response
 
 
-def oauth_protected_resource(request):
-    """Return RFC 9728 resource metadata for the MCP endpoint.
+def oauth_protected_resource(request, profile=None):
+    """Return RFC 9728 resource metadata for an MCP endpoint.
 
-    The `/mcp` 401 response points clients here via `WWW-Authenticate`. This
+    Each endpoint's 401 response points clients here via `WWW-Authenticate`:
+    the bare path for `/mcp`, the path-suffixed one for `/mcp/preview`. This
     metadata lets clients discover the authorization server and start sign-in.
     """
     return _cors(JsonResponse(
-        protected_resource_metadata(_resource_url(), _issuer_url())
+        protected_resource_metadata(_resource_url(), _issuer_url(), profile or STABLE)
     ))
 
 
@@ -103,8 +116,6 @@ def _client_ip(request) -> str:
 
 
 def _rate_limited(request) -> bool:
-    from django.core.cache import cache
-
     key = f"dbi_dcr_rate_{_client_ip(request)}"
     try:
         count = cache.get_or_set(key, 0, REGISTRATION_RATE_WINDOW_SECONDS)
@@ -210,26 +221,17 @@ def register(request):
 def make_authorization_view():
     """Build the consent view, or return None where DOT is not usable.
 
-    Deliberately not a module-level import. `oauth2_provider.views` pulls in its
+    The DOT imports are deliberately local. `oauth2_provider.views` pulls in its
     models, which raise `RuntimeError` — not `ImportError` — when the package is
     installed but absent from `INSTALLED_APPS`. That is exactly the state of
-    ternodbi's own test settings, so an import guard here would break importing
+    ternodbi's own test settings, so a module-level import would break importing
     this module at all.
     """
-    from django.apps import apps
-
     if not apps.is_installed("oauth2_provider"):
         return None
 
-    from django import forms as django_forms
     from oauth2_provider.forms import AllowForm
     from oauth2_provider.views import AuthorizationView
-
-    from terno_dbi.oauth.org_choice import (
-        merge_into_claims,
-        organisation_choices,
-        validate_choice,
-    )
 
     class TernoAllowForm(AllowForm):
         """DOT consent form with an organisation selector.
@@ -259,9 +261,6 @@ def make_authorization_view():
 
             organisation = validate_choice(self._user, chosen)
             if organisation is None:
-                # Fail closed to the default rather than erroring — a revoked
-                # membership between render and submit is legitimate, and the
-                # server picks the default in that case.
                 logger.warning(
                     "Discarding organisation choice %r for %s", chosen, self._user
                 )
@@ -307,15 +306,22 @@ def make_authorization_view():
             kwargs["user"] = self.request.user
             return kwargs
 
+        def validate_authorization_request(self, request):
+            """Drop scopes the requesting endpoint does not offer.
+
+            Done here, before the consent form is built, so a hidden scope is
+            neither shown nor carried into the grant: the form's `scope` field
+            is filled from what this returns. The endpoint comes from the
+            client's RFC 8707 `resource`; without one, the stable `/mcp`
+            surface applies. Requesting a hidden scope is not an error, so a
+            client that cached an older scope list still connects.
+            """
+            scopes, credentials = super().validate_authorization_request(request)
+            hidden = profile_for_resource(request.GET.getlist("resource")).hidden_scopes
+            return [s for s in scopes if s not in hidden], credentials
+
         def get_context_data(self, **kwargs):
             context = super().get_context_data(**kwargs)
-
-            from terno_dbi.oauth.metadata import scope_consent_rows
-            from terno_dbi.oauth.minting import resolve_membership, user_can_write
-            from terno_dbi.oauth.org_choice import organisation_choices
-            from terno_dbi.oauth.provisioning import ensure_organisation
-            from terno_dbi.oauth.scopes import WRITE_SCOPES
-
             requested = set(context.get("scopes") or [])
             rows = scope_consent_rows(requested)
             context["read_scopes"] = [r for r in rows if r["scope"] not in WRITE_SCOPES]

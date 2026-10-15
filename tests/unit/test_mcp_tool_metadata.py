@@ -25,23 +25,19 @@ from terno_dbi.mcp.tool_meta import (
     as_tool_result,
 )
 
-# 15 query + 14 admin, each plus the shared `terno_guide`. The query count
-# includes the API-source tools, which are gated off by default — these tests
-# assert the full (enabled) surface, so the fixture below turns them on.
-EXPECTED_QUERY_TOOLS = 16
+# 18 query + 14 admin, each plus the shared `terno_guide`. The query count
+# includes the connector tools, which only the preview endpoint lists — these
+# tests assert that full surface, so the fixture below selects it.
+EXPECTED_QUERY_TOOLS = 19
 EXPECTED_ADMIN_TOOLS = 15
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _enable_api_mcp_tools():
-    import os
-    prev = os.environ.get("TERNO_ENABLE_API_MCP_TOOLS")
-    os.environ["TERNO_ENABLE_API_MCP_TOOLS"] = "true"
-    yield
-    if prev is None:
-        os.environ.pop("TERNO_ENABLE_API_MCP_TOOLS", None)
-    else:
-        os.environ["TERNO_ENABLE_API_MCP_TOOLS"] = prev
+def _preview_profile():
+    from terno_dbi.mcp.profiles import PREVIEW, use_profile
+
+    with use_profile(PREVIEW):
+        yield
 
 
 def _tools(server_module):
@@ -144,8 +140,14 @@ def test_destructive_titles_are_unmistakable(admin_tools):
             )
 
 
-def test_query_server_is_entirely_read_only(query_tools):
+def test_query_server_is_read_only_except_execute_action(query_tools):
+    # execute_action changes a customer's external account; it is the one write
+    # in this registry and is scope-gated (connector:write + Org Admin).
     for tool in query_tools:
+        if tool.name == "execute_action":
+            assert tool.annotations.readOnlyHint is False
+            assert tool.annotations.destructiveHint is True
+            continue
         assert tool.annotations.readOnlyHint is True, f"{tool.name} is not read-only"
         assert tool.annotations.destructiveHint is False
 

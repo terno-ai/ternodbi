@@ -1,4 +1,3 @@
-import os
 import sys
 import json
 import asyncio
@@ -9,6 +8,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool
 from terno_dbi.mcp.context import client, describe_backend
 from terno_dbi.mcp.instructions import QUERY_INSTRUCTIONS
+from terno_dbi.mcp.profiles import current_profile
 from terno_dbi.mcp.surface import GUIDE_TOOL, handle_guide, register_surface
 from terno_dbi.mcp.tool_meta import (
     apply_tool_meta,
@@ -32,63 +32,30 @@ server = Server(
 register_surface(server)
 
 
-# The API-source MCP tools (data_query et al.) are gated so a production deploy
-# can carry the new code while the submitted mcp.terno.ai tool manifest stays
-# exactly as reviewed. Enable with the Django setting or env var
-# TERNO_ENABLE_API_MCP_TOOLS once the directory listings are approved.
+# Tools released only on the `preview` channel (see `profiles`): the API-source
+# tools, the connector catalogue, and the connector write tools. The `stable`
+# channel's tool list changes only on purpose.
 _API_TOOL_NAMES = frozenset({
     "get_today", "list_accounts", "list_fields", "data_query", "get_query_results",
 })
+_CONNECTOR_TOOL_NAMES = frozenset({"list_connectors"})
+# execute_action mutates a customer's external account; even where listed it is
+# scope-gated (connector:write + Org Admin) at the merged server.
+_CONNECTOR_WRITE_TOOL_NAMES = frozenset({"list_actions", "execute_action"})
+_PREVIEW_ONLY_TOOL_NAMES = _API_TOOL_NAMES | _CONNECTOR_TOOL_NAMES | _CONNECTOR_WRITE_TOOL_NAMES
 
-# Keep list_datasources' reviewed description unchanged.
-# The API-aware description is used only when API tools are enabled.
+# list_datasources' stable description; the API-aware one is preview-only.
 _LIST_DATASOURCES_DESC_STABLE = "List all configured database connections"
 
-# Connector catalogue tools follow the same feature gate as API tools.
-# Enable with TERNO_ENABLE_CONNECTOR_TOOLS after the updated listing is approved.
-_CONNECTOR_TOOL_NAMES = frozenset({"list_connectors"})
 
-# Connector WRITE tools (execute_action mutates a customer's external account).
-# Gated separately and OFF by default so they never join the reviewed manifest
-# implicitly: enabling them re-opens the mcp.terno.ai manifest for re-submission.
-# execute_action is additionally scope-gated (connector:write + Org Admin) at the
-# merged server, so even when exposed it is withheld from non-admins.
-_CONNECTOR_WRITE_TOOL_NAMES = frozenset({"list_actions", "execute_action"})
-
-
-def _flag_on(name: str) -> bool:
-    from django.conf import settings
-    val = getattr(settings, name, None)
-    if val is None:
-        val = os.environ.get(name, "")
-    return str(val).strip().lower() in ("1", "true", "yes", "on")
-
-
-def _api_mcp_tools_enabled() -> bool:
-    """Whether the API-source MCP tools are exposed on this server. Off by default."""
-    return _flag_on("TERNO_ENABLE_API_MCP_TOOLS")
-
-
-def _connector_tools_enabled() -> bool:
-    """Whether the connector-catalogue tool is exposed. Off by default."""
-    return _flag_on("TERNO_ENABLE_CONNECTOR_TOOLS")
-
-
-def _connector_write_tools_enabled() -> bool:
-    """Whether the connector write tools are exposed. Off by default."""
-    return _flag_on("TERNO_ENABLE_CONNECTOR_WRITE_TOOLS")
+def _connectors_exposed() -> bool:
+    """Whether this request's endpoint exposes the connector tools."""
+    return current_profile().connectors
 
 
 def _gated_off_tool_names() -> frozenset:
-    """Tool names to strip from the manifest given the current flags."""
-    names = set()
-    if not _api_mcp_tools_enabled():
-        names |= _API_TOOL_NAMES
-    if not _connector_tools_enabled():
-        names |= _CONNECTOR_TOOL_NAMES
-    if not _connector_write_tools_enabled():
-        names |= _CONNECTOR_WRITE_TOOL_NAMES
-    return frozenset(names)
+    """Tool names this endpoint does not expose."""
+    return frozenset() if _connectors_exposed() else _PREVIEW_ONLY_TOOL_NAMES
 
 
 def own_tools() -> List[Tool]:
@@ -96,8 +63,7 @@ def own_tools() -> List[Tool]:
 
     Separate from `list_tools` so the merged hosted server can compose both
     registries rather than carrying a third copy of these definitions. The
-    API-source tools are advertised only when TERNO_ENABLE_API_MCP_TOOLS is on,
-    and list_connectors only when TERNO_ENABLE_CONNECTOR_TOOLS is on.
+    connector tools are listed only on the `preview` endpoint.
     """
     gated_off = _gated_off_tool_names()
     return [t for t in _all_own_tools() if t.name not in gated_off]
@@ -164,7 +130,7 @@ def _all_own_tools() -> List[Tool]:
                     "Each entry carries `family`: use execute_query for "
                     "'database', data_query for 'api'."
                 )
-                if _api_mcp_tools_enabled()
+                if _connectors_exposed()
                 else _LIST_DATASOURCES_DESC_STABLE
             ),
             inputSchema={
@@ -554,7 +520,7 @@ def _dispatch(name: str, arguments: Dict[str, Any]):
 
         elif name == "list_datasources":
             payload = client.list_datasources_full()
-            if _api_mcp_tools_enabled():
+            if _connectors_exposed():
                 # Pass the envelope through rather than rebuilding it: `available`
                 # and `notes` are the point of this tool now, and re-deriving
                 # `count` here would let the two drift.
@@ -566,10 +532,9 @@ def _dispatch(name: str, arguments: Dict[str, Any]):
                     result["count"] = len(result["datasources"])
             else:
                 # Frozen 1.0.2 shape: connected database sources only, original
-                # fields, no `available`/`notes`/`family`. Keeps the submitted
-                # mcp.terno.ai response byte-for-byte identical while API tools
-                # are off. (API-family sources are omitted here — there is no
-                # data_query tool to query them in this manifest.)
+                # fields, no `available`/`notes`/`family`. Keeps the stable
+                # `/mcp` response byte-for-byte identical. (API-family sources
+                # are omitted — that channel has no data_query to query them.)
                 stable_keys = ("id", "name", "type", "description",
                                "is_erp", "dialect_name", "dialect_version")
                 dbs = [

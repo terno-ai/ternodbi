@@ -253,6 +253,27 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
             row_count=_COUNT,
         ),
     },
+    "list_connectors": {
+        "title": "List connectors",
+        "hints": dict(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False),
+        "output": _out(
+            "Every connector this organisation can use, with its connection status.",
+            connectors={
+                "type": "array",
+                "description": (
+                    "One entry per connector: `key`, `name`, `family`, "
+                    "`auth_type`, `status` and a `connect_url` to give the user."
+                ),
+                "items": {"type": "object", "additionalProperties": True},
+            },
+            count=_COUNT,
+            can_connect={
+                "type": "boolean",
+                "description": "Whether the caller may complete a connection.",
+            },
+            notes=_NOTES,
+        ),
+    },
     "list_actions": {
         "title": "List write actions",
         "hints": dict(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True),
@@ -405,6 +426,53 @@ TOOL_META: Dict[str, Dict[str, Any]] = {
 }
 
 
+# ------------------------------------------------------ the `stable` channel
+# The schemas from before the API-source tools existed, which the stable channel
+# keeps so its published tool list does not change (see `profiles`). Delete this
+# block once the stable channel carries the connector tools.
+_ERROR_STABLE = {
+    "type": "string",
+    "description": "Present instead of the payload when the call failed.",
+}
+
+_STABLE_META: Dict[str, Dict[str, Any]] = {
+    "list_datasources": {
+        "title": "List databases",
+        "hints": dict(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False),
+        "output": {
+            "type": "object",
+            "description": "The database connections this token may reach.",
+            "properties": {
+                "datasources": {
+                    "type": "array",
+                    "description": "Configured datasources, each with at least an id and a display name.",
+                    "items": {"type": "object", "additionalProperties": True},
+                },
+                "count": _COUNT,
+                "error": _ERROR_STABLE,
+            },
+            "additionalProperties": True,
+        },
+    },
+}
+
+
+def _meta_for(name: str) -> Dict[str, Any]:
+    """A tool's metadata as the current endpoint presents it."""
+    from terno_dbi.mcp.profiles import current_profile
+
+    meta = TOOL_META[name]
+    if current_profile().connectors:
+        return meta
+    if name in _STABLE_META:
+        return _STABLE_META[name]
+    properties = meta["output"].get("properties", {})
+    if "error" not in properties:
+        return meta
+    output = {**meta["output"], "properties": {**properties, "error": _ERROR_STABLE}}
+    return {**meta, "output": output}
+
+
 class MissingToolMetadata(RuntimeError):
     """A tool was listed without a title, annotations, and an output schema."""
 
@@ -426,7 +494,7 @@ def apply_tool_meta(tools: List[Tool]) -> List[Tool]:
 
     decorated = []
     for tool in tools:
-        meta = TOOL_META[tool.name]
+        meta = _meta_for(tool.name)
         decorated.append(
             tool.model_copy(
                 update={

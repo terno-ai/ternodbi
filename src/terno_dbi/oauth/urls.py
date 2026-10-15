@@ -9,6 +9,7 @@ host they start from.
 """
 
 from django.urls import path
+from terno_dbi.mcp.profiles import PREVIEW
 from terno_dbi.oauth import views
 
 app_name = "terno_dbi_oauth"
@@ -19,6 +20,12 @@ urlpatterns = [
         ".well-known/oauth-protected-resource",
         views.oauth_protected_resource,
         name="oauth-protected-resource",
+    ),
+    path(
+        ".well-known/oauth-protected-resource/mcp/preview",
+        views.oauth_protected_resource,
+        {"profile": PREVIEW},
+        name="oauth-protected-resource-preview",
     ),
     path(
         ".well-known/oauth-authorization-server",

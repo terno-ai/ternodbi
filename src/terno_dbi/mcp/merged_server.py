@@ -47,7 +47,25 @@ logger = logging.getLogger(__name__)
 
 SERVER_NAME = "terno"
 
-server = Server(SERVER_NAME, instructions=MERGED_INSTRUCTIONS)
+
+class _PerRequestToolServer(Server):
+    """Validates tool calls against the caller's own tool definitions.
+
+    The SDK validates call input and output against a tool cache held on the
+    server object, refilled by whichever `tools/list` ran last. One server
+    object serves every endpoint and grant, and `/mcp` and `/mcp/preview` define
+    some tools differently, so that cache would validate one caller's call
+    against another caller's listing. Resolve the definition from this
+    request's profile and grant instead. A tool the caller cannot see gets no
+    definition, so the call reaches `call_tool`, which refuses it.
+    """
+
+    async def _get_cached_tool_definition(self, tool_name: str) -> Optional[Tool]:
+        tools = visible_tools(current_scopes(), can_write())
+        return next((t for t in tools if t.name == tool_name), None)
+
+
+server = _PerRequestToolServer(SERVER_NAME, instructions=MERGED_INSTRUCTIONS)
 register_surface(server)
 
 
@@ -121,8 +139,7 @@ async def list_tools() -> List[Tool]:
     )
     return tools
 
-
-_QUERY_NAMES = {t.name for t in query_server.own_tools()}
+_QUERY_NAMES = {t.name for t in query_server._all_own_tools()}
 _ADMIN_NAMES = {t.name for t in admin_server.own_tools()}
 _COLLISIONS = _QUERY_NAMES & _ADMIN_NAMES
 if _COLLISIONS:

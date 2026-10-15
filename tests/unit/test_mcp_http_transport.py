@@ -35,15 +35,16 @@ WRITE_TOOLS = {
 
 # ------------------------------------------------------------ merged server
 
-def test_merged_server_carries_both_registries(monkeypatch):
-    # Assert the full (enabled) surface; the API-source tools are gated off by
-    # default so the submitted manifest stays frozen in production.
-    monkeypatch.setenv("TERNO_ENABLE_API_MCP_TOOLS", "true")
-    names = {t.name for t in merged_server.all_tools()}
+def test_merged_server_carries_both_registries():
+    # Assert the full (preview) surface; `/mcp` keeps the stable one.
+    from terno_dbi.mcp.profiles import PREVIEW, use_profile
+
+    with use_profile(PREVIEW):
+        names = {t.name for t in merged_server.all_tools()}
     assert "execute_query" in names          # query registry
     assert "add_datasource" in names         # admin registry
     assert "terno_guide" in names            # shared surface
-    assert len(names) == 31   # 15 query + 14 admin + terno_guide, minus dupes
+    assert len(names) == 34   # 18 query + 14 admin + terno_guide + connect_datasource
 
 
 def test_merged_instructions_fit_the_cap():

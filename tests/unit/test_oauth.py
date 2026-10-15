@@ -130,6 +130,15 @@ def test_protected_resource_metadata_shape():
     assert doc["resource"] == "https://mcp.terno.ai/mcp"
     assert doc["authorization_servers"] == [ISSUER]
     assert doc["bearer_methods_supported"] == ["header"]
+    # `/mcp` is the stable channel: connector:write is not advertised there.
+    assert set(doc["scopes_supported"]) == ALL_SCOPES - {"connector:write"}
+
+
+def test_preview_resource_metadata_names_its_own_url_and_every_scope():
+    from terno_dbi.mcp.profiles import PREVIEW
+
+    doc = protected_resource_metadata(RESOURCE, ISSUER, PREVIEW)
+    assert doc["resource"] == "https://mcp.terno.ai/mcp/preview"
     assert set(doc["scopes_supported"]) == ALL_SCOPES
 
 

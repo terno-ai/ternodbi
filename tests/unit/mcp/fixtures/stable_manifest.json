@@ -1,0 +1,1422 @@
+{
+ "authorization_server_metadata": {
+  "authorization_endpoint": "https://app.terno.ai/oauth/authorize/",
+  "code_challenge_methods_supported": [
+   "S256"
+  ],
+  "grant_types_supported": [
+   "authorization_code",
+   "refresh_token"
+  ],
+  "issuer": "https://mcp.terno.ai",
+  "registration_endpoint": "https://mcp.terno.ai/oauth/register",
+  "response_types_supported": [
+   "code"
+  ],
+  "revocation_endpoint": "https://mcp.terno.ai/oauth/revoke_token/",
+  "scopes_supported": [
+   "admin:read",
+   "admin:sync",
+   "admin:write",
+   "query:execute",
+   "query:read"
+  ],
+  "service_documentation": "https://mcp.terno.ai/docs",
+  "token_endpoint": "https://mcp.terno.ai/oauth/token/",
+  "token_endpoint_auth_methods_supported": [
+   "client_secret_post",
+   "client_secret_basic",
+   "none"
+  ]
+ },
+ "instructions": "SQL access to this organisation's databases, the durable memory recorded about them, and their schema metadata.\n\nRead flow: list_datasources, then list_tables / list_table_columns, then execute_query (SELECT only, public names) or get_sample_data.\n\nBefore answering any schema, join, or business-rule question you cannot verify from the schema alone, search memory: grep_memory or list_memories, then get_memory for the full entry. An index description is a hook, not the fact. Memory is shared — it holds what every agent before you learned about this data.\n\nWrites, where your access allows them: schema descriptions and names, memory, and the organisation prompt. **You only see the tools you may use** — if a write tool is not listed, you do not have that access, so say so rather than attempting the call.\n\nTo add a database, call connect_datasource and show the user the link it returns. Never ask for a connection string or password: the credential is entered in Terno so it never passes through this conversation.\n\nTwo server-enforced rules:\n1. Read before write. edit_memory, edit_org_prompt, and any save_memory or update_org_prompt replacing existing content require expected_hash from a read made just before.\n2. One fact per memory. Prefer edit_memory over a replacing save_memory — it preserves the [[name]] links other memories point at it with.\n\nstore='org' shares a memory with every agent working on this organisation's data; store='user' (the default) is private to you.\n\norg_prompt vs memory — decide by REACH, not importance. org_prompt is injected into every request for every user, so it costs tokens forever: put only always-apply directives there. Everything else goes in memory, which costs nothing until read. When unsure, choose memory, and never keep the same rule in both. Because org_prompt changes behaviour for everyone, show the user the exact wording first.\n\nFull guidance: ternodbi://docs. Orientation: terno_guide.",
+ "prompts": [
+  {
+   "arguments": [],
+   "description": "List reachable databases and summarise what is in them.",
+   "name": "explore-datasources",
+   "title": "Explore my databases"
+  },
+  {
+   "arguments": [],
+   "description": "Pick a datasource, read its schema, then write and run SQL.",
+   "name": "build-a-query",
+   "title": "Build a SQL query"
+  },
+  {
+   "arguments": [],
+   "description": "Find tables and columns missing descriptions.",
+   "name": "schema-health",
+   "title": "Review schema metadata"
+  }
+ ],
+ "protected_resource_metadata": {
+  "authorization_servers": [
+   "https://mcp.terno.ai"
+  ],
+  "bearer_methods_supported": [
+   "header"
+  ],
+  "resource": "https://mcp.terno.ai/mcp",
+  "resource_documentation": "https://mcp.terno.ai/docs",
+  "scopes_supported": [
+   "admin:read",
+   "admin:sync",
+   "admin:write",
+   "query:execute",
+   "query:read"
+  ]
+ },
+ "resources": [
+  {
+   "description": "Full guidance on reading schema, memory (stores, read-before-write), and when to use org_prompt versus memory. Referenced from the server instructions, which are length-capped and cannot carry it.",
+   "mimeType": "text/markdown",
+   "name": "TernoDBI connector guide",
+   "title": "Connector guide",
+   "uri": "ternodbi://docs"
+  },
+  {
+   "description": "Release history. Check here before assuming a capability exists in the version you are talking to.",
+   "mimeType": "text/markdown",
+   "name": "TernoDBI changelog",
+   "title": "Changelog",
+   "uri": "ternodbi://changelog"
+  }
+ ],
+ "tools": [
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false,
+    "title": "Add a database"
+   },
+   "description": "Add a new database connection. Validates the connection first.",
+   "inputSchema": {
+    "properties": {
+     "connection_json": {
+      "description": "Optional credentials JSON (required for BigQuery)",
+      "type": "object"
+     },
+     "connection_str": {
+      "description": "Connection string (e.g., postgresql://user:pass@host:port/db)",
+      "type": "string"
+     },
+     "description": {
+      "description": "Optional description of the datasource",
+      "type": "string"
+     },
+     "display_name": {
+      "description": "Display name for the datasource",
+      "type": "string"
+     },
+     "type": {
+      "description": "Database type (postgres, mysql, sqlite, bigquery, snowflake, oracle, databricks)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "display_name",
+     "type",
+     "connection_str"
+    ],
+    "type": "object"
+   },
+   "name": "add_datasource",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "The datasource that was created.",
+    "properties": {
+     "datasource": {
+      "additionalProperties": true,
+      "type": "object"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "success": {
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Add a database"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": false,
+    "title": "Connect a database"
+   },
+   "description": "Get the link the user opens to connect a database to Terno. Call this when they want to add a datasource, or when they have none yet. Takes no credentials: the connection details are entered in Terno, never in this conversation. Show the returned link to the user.",
+   "inputSchema": {
+    "properties": {
+     "type": {
+      "description": "Optional database type they mentioned (postgres, mysql, bigquery, snowflake, ...). Only used to phrase the reply.",
+      "type": "string"
+     }
+    },
+    "required": [],
+    "type": "object"
+   },
+   "name": "connect_datasource",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Where the user connects a database. Never contains credentials.",
+    "properties": {
+     "credential_required": {
+      "type": "boolean"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "instruction": {
+      "description": "What to do with the link.",
+      "type": "string"
+     },
+     "reason": {
+      "description": "Why this cannot be done in the conversation.",
+      "type": "string"
+     },
+     "setup_location": {
+      "description": "Prose fallback when no URL could be built.",
+      "type": "string"
+     },
+     "setup_url": {
+      "description": "Link for the user to open. Absent if the workspace could not be resolved.",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Connect a database"
+  },
+  {
+   "annotations": {
+    "destructiveHint": true,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false,
+    "title": "Delete a database connection"
+   },
+   "description": "Delete a datasource and all its metadata (tables, columns, etc.)",
+   "inputSchema": {
+    "properties": {
+     "datasource_id": {
+      "description": "ID of the datasource to delete",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "datasource_id"
+    ],
+    "type": "object"
+   },
+   "name": "delete_datasource",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Confirmation of the write, including the updated record where the API returns one.",
+    "properties": {
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "success": {
+      "description": "Whether the write was applied.",
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Delete a database connection"
+  },
+  {
+   "annotations": {
+    "destructiveHint": true,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": false,
+    "title": "Delete a saved fact"
+   },
+   "description": "Delete a persistent memory by name within its scope.",
+   "inputSchema": {
+    "properties": {
+     "datasource_id": {
+      "description": "Scope of the memory to delete",
+      "type": "integer"
+     },
+     "name": {
+      "description": "The memory's slug",
+      "type": "string"
+     },
+     "store": {
+      "description": "Which store the memory is in (default user)",
+      "enum": [
+       "user",
+       "org"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "name"
+    ],
+    "type": "object"
+   },
+   "name": "delete_memory",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Confirmation of the write, including the updated record where the API returns one.",
+    "properties": {
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "success": {
+      "description": "Whether the write was applied.",
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Delete a saved fact"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false,
+    "readOnlyHint": false,
+    "title": "Edit a saved fact"
+   },
+   "description": "Edit an existing memory by exact string replacement, preserving the rest of its content. `old_string` must be present and unique unless replace_all=true. Read the memory first (get_memory) and pass its `content_hash` as `expected_hash`.",
+   "inputSchema": {
+    "properties": {
+     "datasource_id": {
+      "description": "Scope of the memory to edit",
+      "type": "integer"
+     },
+     "expected_hash": {
+      "description": "The memory's current content_hash from get_memory (read-before-write)",
+      "type": "string"
+     },
+     "name": {
+      "description": "The memory's slug",
+      "type": "string"
+     },
+     "new_string": {
+      "description": "Replacement text",
+      "type": "string"
+     },
+     "old_string": {
+      "description": "Exact text to replace",
+      "type": "string"
+     },
+     "replace_all": {
+      "description": "Replace every occurrence (default false)",
+      "type": "boolean"
+     },
+     "store": {
+      "description": "Which store the memory is in (default user)",
+      "enum": [
+       "user",
+       "org"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "old_string",
+     "new_string",
+     "expected_hash"
+    ],
+    "type": "object"
+   },
+   "name": "edit_memory",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Confirmation, with the hash of the edited memory.",
+    "properties": {
+     "content_hash": {
+      "description": "Hash of the full text, to pass back as `expected_hash` on a later write.",
+      "type": "string"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "success": {
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Edit a saved fact"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": false,
+    "title": "Edit the organisation prompt"
+   },
+   "description": "Edit the organisation prompt by exact string replacement, preserving the rest of its content. `old_string` must be present and unique unless replace_all=true. Read it first (get_org_prompt) and pass its `content_hash` as `expected_hash`.",
+   "inputSchema": {
+    "properties": {
+     "expected_hash": {
+      "description": "The org prompt's current content_hash from get_org_prompt (read-before-write)",
+      "type": "string"
+     },
+     "new_string": {
+      "description": "Replacement text",
+      "type": "string"
+     },
+     "old_string": {
+      "description": "Exact text to replace",
+      "type": "string"
+     },
+     "replace_all": {
+      "description": "Replace every occurrence (default false)",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "old_string",
+     "new_string",
+     "expected_hash"
+    ],
+    "type": "object"
+   },
+   "name": "edit_org_prompt",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Confirmation, with the hash of the edited prompt.",
+    "properties": {
+     "content_hash": {
+      "description": "Hash of the full text, to pass back as `expected_hash` on a later write.",
+      "type": "string"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "success": {
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Edit the organisation prompt"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": true,
+    "title": "Run a SQL query"
+   },
+   "description": "Execute a SQL query using high-performance server-side streaming.\n\nReturns columns and data rows. Use max_rows to limit the number of rows returned.",
+   "inputSchema": {
+    "properties": {
+     "datasource": {
+      "description": "Datasource name or ID",
+      "type": "string"
+     },
+     "max_rows": {
+      "description": "Maximum number of rows to return (optional, returns all rows if not set)",
+      "type": "integer"
+     },
+     "sql": {
+      "description": "SQL query to execute (can use public names)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "datasource",
+     "sql"
+    ],
+    "type": "object"
+   },
+   "name": "execute_query",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Query results.",
+    "properties": {
+     "columns": {
+      "description": "Column names, in the order values appear in each row.",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "data": {
+      "description": "Result rows, each an object keyed by column name.",
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "row_count": {
+      "description": "Number of items returned.",
+      "type": "integer"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Run a SQL query"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": true,
+    "title": "Read a recorded fact"
+   },
+   "description": "Fetch the full content of one memory by its `name` (the slug shown in the memory index). The response includes `content_hash` — pass it back as `expected_hash` when you later edit or overwrite this memory.",
+   "inputSchema": {
+    "properties": {
+     "datasource_id": {
+      "description": "Optional: datasource scope to prefer when resolving the name",
+      "type": "integer"
+     },
+     "name": {
+      "description": "The memory's name/slug, e.g. 'zydus-active-users-join'",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name"
+    ],
+    "type": "object"
+   },
+   "name": "get_memory",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "One memory in full, with the hash needed to write to it.",
+    "properties": {
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "memory": {
+      "additionalProperties": true,
+      "description": "The memory: name, description, content, type, scope, and content_hash.",
+      "properties": {
+       "content_hash": {
+        "description": "Hash of the full text, to pass back as `expected_hash` on a later write.",
+        "type": "string"
+       }
+      },
+      "type": "object"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Read a recorded fact"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": true,
+    "title": "Read the organisation prompt"
+   },
+   "description": "Get this organisation's custom system-prompt addendum — text appended to the default LLM system prompt for all users in this organisation. The response includes `content_hash` — pass it back as `expected_hash` when you later edit or replace this prompt. Paginated like a file read: returns up to `limit` lines (default 2000) starting at 1-indexed `offset`; when `has_more` is true, page through with `next_offset`. `content_hash` always covers the full prompt regardless of which page you read.",
+   "inputSchema": {
+    "properties": {
+     "limit": {
+      "description": "Maximum number of lines to return (default 2000)",
+      "type": "integer"
+     },
+     "offset": {
+      "description": "1-indexed line number to start reading from (default 1)",
+      "type": "integer"
+     }
+    },
+    "required": [],
+    "type": "object"
+   },
+   "name": "get_org_prompt",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "A page of the organisation prompt. `content_hash` always covers the full text.",
+    "properties": {
+     "content_hash": {
+      "description": "Hash of the full text, to pass back as `expected_hash` on a later write.",
+      "type": "string"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "has_more": {
+      "description": "Whether more lines follow.",
+      "type": "boolean"
+     },
+     "next_offset": {
+      "description": "Offset to pass to read the next page.",
+      "type": "integer"
+     },
+     "org_prompt": {
+      "description": "The requested lines of the prompt.",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Read the organisation prompt"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true,
+    "title": "Preview sample rows"
+   },
+   "description": "Get sample rows from a table",
+   "inputSchema": {
+    "properties": {
+     "rows": {
+      "description": "Number of sample rows (default: 10)",
+      "type": "integer"
+     },
+     "table_id": {
+      "description": "ID of the table",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "table_id"
+    ],
+    "type": "object"
+   },
+   "name": "get_sample_data",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "A small sample of rows from the table.",
+    "properties": {
+     "columns": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "data": {
+      "description": "Result rows, each an object keyed by column name.",
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Preview sample rows"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true,
+    "title": "Inspect table metadata"
+   },
+   "description": "Get detailed table info (columns, stats, sample data) for AI agents to generate descriptions. Returns data needed to generate table and column descriptions.",
+   "inputSchema": {
+    "properties": {
+     "datasource_id": {
+      "description": "ID of the datasource",
+      "type": "integer"
+     },
+     "table_name": {
+      "description": "Name of the table",
+      "type": "string"
+     }
+    },
+    "required": [
+     "datasource_id",
+     "table_name"
+    ],
+    "type": "object"
+   },
+   "name": "get_table_info",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Columns, statistics, and sample data for one table — enough to write descriptions from.",
+    "properties": {
+     "columns": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "sample_data": {
+      "description": "Result rows, each an object keyed by column name.",
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Inspect table metadata"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": true,
+    "title": "Search recorded facts"
+   },
+   "description": "Regex-search the BODIES of memories and return matching index rows (name/description/type/scope, no bodies). Use to find a fact when you don't know its exact name.",
+   "inputSchema": {
+    "properties": {
+     "datasource_id": {
+      "description": "Optional: restrict to global + this datasource's memories",
+      "type": "integer"
+     },
+     "pattern": {
+      "description": "Regular expression matched (case-insensitive) against memory content",
+      "type": "string"
+     }
+    },
+    "required": [
+     "pattern"
+    ],
+    "type": "object"
+   },
+   "name": "grep_memory",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Index rows whose bodies matched the pattern. Bodies are not returned.",
+    "properties": {
+     "count": {
+      "description": "Number of items returned.",
+      "type": "integer"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "matches": {
+      "description": "Memory index rows — name, description, type, and scope. Bodies are not included.",
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Search recorded facts"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": true,
+    "title": "Search the organisation prompt"
+   },
+   "description": "Regex-search the organisation prompt's own text and return matching lines (1-indexed). Use to find a specific passage before editing it with edit_org_prompt.",
+   "inputSchema": {
+    "properties": {
+     "pattern": {
+      "description": "Regular expression matched (case-insensitive) against the org prompt's lines",
+      "type": "string"
+     }
+    },
+    "required": [
+     "pattern"
+    ],
+    "type": "object"
+   },
+   "name": "grep_org_prompt",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Matching lines from the organisation prompt, with 1-indexed line numbers.",
+    "properties": {
+     "count": {
+      "description": "Number of items returned.",
+      "type": "integer"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "matches": {
+      "description": "Matching lines, each with its line number and text.",
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Search the organisation prompt"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": true,
+    "title": "List databases"
+   },
+   "description": "List all configured database connections",
+   "inputSchema": {
+    "properties": {},
+    "required": [],
+    "type": "object"
+   },
+   "name": "list_datasources",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "The database connections this token may reach.",
+    "properties": {
+     "count": {
+      "description": "Number of items returned.",
+      "type": "integer"
+     },
+     "datasources": {
+      "description": "Configured datasources, each with at least an id and a display name.",
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "title": "List databases"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": true,
+    "title": "List recorded facts"
+   },
+   "description": "List the memory index (name, one-line description, type, scope — not full content) of persistent facts. Optionally scope to a datasource; global memories are always included. Use `get_memory` to read a full fact.",
+   "inputSchema": {
+    "properties": {
+     "datasource_id": {
+      "description": "Optional: include this datasource's scoped memories alongside global ones",
+      "type": "integer"
+     }
+    },
+    "required": [],
+    "type": "object"
+   },
+   "name": "list_memories",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "The memory index. Descriptions are hooks — call get_memory for a fact itself.",
+    "properties": {
+     "count": {
+      "description": "Number of items returned.",
+      "type": "integer"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "memories": {
+      "description": "Memory index rows — name, description, type, and scope. Bodies are not included.",
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array"
+     }
+    },
+    "type": "object"
+   },
+   "title": "List recorded facts"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true,
+    "title": "List columns in a table"
+   },
+   "description": "List all columns for a table with their public names and types",
+   "inputSchema": {
+    "properties": {
+     "datasource": {
+      "description": "Datasource name or ID",
+      "type": "string"
+     },
+     "table": {
+      "description": "Table name or ID",
+      "type": "string"
+     }
+    },
+    "required": [
+     "datasource",
+     "table"
+    ],
+    "type": "object"
+   },
+   "name": "list_table_columns",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Columns visible in the table, with public names and types.",
+    "properties": {
+     "columns": {
+      "description": "Visible columns, each with a public name, type, and any description.",
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "count": {
+      "description": "Number of items returned.",
+      "type": "integer"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "title": "List columns in a table"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true,
+    "title": "List tables"
+   },
+   "description": "List all tables in a datasource with their public names",
+   "inputSchema": {
+    "properties": {
+     "datasource": {
+      "description": "Datasource name or ID",
+      "type": "string"
+     }
+    },
+    "required": [
+     "datasource"
+    ],
+    "type": "object"
+   },
+   "name": "list_tables",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Tables visible in the datasource, with their public names.",
+    "properties": {
+     "count": {
+      "description": "Number of items returned.",
+      "type": "integer"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "tables": {
+      "description": "Visible tables. Write SQL against `public_name`, not the physical name.",
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array"
+     }
+    },
+    "type": "object"
+   },
+   "title": "List tables"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": false,
+    "title": "Rename a column"
+   },
+   "description": "Update the public display name of a column",
+   "inputSchema": {
+    "properties": {
+     "column_id": {
+      "description": "ID of the column to rename",
+      "type": "integer"
+     },
+     "public_name": {
+      "description": "New public display name for the column",
+      "type": "string"
+     }
+    },
+    "required": [
+     "column_id",
+     "public_name"
+    ],
+    "type": "object"
+   },
+   "name": "rename_column",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Confirmation of the write, including the updated record where the API returns one.",
+    "properties": {
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "success": {
+      "description": "Whether the write was applied.",
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Rename a column"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": false,
+    "title": "Rename a table"
+   },
+   "description": "Update the public display name of a table",
+   "inputSchema": {
+    "properties": {
+     "public_name": {
+      "description": "New public display name for the table",
+      "type": "string"
+     },
+     "table_id": {
+      "description": "ID of the table to rename",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "table_id",
+     "public_name"
+    ],
+    "type": "object"
+   },
+   "name": "rename_table",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Confirmation of the write, including the updated record where the API returns one.",
+    "properties": {
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "success": {
+      "description": "Whether the write was applied.",
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Rename a table"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false,
+    "readOnlyHint": false,
+    "title": "Save a fact"
+   },
+   "description": "Create or fully replace a persistent memory (a single fact recalled across sessions). One fact per memory. Set `datasource_id` when the fact is specific to one database's tables/columns/joins/rules; omit it for a global fact. `store`: 'user' (private to the caller) or 'org' (shared org-wide, admin only). To REPLACE an existing memory you must first read it (get_memory) and pass its `content_hash` as `expected_hash`.",
+   "inputSchema": {
+    "properties": {
+     "content": {
+      "description": "The full fact body (add Why/How-to-apply for feedback/project types)",
+      "type": "string"
+     },
+     "datasource_id": {
+      "description": "Optional: scope this fact to one datasource",
+      "type": "integer"
+     },
+     "description": {
+      "description": "One-line hook shown in the memory index",
+      "type": "string"
+     },
+     "expected_hash": {
+      "description": "Required when replacing an existing memory: its current content_hash from get_memory",
+      "type": "string"
+     },
+     "memory_type": {
+      "description": "Kind of fact (default: project)",
+      "enum": [
+       "user",
+       "feedback",
+       "project",
+       "reference"
+      ],
+      "type": "string"
+     },
+     "name": {
+      "description": "kebab-case slug, unique within scope, e.g. 'zydus-active-users-join'",
+      "type": "string"
+     },
+     "store": {
+      "description": "user = private to caller; org = shared org-wide (default user)",
+      "enum": [
+       "user",
+       "org"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "description",
+     "content"
+    ],
+    "type": "object"
+   },
+   "name": "save_memory",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Confirmation, with the hash of the stored memory.",
+    "properties": {
+     "content_hash": {
+      "description": "Hash of the full text, to pass back as `expected_hash` on a later write.",
+      "type": "string"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "success": {
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Save a fact"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false,
+    "title": "Sync schema metadata"
+   },
+   "description": "Discover and sync tables/columns from the database. Run this after adding a new datasource to load its schema.",
+   "inputSchema": {
+    "properties": {
+     "datasource_id": {
+      "description": "ID of the datasource to sync",
+      "type": "integer"
+     },
+     "overwrite": {
+      "description": "If true, update existing metadata",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "datasource_id"
+    ],
+    "type": "object"
+   },
+   "name": "sync_metadata",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "What the sync discovered and changed.",
+    "properties": {
+     "columns_added": {
+      "description": "Number of items returned.",
+      "type": "integer"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "success": {
+      "type": "boolean"
+     },
+     "tables_added": {
+      "description": "Number of items returned.",
+      "type": "integer"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Sync schema metadata"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": true,
+    "title": "About this connector"
+   },
+   "description": "Orientation for this connector: what it can do, the canonical tool sequence, and what changed in recent versions. Call at most once per conversation, when you are unsure what the connector supports — not before every task.",
+   "inputSchema": {
+    "properties": {
+     "mode": {
+      "description": "'tour' for what the connector does and how to use it; 'whats_new' for the changelog. Default 'tour'.",
+      "enum": [
+       "tour",
+       "whats_new"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [],
+    "type": "object"
+   },
+   "name": "terno_guide",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Orientation text for the connector.",
+    "properties": {
+     "content": {
+      "description": "Markdown guide text.",
+      "type": "string"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "mode": {
+      "description": "Which guide was returned: 'tour' or 'whats_new'.",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "title": "About this connector"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": false,
+    "title": "Describe a column"
+   },
+   "description": "Update the description of a column",
+   "inputSchema": {
+    "properties": {
+     "column_id": {
+      "description": "ID of the column",
+      "type": "integer"
+     },
+     "description": {
+      "description": "New description for the column",
+      "type": "string"
+     }
+    },
+    "required": [
+     "column_id",
+     "description"
+    ],
+    "type": "object"
+   },
+   "name": "update_column_description",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Confirmation of the write, including the updated record where the API returns one.",
+    "properties": {
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "success": {
+      "description": "Whether the write was applied.",
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Describe a column"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": false,
+    "title": "Replace the organisation prompt"
+   },
+   "description": "Create or fully replace this organisation's custom system-prompt addendum — text appended to the default LLM system prompt for all users in this organisation. To REPLACE an existing (non-blank) prompt you must first read it (get_org_prompt) and pass its `content_hash` as `expected_hash`. Capped at a max length per call — if rejected as too long, write a shorter initial version here, then use the uncapped edit_org_prompt to grow it further.\n\nWrite as short imperative bullets (terminology, default units, must-apply filters) — one directive per line, no prose, no meta-commentary about why a rule exists. Aim for a few hundred words; the cap above is a hard backstop, not a target. For revisions, prefer edit_org_prompt over a fresh update_org_prompt — a full replace risks silently dropping an existing directive you didn't know mattered. Because this changes behavior for every user in the organisation, show the requesting user the exact wording before writing it.",
+   "inputSchema": {
+    "properties": {
+     "expected_hash": {
+      "description": "Required when replacing a non-blank org_prompt: its current content_hash from get_org_prompt",
+      "type": "string"
+     },
+     "org_prompt": {
+      "description": "New organisation prompt text (replaces the existing value)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "org_prompt"
+    ],
+    "type": "object"
+   },
+   "name": "update_org_prompt",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Confirmation, with the hash of the stored prompt.",
+    "properties": {
+     "content_hash": {
+      "description": "Hash of the full text, to pass back as `expected_hash` on a later write.",
+      "type": "string"
+     },
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "success": {
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Replace the organisation prompt"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": false,
+    "title": "Describe a table"
+   },
+   "description": "Update the description of a table",
+   "inputSchema": {
+    "properties": {
+     "description": {
+      "description": "New description for the table",
+      "type": "string"
+     },
+     "table_id": {
+      "description": "ID of the table",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "table_id",
+     "description"
+    ],
+    "type": "object"
+   },
+   "name": "update_table_description",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Confirmation of the write, including the updated record where the API returns one.",
+    "properties": {
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "success": {
+      "description": "Whether the write was applied.",
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Describe a table"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true,
+    "title": "Test a database connection"
+   },
+   "description": "Test a database connection before adding a datasource. Supported types: postgres, mysql, sqlite, bigquery, snowflake, oracle, databricks",
+   "inputSchema": {
+    "properties": {
+     "connection_json": {
+      "description": "Optional credentials JSON (required for BigQuery)",
+      "type": "object"
+     },
+     "connection_str": {
+      "description": "Connection string (e.g., postgresql://user:pass@host:port/db)",
+      "type": "string"
+     },
+     "type": {
+      "description": "Database type (postgres, mysql, sqlite, bigquery, snowflake, oracle, databricks)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "type",
+     "connection_str"
+    ],
+    "type": "object"
+   },
+   "name": "validate_connection",
+   "outputSchema": {
+    "additionalProperties": true,
+    "description": "Whether the connection succeeded.",
+    "properties": {
+     "error": {
+      "description": "Present instead of the payload when the call failed.",
+      "type": "string"
+     },
+     "message": {
+      "description": "Detail on the outcome, including the failure reason.",
+      "type": "string"
+     },
+     "success": {
+      "description": "Whether the database accepted the connection.",
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "title": "Test a database connection"
+  }
+ ]
+}

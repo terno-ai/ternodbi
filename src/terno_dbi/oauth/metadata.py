@@ -12,15 +12,23 @@ the existing authentication flow are served by different vhosts.
 """
 
 from typing import Any, Dict
-from terno_dbi.oauth.scopes import ALL_SCOPES, scope_string
+from terno_dbi.mcp.profiles import STABLE, Profile
+from terno_dbi.oauth.scopes import scope_string
 
 
-def protected_resource_metadata(resource_url: str, auth_server_url: str) -> Dict[str, Any]:
-    """RFC 9728. Served at `/.well-known/oauth-protected-resource`."""
+def protected_resource_metadata(
+    resource_url: str, auth_server_url: str, profile: Profile = STABLE
+) -> Dict[str, Any]:
+    """RFC 9728 metadata for one MCP endpoint.
+
+    Served at `/.well-known/oauth-protected-resource` for `/mcp`, and with the
+    endpoint's path appended for the others (`.../mcp/preview`), since clients
+    check that `resource` names the URL they connected to.
+    """
     return {
-        "resource": f"{resource_url.rstrip('/')}/mcp",
+        "resource": f"{resource_url.rstrip('/')}{profile.path}",
         "authorization_servers": [auth_server_url.rstrip("/")],
-        "scopes_supported": sorted(ALL_SCOPES),
+        "scopes_supported": sorted(profile.advertised_scopes),
         "bearer_methods_supported": ["header"],
         "resource_documentation": f"{resource_url.rstrip('/')}/docs",
     }
@@ -46,7 +54,7 @@ def authorization_server_metadata(
         "token_endpoint": f"{base}/oauth/token/",
         "revocation_endpoint": f"{base}/oauth/revoke_token/",
         "registration_endpoint": f"{base}/oauth/register",
-        "scopes_supported": sorted(ALL_SCOPES),
+        "scopes_supported": sorted(STABLE.advertised_scopes),
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256"],
