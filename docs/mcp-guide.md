@@ -98,6 +98,53 @@ Use this if you are modifying TernoDBI code locally.
 }
 ```
 
+## Hosting over HTTP: stable and preview channels
+
+Hosted, both registries are served as one server over Streamable HTTP, with
+OAuth 2.1 (dynamic client registration, PKCE) instead of an API key in the
+environment. Run the standalone server's ASGI app to get this, together with
+the REST API and OAuth endpoints (`ternodbi start` runs Django's WSGI dev
+server, which does not serve `/mcp`):
+
+```bash
+pip install 'terno-dbi[http]'
+uvicorn terno_dbi.server.asgi:application --port 8376
+```
+
+`dbi-mcp serve --transport http` serves the MCP endpoint alone, authenticating
+bearer tokens against an existing TernoDBI database.
+
+A hosted endpoint is often listed somewhere — a client's connector directory,
+a customer's configuration — where its tool list is expected not to change
+without notice, while new tools still need testing with real clients. So the
+server has two **release channels**, each fixed to its own URL in code
+(`terno_dbi.mcp.profiles`), not by a setting:
+
+| Channel | Endpoint | What it exposes |
+|---|---|---|
+| `stable` | `/mcp` | The released tools. Changes only on purpose. |
+| `preview` | `/mcp/preview` | Everything, including tools not yet released on `stable` (currently the API-source connector tools and `connector:write`). |
+
+Each endpoint has its own OAuth protected-resource metadata, as RFC 9728
+requires: `/.well-known/oauth-protected-resource` for `/mcp` and
+`/.well-known/oauth-protected-resource/mcp/preview` for the preview. The
+authorization server is shared. On the consent screen, scopes that the
+requesting endpoint (the client's RFC 8707 `resource`) does not offer are
+neither shown nor granted.
+
+```bash
+dbi-mcp serve --transport http                      # stable channel
+dbi-mcp serve --transport http --profile preview    # preview channel
+```
+
+**Releasing.** `tests/unit/mcp/test_stable_manifest.py` pins everything a client
+sees on `/mcp` — tools, prompts, resources, instructions, discovery documents —
+to a snapshot. To release preview tools on `/mcp`, change the `STABLE` channel
+in `profiles.py` and regenerate the snapshot (see
+`tests/unit/mcp/manifest_snapshot.py`). Don't mount `/mcp` with the preview
+channel instead: its discovery documents name `/mcp/preview`, and clients
+reject metadata whose `resource` differs from the URL they connected to.
+
 ## Troubleshooting
 
 *   **Connection Refused**: Ensure the Django server is running (`python manage.py runserver`).

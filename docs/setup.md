@@ -31,6 +31,21 @@ TernoDBI works out-of-the-box with SQLite, but production use requires configuri
 | `DBI_DEBUG` | Enable debug mode (detailed errors). | `True` |
 | `DBI_ALLOWED_HOSTS` | Comma-separated list of allowed hostnames. | `*` |
 | `DATABASE_ENGINE` | Primary backend DB: `MYSQL`, `POSTGRESQL`, or empty (SQLite). | `SQLite` |
+| `MCP_ENCRYPTION_KEY` | Fernet key encrypting stored credentials and OAuth tokens. **Required when `DBI_DEBUG=False`.** | Derived from `DBI_SECRET_KEY` in debug only |
+| `MCP_ENCRYPTION_KEYS` | Comma-separated keys for rotation; the first encrypts, any decrypts. | — |
+| `TERNO_LOCAL_PORT` | Port used to build local URLs. | `8376` |
+| `TERNO_MCP_BASE_URL` | Public URL of the MCP server, used in OAuth discovery. | `http://127.0.0.1:<port>` |
+| `PROVISIONER_URL` | Host that serves the browser OAuth consent page. | `http://127.0.0.1:<port>` |
+| `DJANGO_PROJECT_PATH` | Share the SQLite database of another Django project. | — |
+| `TERNODBI_LOG_LEVEL` | Log level. | `INFO` |
+
+API-connector OAuth credentials (`TERNO_GOOGLE_OAUTH_CLIENT_ID`, …) are listed in the [README](../README.md#api-connectors).
+
+Generate an encryption key with:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
 
 ### Database Specific Configuration
 

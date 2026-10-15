@@ -85,9 +85,11 @@ agents = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/ternoai/ternodbi"
-"Repository" = "https://github.com/ternoai/ternodbi"
-"Documentation" = "https://docs.ternoai.com/dbi"
+"Homepage" = "https://github.com/terno-ai/ternodbi"
+"Repository" = "https://github.com/terno-ai/ternodbi"
+"Documentation" = "https://github.com/terno-ai/ternodbi/tree/main/docs"
+"Issues" = "https://github.com/terno-ai/ternodbi/issues"
+"Changelog" = "https://github.com/terno-ai/ternodbi/blob/main/CHANGELOG.md"
 
 [project.scripts]
 dbi-mcp = "terno_dbi.mcp.__main__:main"
