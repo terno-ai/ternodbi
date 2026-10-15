@@ -126,11 +126,12 @@ def connect(request):
     """Entry point for a connect link. Dispatches by the connector's auth type."""
     from terno_dbi.connectors.api.model.errors import ApiError
     from terno_dbi.connectors.api.auth.oauth import start_authorization
+    from terno_dbi.catalog.availability import offered_connectors
     from terno_dbi.core.models import ConnectorCatalog
     from terno_dbi.mcp.setup_link import datasource_setup_url
 
     connector_key = request.GET.get("connector", "")
-    catalog = ConnectorCatalog.objects.filter(key=connector_key, enabled=True).first()
+    catalog = offered_connectors().filter(key=connector_key).first()
     if catalog is None:
         return HttpResponseBadRequest("Unknown or disabled connector.")
 

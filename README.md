@@ -239,6 +239,7 @@ The standalone server reads these environment variables (full list in the [Setup
 | `DATABASE_ENGINE` | `POSTGRESQL`, `MYSQL`, or empty for SQLite | SQLite |
 | `TERNO_MCP_BASE_URL` | Public URL of the MCP server, used in OAuth discovery | `http://127.0.0.1:8376` |
 | `TERNODBI_LOG_LEVEL` | Log level | `INFO` |
+| `TERNO_DISABLED_CONNECTORS` | Comma-separated connector keys this deployment withholds — e.g. offered on staging but hidden in production until approved. Withheld connectors are not listed anywhere and can't be connected; existing connections keep working. | none |
 
 **Before running anywhere other than your own machine:**
 * Set `DBI_DEBUG=False`, a random `DBI_SECRET_KEY`, and `DBI_ALLOWED_HOSTS`.

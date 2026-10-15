@@ -20,6 +20,7 @@ from terno_dbi.services.shield import prepare_mdb, generate_native_sql
 from terno_dbi.services.access import get_admin_config_object
 from terno_dbi.services.resolver import resolve_datasource
 from terno_dbi.decorators import require_service_auth
+from terno_dbi.catalog.availability import offered_connectors
 from terno_dbi.mcp.setup_link import connect_url
 from django.contrib.auth.models import Group
 from django.contrib.auth.models import User
@@ -178,7 +179,7 @@ def _available_connectors(datasources, org_subdomain):
     }
 
     entries = []
-    for catalog in models.ConnectorCatalog.objects.filter(enabled=True):
+    for catalog in offered_connectors():
         if catalog.key in connected_api_keys:
             continue
         entry = {
@@ -276,7 +277,7 @@ def list_connectors(request):
                 ds_by_key[key] = ds
 
     connectors = []
-    for catalog in models.ConnectorCatalog.objects.filter(enabled=True):
+    for catalog in offered_connectors():
         ds = ds_by_key.get(catalog.key)
         entry = {
             "key": catalog.key,

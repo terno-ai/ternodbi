@@ -138,17 +138,19 @@ def _connected_datasource(org, connector_key):
 
 
 def _connector_cards(org) -> list:
-    """A card per enabled API connector, carrying this org's connection state.
+    """A card per offered API connector, carrying this org's connection state.
 
-    The *offer* is the ConnectorCatalog (family=api, enabled); the *state* is the
+    The *offer* is the ConnectorCatalog (family=api, enabled, not withheld by
+    TERNO_DISABLED_CONNECTORS); the *state* is the
     org's DataSource for each. Every connector declared and enabled in ternodbi
     appears here automatically — there is no per-connector code. A connected row
     wins over an unauthenticated leftover for the same source.
     """
-    from terno_dbi.core.models import ConnectorAccountSelection, ConnectorCatalog, DataSource
+    from terno_dbi.catalog.availability import offered_connectors
+    from terno_dbi.core.models import ConnectorAccountSelection, DataSource
     from django.db.models import Count, Q
 
-    catalogs = list(ConnectorCatalog.objects.filter(family="api", enabled=True))
+    catalogs = list(offered_connectors().filter(family="api"))
     ds_by_key = {}
     for ds in (DataSource.objects
                .filter(organisation=org, catalog__family="api")

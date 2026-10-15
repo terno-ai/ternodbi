@@ -38,6 +38,7 @@ TernoDBI works out-of-the-box with SQLite, but production use requires configuri
 | `PROVISIONER_URL` | Host that serves the browser OAuth consent page. | `http://127.0.0.1:<port>` |
 | `DJANGO_PROJECT_PATH` | Share the SQLite database of another Django project. | — |
 | `TERNODBI_LOG_LEVEL` | Log level. | `INFO` |
+| `TERNO_DISABLED_CONNECTORS` | Comma-separated connector keys to withhold on this deployment (not listed, not connectable; existing connections keep working). | — |
 
 API-connector OAuth credentials (`TERNO_GOOGLE_OAUTH_CLIENT_ID`, …) are listed in the [README](../README.md#api-connectors).
 
