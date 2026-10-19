@@ -357,7 +357,7 @@ _APIS: List[ConnectorSpec] = [
         default_report_type="Insights",
         rate_limit_per_second=50,
         rate_limit_per_day=100000,
-        default_enabled=False,   # Business Verification + App Review pending
+        default_enabled=True,
     ),
     ConnectorSpec(
         key="instagram_insights",
