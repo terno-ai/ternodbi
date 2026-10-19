@@ -361,6 +361,48 @@ _APIS: List[ConnectorSpec] = [
         default_enabled=True,
     ),
     ConnectorSpec(
+        key="facebook_pages",
+        display_name="Facebook Pages",
+        provider="Meta",
+        category="Social",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="The Facebook Pages you manage and the content on them — "
+                    "the Page's own posts, posts and comments left by visitors, "
+                    "and recommendations.",
+        scopes_label="Facebook Pages read access",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=False,
+        account_label_singular="Facebook Page",
+        account_label_plural="Facebook Pages",
+        report_types=[
+            ReportType(
+                "Pages", "Managed Pages", is_date_range_required=False),
+            ReportType(
+                "Posts", "Page posts (published by the Page)",
+                is_date_range_required=False),
+            ReportType(
+                "VisitorPosts", "Visitor posts (by other people)",
+                is_date_range_required=False),
+            ReportType(
+                "PostComments", "Comments on a post",
+                is_date_range_required=False,
+                settings=[ReportSetting(
+                    "post_id", label="Post id",
+                    help_text="The Page post id whose comments to list (from "
+                              "the Posts report).")],
+            ),
+            ReportType(
+                "Ratings", "Recommendations / reviews",
+                is_date_range_required=False),
+        ],
+        default_report_type="Pages",
+        rate_limit_per_second=50,
+        rate_limit_per_day=100000,
+        default_enabled=True,
+    ),
+    ConnectorSpec(
         key="instagram_insights",
         display_name="Instagram Insights",
         provider="Meta",

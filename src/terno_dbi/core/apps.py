@@ -59,6 +59,9 @@ def _register_api_connectors():
     from terno_dbi.connectors.api.sources.google_sheets import make_google_sheets_connector
     from terno_dbi.connectors.api.sources.linkedin_ads import make_linkedin_ads_connector
     from terno_dbi.connectors.api.sources.meta_ads import make_meta_ads_connector
+    from terno_dbi.connectors.api.sources.facebook_pages import (
+        make_facebook_pages_connector,
+    )
     from terno_dbi.connectors.api.sources.instagram_insights import (
         make_instagram_insights_connector,
     )
@@ -81,6 +84,7 @@ def _register_api_connectors():
     registry.register("google_drive", make_google_drive_connector)
     registry.register("google_sheets", make_google_sheets_connector)
     registry.register("meta_ads", make_meta_ads_connector)
+    registry.register("facebook_pages", make_facebook_pages_connector)
     registry.register("instagram_insights", make_instagram_insights_connector)
     registry.register("instagram_public", make_instagram_public_connector)
     registry.register("linkedin_ads", make_linkedin_ads_connector)

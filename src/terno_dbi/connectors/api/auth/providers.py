@@ -103,6 +103,17 @@ _META = OAuthProvider(
     use_pkce=False,   # Meta's flow is not PKCE
 )
 
+_FACEBOOK_PAGES = OAuthProvider(
+    name="meta",
+    authorization_url="https://www.facebook.com/v25.0/dialog/oauth",
+    token_url="https://graph.facebook.com/v25.0/oauth/access_token",
+    scope="public_profile,pages_show_list,pages_read_engagement,"
+          "pages_read_user_content,business_management",
+    client_id_env="TERNO_META_APP_ID",
+    client_secret_env="TERNO_META_APP_SECRET",
+    use_pkce=False,
+)
+
 _INSTAGRAM = OAuthProvider(
     name="meta",
     authorization_url="https://www.facebook.com/v25.0/dialog/oauth",
@@ -294,6 +305,7 @@ _PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
         "https://www.googleapis.com/auth/spreadsheets.readonly "
         "https://www.googleapis.com/auth/drive.readonly"),
     "meta_ads": _META,
+    "facebook_pages": _FACEBOOK_PAGES,
     "instagram_insights": _INSTAGRAM,
     "instagram_public": _INSTAGRAM,
     "linkedin_ads": _LINKEDIN,
