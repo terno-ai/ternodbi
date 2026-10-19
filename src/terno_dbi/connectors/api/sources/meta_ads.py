@@ -177,22 +177,72 @@ class MetaAdsConnector(ApiConnector):
 
     # -- discovery ----------------------------------------------------------
 
+    _ACCOUNT_FIELDS = "id,name,account_id,currency,timezone_name"
+
     def list_accounts(self) -> List[Account]:
-        data = self._call(
-            "GET", f"{_BASE}/me/adaccounts",
-            {"fields": "id,name,account_id,currency,timezone_name"})
-        accounts: List[Account] = []
-        for acc in data.get("data", []):
-            acc_id = acc.get("id") or acc.get("account_id")
-            if not acc_id:
+        """Every ad account this login can reach.
+
+        `/me/adaccounts` only returns ad accounts the user is *directly*
+        assigned to. Accounts owned by (or shared into) a Business Manager that
+        the user reaches through the business are not on that edge, so we also
+        walk `/me/businesses` and collect each business's owned and client ad
+        accounts. Results are merged and de-duplicated by account id.
+        """
+        by_id: Dict[str, Account] = {}
+
+        self._collect_accounts(
+            f"{_BASE}/me/adaccounts",
+            {"fields": self._ACCOUNT_FIELDS}, by_id)
+
+        try:
+            businesses = self._paged(
+                f"{_BASE}/me/businesses", {"fields": "id"})
+        except ApiError:
+            # business_management may be absent/denied; direct accounts still stand.
+            businesses = []
+
+        for biz in businesses:
+            biz_id = biz.get("id")
+            if not biz_id:
                 continue
-            accounts.append(Account(
+            for edge in ("owned_ad_accounts", "client_ad_accounts"):
+                try:
+                    self._collect_accounts(
+                        f"{_BASE}/{biz_id}/{edge}",
+                        {"fields": self._ACCOUNT_FIELDS}, by_id)
+                except ApiError:
+                    continue   # one business/edge failing must not drop the rest
+
+        return list(by_id.values())
+
+    def _collect_accounts(self, url: str, params: Dict[str, Any],
+                          by_id: Dict[str, "Account"]) -> None:
+        for acc in self._paged(url, params):
+            acc_id = acc.get("id") or acc.get("account_id")
+            if not acc_id or acc_id in by_id:
+                continue
+            by_id[acc_id] = Account(
                 id=acc_id,
                 name=acc.get("name", acc_id),
                 currency=acc.get("currency"),
                 timezone=acc.get("timezone_name"),
-            ))
-        return accounts
+            )
+
+    def _paged(self, url: str, params: Dict[str, Any],
+               max_pages: int = 20) -> List[Dict[str, Any]]:
+        """Follow Graph cursor pagination, capped so a huge org can't loop."""
+        out: List[Dict[str, Any]] = []
+        page_params = dict(params)
+        for _ in range(max_pages):
+            data = self._call("GET", url, page_params)
+            out.extend(data.get("data", []))
+            after = (data.get("paging", {})
+                         .get("cursors", {})
+                         .get("after"))
+            if not after or not data.get("data"):
+                break
+            page_params = {**params, "after": after}
+        return out
 
     def list_fields(self, report_type: Optional[str] = None) -> List[Field]:
         return list(_fields_for(report_type).values())

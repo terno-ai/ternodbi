@@ -78,6 +78,27 @@ class TestListAccounts:
         assert accounts[0].currency == "USD"
         assert accounts[0].timezone == "America/New_York"
 
+    def test_merges_business_manager_accounts_deduped(self):
+        # Direct edge returns act_111; the business owns act_111 (dup) + act_333
+        # and has a client act_444. All distinct ids should surface once.
+        conn = _connector({
+            ("GET", "/me/adaccounts"): {"data": [
+                {"id": "act_111", "name": "Acme", "currency": "USD"}]},
+            ("GET", "/me/businesses"): {"data": [{"id": "biz_1"}]},
+            ("GET", "/biz_1/owned_ad_accounts"): {"data": [
+                {"id": "act_111", "name": "Acme", "currency": "USD"},
+                {"id": "act_333", "name": "CloudxLab", "currency": "INR"}]},
+            ("GET", "/biz_1/client_ad_accounts"): {"data": [
+                {"id": "act_444", "name": "Client", "currency": "USD"}]},
+        })
+        accounts = conn.list_accounts()
+        assert {a.id for a in accounts} == {"act_111", "act_333", "act_444"}
+
+    def test_business_enumeration_failure_keeps_direct_accounts(self):
+        # No /me/businesses route -> that call errors; direct accounts still returned.
+        conn = _connector({("GET", "/me/adaccounts"): ADACCOUNTS})
+        assert {a.id for a in conn.list_accounts()} == {"act_111", "act_222"}
+
 
 class TestListFields:
     def test_insights_vs_entity_catalogues(self):
