@@ -353,6 +353,7 @@ _APIS: List[ConnectorSpec] = [
             ReportType("Campaigns", "Campaigns"),
             ReportType("AdSets", "Ad sets"),
             ReportType("Ads", "Ads"),
+            ReportType("ActionTypes", "Action types present (diagnostic)"),
         ],
         default_report_type="Insights",
         rate_limit_per_second=50,
