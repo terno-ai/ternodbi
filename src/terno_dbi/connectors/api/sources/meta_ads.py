@@ -96,20 +96,24 @@ _INSIGHTS_METRICS: List[Field] = [
 # so the omni_* aggregate is never double-counted with its pixel variant.
 _P = ["omni_purchase", "purchase",
       "offsite_conversion.fb_pixel_purchase", "onsite_web_purchase",
-      "onsite_web_app_purchase"]
+      "onsite_web_app_purchase", "web_in_store_purchase",
+      "web_app_in_store_purchase"]
 _LEAD = ["lead", "onsite_conversion.lead_grouped",
          "offsite_conversion.fb_pixel_lead", "onsite_web_lead"]
 _MSG = ["onsite_conversion.messaging_conversation_started_7d",
         "messaging_conversation_started_7d"]
 _VC = ["omni_view_content", "view_content",
-       "offsite_conversion.fb_pixel_view_content"]
+       "offsite_conversion.fb_pixel_view_content",
+       "onsite_web_view_content", "onsite_web_app_view_content"]
 _ATC = ["omni_add_to_cart", "add_to_cart",
-        "offsite_conversion.fb_pixel_add_to_cart"]
+        "offsite_conversion.fb_pixel_add_to_cart",
+        "onsite_web_add_to_cart", "onsite_web_app_add_to_cart"]
 _IC = ["omni_initiated_checkout", "initiate_checkout",
-       "offsite_conversion.fb_pixel_initiate_checkout"]
+       "offsite_conversion.fb_pixel_initiate_checkout",
+       "onsite_web_initiate_checkout", "onsite_web_app_initiate_checkout"]
 _REG = ["omni_complete_registration", "complete_registration",
         "offsite_conversion.fb_pixel_complete_registration"]
-_LPV = ["landing_page_view"]
+_LPV = ["landing_page_view", "omni_landing_page_view"]
 _VID = ["video_view"]
 
 _ACTION_METRICS: Dict[str, Dict[str, Any]] = {
@@ -122,12 +126,16 @@ _ACTION_METRICS: Dict[str, Dict[str, Any]] = {
     "initiate_checkout": {"src": "actions", "types": _IC},
     "add_payment_info": {"src": "actions",
                          "types": ["omni_add_payment_info", "add_payment_info",
-                                   "offsite_conversion.fb_pixel_add_payment_info"]},
+                                   "offsite_conversion.fb_pixel_add_payment_info",
+                                   "onsite_web_add_payment_info",
+                                   "onsite_web_app_add_payment_info"]},
     "add_to_wishlist": {"src": "actions",
                         "types": ["omni_add_to_wishlist", "add_to_wishlist",
-                                  "offsite_conversion.fb_pixel_add_to_wishlist"]},
+                                  "offsite_conversion.fb_pixel_add_to_wishlist",
+                                  "onsite_web_add_to_wishlist"]},
     "search": {"src": "actions", "types": ["omni_search", "search",
-                                           "offsite_conversion.fb_pixel_search"]},
+                                           "offsite_conversion.fb_pixel_search",
+                                           "onsite_web_search"]},
     "subscribe": {"src": "actions",
                   "types": ["subscribe", "omni_subscribe"]},
     "start_trial": {"src": "actions",

@@ -261,6 +261,25 @@ class TestConversionMetrics:
             def json(self): raise ValueError("not json")
         assert _meta_error_message(_Broken()) == "Bad Request"
 
+    def test_omni_wins_over_variants_no_double_count(self):
+        # Both omni_purchase and web_in_store_purchase present with the same 67;
+        # first-match must take omni and report 67, not 134.
+        row = {"data": [{"actions": [
+            {"action_type": "web_in_store_purchase", "value": "67"},
+            {"action_type": "omni_purchase", "value": "67"},
+        ]}]}
+        conn = MetaAdsConnector(_DS(), http=_mock_http({
+            ("GET", "act_111/insights"): row}))
+        assert conn.query(self._spec(("purchases",))).rows[0]["purchases"] == 67
+
+    def test_variant_resolves_when_omni_absent(self):
+        # Account lacks omni_purchase -> falls back to web_in_store_purchase.
+        row = {"data": [{"actions": [
+            {"action_type": "web_in_store_purchase", "value": "42"}]}]}
+        conn = MetaAdsConnector(_DS(), http=_mock_http({
+            ("GET", "act_111/insights"): row}))
+        assert conn.query(self._spec(("purchases",))).rows[0]["purchases"] == 42
+
     def test_action_metric_dict_and_field_ids_match(self):
         from terno_dbi.connectors.api.sources.meta_ads import (
             _ACTION_METRICS, _ACTION_METRIC_FIELDS)
