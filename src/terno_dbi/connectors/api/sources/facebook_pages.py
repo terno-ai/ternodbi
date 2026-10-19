@@ -9,12 +9,14 @@ Reports:
                      Uses `pages_show_list`.
   * "Posts"        — a Page's own recently published posts.
                      Uses `pages_read_engagement`.
-  * "VisitorPosts" — posts made by *other people* on the Page's timeline.
-                     Uses `pages_read_user_content`.
   * "PostComments" — comments left by users on a given Page post (`post_id`).
                      Uses `pages_read_user_content`.
   * "Ratings"      — recommendations / reviews left by users on the Page.
                      Uses `pages_read_user_content`.
+
+The `visitor_posts` edge (posts made by other people on the Page's timeline) is
+intentionally not exposed: Meta deprecated it for the New Pages Experience, which
+is now the default, so it returns a permissions error for most Pages.
 
 Page-scoped reads require a *Page* access token, not the user token. Those
 tokens come from `GET /me/accounts` (the same call that lists the Pages), so a
@@ -98,17 +100,6 @@ _POST_FIELDS: List[Field] = [
 _POST_API_FIELDS = ["id", "created_time", "message", "permalink_url",
                     "status_type"]
 
-# --- Visitor posts (posts by other people on the Page) ----------------------
-
-_VISITOR_FIELDS: List[Field] = [
-    Field("id", "Post ID", "dimension", data_type="string"),
-    Field("created_time", "Posted", "dimension", data_type="string"),
-    Field("from_name", "Author", "dimension", data_type="string"),
-    Field("message", "Message", "dimension", data_type="string"),
-    Field("permalink_url", "Permalink", "dimension", data_type="string"),
-]
-_VISITOR_API_FIELDS = ["id", "created_time", "from", "message", "permalink_url"]
-
 # --- Comments on a Page post ------------------------------------------------
 
 _COMMENT_FIELDS: List[Field] = [
@@ -135,7 +126,6 @@ _RATING_API_FIELDS = ["created_time", "recommendation_type", "review_text",
 _REPORTS: Dict[str, List[Field]] = {
     "Pages": list(_PAGE_FIELDS),
     "Posts": list(_POST_FIELDS),
-    "VisitorPosts": list(_VISITOR_FIELDS),
     "PostComments": list(_COMMENT_FIELDS),
     "Ratings": list(_RATING_FIELDS),
 }
@@ -248,8 +238,6 @@ class FacebookPagesConnector(ApiConnector):
         edge, api_fields, default_fields = {
             "Posts": ("posts", _POST_API_FIELDS,
                       ["id", "created_time", "message", "permalink_url"]),
-            "VisitorPosts": ("visitor_posts", _VISITOR_API_FIELDS,
-                             ["id", "created_time", "from_name", "message"]),
             "Ratings": ("ratings", _RATING_API_FIELDS,
                         ["created_time", "recommendation_type", "review_text",
                          "reviewer_name"]),

@@ -18,7 +18,6 @@ from terno_dbi.connectors.api.sources.facebook_pages import (
 _REPORT_TYPES = [
     {"id": "Pages", "settings": []},
     {"id": "Posts", "settings": []},
-    {"id": "VisitorPosts", "settings": []},
     {"id": "PostComments",
      "settings": [{"setting_id": "post_id", "required": True}]},
     {"id": "Ratings", "settings": []},
@@ -130,25 +129,7 @@ class TestPosts:
             {"id": "100_1", "message": "Hello", "status_type": "added_photos"}]
 
 
-class TestVisitorPostsAndComments:
-    def test_visitor_posts_flatten_author(self):
-        def http(method, url, token, params=None):
-            if "me/accounts" in url:
-                return ACCOUNTS
-            assert "100/visitor_posts" in url
-            return {"data": [
-                {"id": "v1", "created_time": "2026-08-02T09:00:00+0000",
-                 "from": {"name": "Asha", "id": "u1"},
-                 "message": "Great course!",
-                 "permalink_url": "https://fb.com/v1"},
-            ]}
-
-        conn = FacebookPagesConnector(_DS(), http=http)
-        res = conn.query(_spec(
-            ["id", "from_name", "message"], "VisitorPosts"))
-        assert res.rows == [
-            {"id": "v1", "from_name": "Asha", "message": "Great course!"}]
-
+class TestComments:
     def test_post_comments_require_post_id(self):
         conn = FacebookPagesConnector(
             _DS(), http=lambda m, u, t, p=None: ACCOUNTS)

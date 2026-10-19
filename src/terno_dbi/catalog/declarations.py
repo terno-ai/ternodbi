@@ -383,9 +383,6 @@ _APIS: List[ConnectorSpec] = [
                 "Posts", "Page posts (published by the Page)",
                 is_date_range_required=False),
             ReportType(
-                "VisitorPosts", "Visitor posts (by other people)",
-                is_date_range_required=False),
-            ReportType(
                 "PostComments", "Comments on a post",
                 is_date_range_required=False,
                 settings=[ReportSetting(
