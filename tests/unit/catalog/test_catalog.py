@@ -182,9 +182,7 @@ class TestRefreshCatalog:
 
     def test_default_enabled_applies_only_at_creation(self):
         refresh_catalog()
-        # meta_ads is declared default_enabled=False (approval pending), but an
-        # operator who enables it must not have that undone by a deploy.
-        row = ConnectorCatalog.objects.get(key="meta_ads")
+        row = ConnectorCatalog.objects.get(key="microsoft_ads")
         assert row.enabled is False
         row.enabled = True
         row.save()
@@ -278,10 +276,10 @@ class TestDataSourceCatalogLink:
         from django.core.exceptions import ValidationError
 
         refresh_catalog()
-        catalog = ConnectorCatalog.objects.get(key="meta_ads")
-        assert catalog.enabled is False   # approval pending
+        catalog = ConnectorCatalog.objects.get(key="microsoft_ads")
+        assert catalog.enabled is False   # OAuth client registration pending
         ds = DataSource(
-            display_name="Meta", type="meta_ads",
+            display_name="MS Ads", type="microsoft_ads",
             connection_str="", catalog=catalog,
         )
         with pytest.raises(ValidationError, match="not enabled"):

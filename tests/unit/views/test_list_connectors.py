@@ -88,10 +88,9 @@ class TestListConnectors:
         assert pg["connect_url"].endswith("/data-connectors/datasource/postgres")
 
     def test_disabled_connectors_are_omitted(self, user, org, catalog, settings):
-        # meta_ads ships disabled (approval pending) — it must not be offered.
         payload = _call(_token(user, org, ["query:read"]), settings)
         keys = {c["key"] for c in payload["connectors"]}
-        assert "meta_ads" not in keys
+        assert "microsoft_ads" not in keys
 
     def test_connected_source_shows_status_and_id(
         self, user, org, catalog, settings
