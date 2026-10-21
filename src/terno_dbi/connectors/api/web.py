@@ -184,7 +184,7 @@ def connect(request):
 
 
 def oauth_callback(request):
-    """The provider redirects here with `code` and `state`."""
+    """The provider redirects here with `code` (or `auth_code`) and `state`."""
     from terno_dbi.connectors.api.model.errors import ApiError
     from terno_dbi.connectors.api.auth.oauth import complete_authorization
     from terno_dbi.core.models import ConnectorOAuthState
@@ -201,7 +201,8 @@ def oauth_callback(request):
         return HttpResponse(message, status=400)
 
     state = request.GET.get("state", "")
-    code = request.GET.get("code", "")
+    # TikTok names the code `auth_code`.
+    code = request.GET.get("code") or request.GET.get("auth_code", "")
     if not (state and code):
         return HttpResponseBadRequest("Missing state or code.")
 

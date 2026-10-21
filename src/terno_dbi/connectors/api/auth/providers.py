@@ -45,6 +45,12 @@ class OAuthProvider:
     # HTTP Basic header rather than `client_id`/`client_secret` in the body
     # (Pipedrive accepts the body form but advises against it).
     token_auth_basic: bool = False
+    # The consent URL's name for the client id. TikTok's portal takes `app_id`.
+    client_id_param: str = "client_id"
+    # When True, the token exchange is TikTok's: a JSON body of `app_id`,
+    # `secret` and `auth_code`, answered inside a `{code, message, data}`
+    # envelope rather than as a bare OAuth token response.
+    token_json_envelope: bool = False
 
     @property
     def uses_instance(self) -> bool:
@@ -275,6 +281,24 @@ _PIPEDRIVE = OAuthProvider(
 )
 
 
+_TIKTOK = OAuthProvider(
+    name="tiktok",
+    authorization_url="https://business-api.tiktok.com/portal/auth",
+    token_url="https://business-api.tiktok.com/open_api/v1.3/oauth2/access_token/",
+    # TikTok takes no scope at consent: the app's permissions are chosen on the
+    # app in the TikTok API for Business portal — Ad Account Management (the
+    # advertiser list), Ads Management (the Campaigns/AdGroups/Ads reports) and
+    # Reporting. The token response lists the granted permission ids. The
+    # access token is long-term and comes with no refresh token.
+    scope="",
+    client_id_env="TERNO_TIKTOK_APP_ID",
+    client_secret_env="TERNO_TIKTOK_APP_SECRET",
+    use_pkce=False,
+    client_id_param="app_id",
+    token_json_envelope=True,
+)
+
+
 def _google_with_scope(scope: str) -> OAuthProvider:
     from dataclasses import replace
     return replace(_GOOGLE, scope=f"openid email {scope}")
@@ -309,6 +333,7 @@ _PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
     "instagram_insights": _INSTAGRAM,
     "instagram_public": _INSTAGRAM,
     "linkedin_ads": _LINKEDIN,
+    "tiktok_ads": _TIKTOK,
     "salesforce": _SALESFORCE,
     "microsoft_ads": _MICROSOFT,
     "dynamics365": _DYNAMICS365,

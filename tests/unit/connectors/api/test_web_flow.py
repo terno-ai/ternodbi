@@ -185,6 +185,21 @@ def test_callback_passes_its_query_string_through(org, monkeypatch):
 
 
 @pytest.mark.django_db
+def test_callback_accepts_tiktoks_auth_code(org, monkeypatch):
+    seen = {}
+
+    def fake_complete(**kw):
+        seen.update(kw)
+        return _DS()
+
+    monkeypatch.setattr(
+        "terno_dbi.connectors.api.auth.oauth.complete_authorization", fake_complete)
+    resp = web.oauth_callback(RequestFactory().get("/cb?state=s&auth_code=ac"))
+    assert resp.status_code == 200
+    assert seen["code"] == "ac"
+
+
+@pytest.mark.django_db
 def test_callback_without_return_to_returns_json(org, monkeypatch):
     monkeypatch.setattr(
         "terno_dbi.connectors.api.auth.oauth.complete_authorization",

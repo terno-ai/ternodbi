@@ -193,7 +193,7 @@ Besides databases, TernoDBI connects to business tools and queries them through 
 
 | Category | Sources |
 | :--- | :--- |
-| Advertising | Google Ads, Meta Ads, LinkedIn Ads, Microsoft Ads, Amazon Ads |
+| Advertising | Google Ads, Meta Ads, LinkedIn Ads, Microsoft Ads, Amazon Ads, TikTok Ads |
 | Analytics | Google Analytics 4, Google Search Console, YouTube |
 | Social | Instagram Insights, Instagram Public Data |
 | CRM | HubSpot, Salesforce, Pipedrive, Zoho CRM |
@@ -210,6 +210,7 @@ Besides databases, TernoDBI connects to business tools and queries them through 
 | LinkedIn | `TERNO_LINKEDIN_CLIENT_ID`, `TERNO_LINKEDIN_CLIENT_SECRET` |
 | Microsoft Advertising | `TERNO_MICROSOFT_ADS_CLIENT_ID`, `TERNO_MICROSOFT_ADS_CLIENT_SECRET` |
 | Amazon Ads | `TERNO_AMAZON_ADS_CLIENT_ID`, `TERNO_AMAZON_ADS_CLIENT_SECRET` |
+| TikTok Ads | `TERNO_TIKTOK_APP_ID`, `TERNO_TIKTOK_APP_SECRET` |
 | HubSpot | `TERNO_HUBSPOT_CLIENT_ID`, `TERNO_HUBSPOT_CLIENT_SECRET` |
 | Salesforce | `TERNO_SALESFORCE_CLIENT_ID`, `TERNO_SALESFORCE_CLIENT_SECRET` |
 | Pipedrive | `TERNO_PIPEDRIVE_CLIENT_ID`, `TERNO_PIPEDRIVE_CLIENT_SECRET` |

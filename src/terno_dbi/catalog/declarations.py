@@ -826,6 +826,36 @@ _APIS: List[ConnectorSpec] = [
         default_enabled=True,   # LinkedIn Marketing API access pending
     ),
     ConnectorSpec(
+        key="tiktok_ads",
+        display_name="TikTok Ads",
+        provider="TikTok",
+        category="Advertising",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Campaign, ad group and ad performance from TikTok "
+                    "advertiser accounts — spend, impressions, clicks, "
+                    "conversions and video engagement, with age, gender, "
+                    "country and platform splits.",
+        scopes_label="TikTok Ads read access (ad accounts, ads, reporting)",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=True,
+        account_label_singular="Advertiser",
+        account_label_plural="Advertisers",
+        report_types=[
+            ReportType("Performance", "Ad performance"),
+            ReportType("Campaigns", "Campaigns", is_date_range_required=False),
+            ReportType("AdGroups", "Ad groups", is_date_range_required=False),
+            ReportType("Ads", "Ads", is_date_range_required=False),
+        ],
+        default_report_type="Performance",
+        # TikTok throttles each app per second and per day; a 30-day hourly
+        # report is 30 requests, so keep the per-second guard modest.
+        rate_limit_per_second=10,
+        rate_limit_per_day=50000,
+        default_enabled=False,   # enable once a TikTok for Business app is set up
+    ),
+    ConnectorSpec(
         key="salesforce",
         display_name="Salesforce",
         provider="Salesforce",

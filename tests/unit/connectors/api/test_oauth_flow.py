@@ -481,6 +481,88 @@ class TestPipedriveBasicAuth:
         oauth._default_post("https://oauth.pipedrive.com/oauth/token",
                             {"grant_type": "refresh_token"}, auth=("i", "s"))
         assert seen["auth"] == ("i", "s")
+@pytest.mark.django_db
+class TestTikTokEnvelope:
+    """TikTok's consent portal names the client `app_id` and takes no scope; its
+    token exchange is a JSON body of `app_id`/`secret`/`auth_code` answered in a
+    `{code, message, data}` envelope, with a long-term token and no refresh."""
+
+    @pytest.fixture(autouse=True)
+    def tiktok_creds(self, monkeypatch):
+        monkeypatch.setenv("TERNO_TIKTOK_APP_ID", "tt-app")
+        monkeypatch.setenv("TERNO_TIKTOK_APP_SECRET", "tt-secret")
+
+    def _start(self, org):
+        return oauth.start_authorization(
+            connector_key="tiktok_ads",
+            redirect_uri="https://acme.app.terno.ai/callback",
+            organisation=org,
+        )
+
+    def test_consent_url_names_the_app_id(self, org, catalog):
+        from urllib.parse import urlparse, parse_qs
+
+        url = self._start(org)["authorization_url"]
+        assert url.startswith("https://business-api.tiktok.com/portal/auth?")
+        qs = parse_qs(urlparse(url).query)
+        assert qs["app_id"] == ["tt-app"]
+        assert "client_id" not in qs
+        assert "scope" not in qs
+        assert "code_challenge" not in qs
+
+    def test_exchange_posts_json_and_unwraps_the_envelope(self, org, catalog):
+        started = self._start(org)
+        posted = {}
+
+        def fake_post(url, data, auth=None, as_json=False):
+            posted.update(url=url, data=data, auth=auth, as_json=as_json)
+            return {"code": 0, "message": "OK", "data": {
+                "access_token": "long-term", "scope": [4, 5, 7],
+                "advertiser_ids": ["7001", "7002"]}}
+
+        ds = oauth.complete_authorization(
+            state=started["state"], code="ac", http_post=fake_post)
+        assert posted == {
+            "url": "https://business-api.tiktok.com/open_api/v1.3/oauth2/access_token/",
+            "data": {"app_id": "tt-app", "secret": "tt-secret", "auth_code": "ac"},
+            "auth": None, "as_json": True}
+        bundle = secrets.decrypt_dict(ds.connection_json)
+        assert bundle["ACCESS_TOKEN"] == "long-term"
+        assert bundle["GRANTED_SCOPES"] == "4 5 7"
+        # Long-term: nothing to refresh, so no expiry is recorded.
+        assert "REFRESH_TOKEN" not in bundle
+        assert "TOKEN_EXPIRES_AT" not in bundle
+        assert ds.auth_status == DataSource.AuthStatus.CONNECTED
+
+    def test_a_refusal_in_a_200_is_not_stored(self, org, catalog):
+        started = self._start(org)
+
+        def fake_post(url, data, auth=None, as_json=False):
+            return {"code": 40110, "message": "auth_code is invalid", "data": {}}
+
+        with pytest.raises(ApiError):
+            oauth.complete_authorization(
+                state=started["state"], code="stale", http_post=fake_post)
+        assert not DataSource.objects.filter(type="tiktok_ads").exists()
+
+    def test_default_post_sends_json_when_asked(self, monkeypatch):
+        seen = {}
+
+        class _Resp:
+            def raise_for_status(self): pass
+            def json(self): return {"code": 0}
+
+        def fake_post(url, auth=None, timeout=None, **body):
+            seen.update(body)
+            return _Resp()
+
+        monkeypatch.setattr(oauth.requests, "post", fake_post)
+        oauth._default_post("https://x/token", {"a": "1"}, as_json=True)
+        assert seen == {"json": {"a": "1"}}
+        oauth._default_post("https://x/token", {"a": "1"})
+        assert seen["data"] == {"a": "1"}
+
+
 class TestSalesforceIdentity:
     """The id_token has no email unless the app includes standard claims, so
     the identity URL is asked instead."""

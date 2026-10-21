@@ -104,7 +104,7 @@ def start_authorization(
 
     params = {
         "response_type": "code",
-        "client_id": provider.client_id(),
+        provider.client_id_param: provider.client_id(),
         "redirect_uri": redirect_uri,
         "state": state,
     }
@@ -239,8 +239,10 @@ def _callback_instance(provider, connector_key: str,
 
 
 def _default_post(url: str, data: Dict[str, str],
-                  auth: Optional[Tuple[str, str]] = None) -> Dict[str, Any]:
-    resp = requests.post(url, data=data, auth=auth, timeout=15)
+                  auth: Optional[Tuple[str, str]] = None,
+                  as_json: bool = False) -> Dict[str, Any]:
+    body = {"json": data} if as_json else {"data": data}
+    resp = requests.post(url, auth=auth, timeout=15, **body)
     try:
         resp.raise_for_status()
     except requests.HTTPError as exc:
@@ -256,13 +258,39 @@ def _post_token(http_post, provider, token_url: str,
 
     Most take the client credentials in the body. A `token_auth_basic` provider
     (Pipedrive) takes them as HTTP Basic instead, so they are moved out of the
-    body — `http_post` then receives them as `auth`.
+    body — `http_post` then receives them as `auth`. A `token_json_envelope`
+    provider (TikTok) has its own exchange; see `_post_token_envelope`.
     """
+    if provider.token_json_envelope:
+        return _post_token_envelope(http_post, token_url, body)
     if not provider.token_auth_basic:
         return http_post(token_url, body)
     body = {k: v for k, v in body.items() if k not in ("client_id", "client_secret")}
     return http_post(token_url, body,
                      auth=(provider.client_id(), provider.client_secret()))
+
+
+def _post_token_envelope(http_post, token_url: str,
+                         body: Dict[str, str]) -> Dict[str, Any]:
+    """TikTok's token exchange: JSON in, a `{code, message, data}` envelope out.
+
+    The OAuth fields are renamed (`app_id`, `secret`, `auth_code`), and a refusal
+    arrives as HTTP 200 with a non-zero `code` — raised here so it is never
+    stored as a connection without a token. `scope` comes back as a list of
+    permission ids and is flattened to the usual space-separated string.
+    """
+    envelope = http_post(token_url, {
+        "app_id": body["client_id"],
+        "secret": body["client_secret"],
+        "auth_code": body["code"],
+    }, as_json=True)
+    if envelope.get("code") != 0:
+        raise ValueError(f"token exchange refused ({envelope.get('code')}): "
+                         f"{envelope.get('message')}")
+    data = dict(envelope.get("data") or {})
+    if isinstance(data.get("scope"), list):
+        data["scope"] = " ".join(str(s) for s in data["scope"])
+    return data
 
 
 def _connected_email(token_response: Dict[str, Any]) -> str:
