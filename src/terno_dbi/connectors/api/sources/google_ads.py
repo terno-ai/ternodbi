@@ -37,7 +37,7 @@ from terno_dbi.connectors.api.sources._multi import gather_accounts
 
 logger = logging.getLogger(__name__)
 
-_API_VERSION = "v22"
+_API_VERSION = "v26"
 _BASE = f"https://googleads.googleapis.com/{_API_VERSION}"
 _DEVELOPER_TOKEN_ENV = "TERNO_GOOGLE_ADS_DEVELOPER_TOKEN"
 # Manager (MCC) customer id to send as `login-customer-id`. Required when the
