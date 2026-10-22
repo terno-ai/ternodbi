@@ -563,6 +563,86 @@ class TestTikTokEnvelope:
         assert seen["data"] == {"a": "1"}
 
 
+@pytest.mark.django_db
+class TestXAnalyticsOAuth2:
+    """X's OAuth 2.0 is PKCE with a confidential client: the client secret goes
+    only in an HTTP Basic header, on the exchange and on every refresh."""
+
+    @pytest.fixture(autouse=True)
+    def x_creds(self, monkeypatch):
+        monkeypatch.setenv("TERNO_X_CLIENT_ID", "x-id")
+        monkeypatch.setenv("TERNO_X_CLIENT_SECRET", "x-secret")
+
+    def _start(self, org):
+        return oauth.start_authorization(
+            connector_key="x_analytics",
+            redirect_uri="https://acme.app.terno.ai/callback",
+            organisation=org,
+        )
+
+    def test_consent_asks_read_and_write_scopes_with_pkce(self, org, catalog):
+        from urllib.parse import urlparse, parse_qs
+
+        url = self._start(org)["authorization_url"]
+        assert url.startswith("https://x.com/i/oauth2/authorize?")
+        qs = parse_qs(urlparse(url).query)
+        assert qs["client_id"] == ["x-id"]
+        assert qs["scope"] == ["tweet.read users.read offline.access tweet.write "
+                               "tweet.moderate.write like.write media.write"]
+        for left_out in ("dm.", "follows.", "block.", "mute.", "list."):
+            assert left_out not in qs["scope"][0]
+        assert qs["code_challenge_method"] == ["S256"]
+
+    def test_exchange_sends_the_verifier_and_basic_auth(self, org, catalog):
+        started = self._start(org)
+        verifier = ConnectorOAuthState.objects.get(
+            state=started["state"]).code_verifier
+        posted = {}
+
+        def fake_post(url, data, auth=None):
+            posted.update(url=url, data=data, auth=auth)
+            return {"access_token": "at", "refresh_token": "rt",
+                    "expires_in": 7200,
+                    "scope": "tweet.read users.read offline.access"}
+
+        ds = oauth.complete_authorization(
+            state=started["state"], code="c", http_post=fake_post)
+        assert posted == {
+            "url": "https://api.x.com/2/oauth2/token",
+            "data": {"grant_type": "authorization_code", "code": "c",
+                     "redirect_uri": "https://acme.app.terno.ai/callback",
+                     "code_verifier": verifier},
+            "auth": ("x-id", "x-secret")}
+        bundle = secrets.decrypt_dict(ds.connection_json)
+        assert bundle["REFRESH_TOKEN"] == "rt"
+        assert "TOKEN_EXPIRES_AT" in bundle
+
+    def test_refresh_keeps_the_rotated_refresh_token(self, org, catalog):
+        ds = DataSource.objects.create(
+            display_name="X", type="x_analytics", connection_str="",
+            organisation=org,
+            catalog=ConnectorCatalog.objects.get(key="x_analytics"),
+        )
+        ds.connection_json = secrets.encrypt_dict({
+            "ACCESS_TOKEN": "old", "REFRESH_TOKEN": "rt-1",
+            "TOKEN_EXPIRES_AT": str(time.time() - 1),
+        })
+        ds.save()
+        posted = {}
+
+        def fake_post(url, data, auth=None):
+            posted.update(data=data, auth=auth)
+            return {"access_token": "new", "refresh_token": "rt-2",
+                    "expires_in": 7200}
+
+        bundle = oauth.refresh_access_token(ds, http_post=fake_post)
+        assert posted == {
+            "data": {"grant_type": "refresh_token", "refresh_token": "rt-1"},
+            "auth": ("x-id", "x-secret")}
+        assert bundle["ACCESS_TOKEN"] == "new"
+        assert bundle["REFRESH_TOKEN"] == "rt-2"
+
+
 class TestSalesforceIdentity:
     """The id_token has no email unless the app includes standard claims, so
     the identity URL is asked instead."""

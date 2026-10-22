@@ -50,6 +50,7 @@ def start_authorization(
     return_to: str = "",
     instance: str = "",
     login_method: str = "",
+    http_post: Optional[Callable[[str, Dict[str, str]], Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """Begin a connect flow. Returns `{authorization_url, state}`.
 
@@ -60,6 +61,9 @@ def start_authorization(
     `instance` is the per-store or per-environment host for providers whose URLs
     are templated — validated for those (required for Shopify and Dynamics 365,
     optional for Salesforce), ignored for the rest.
+
+    `http_post` is injected for tests; only an OAuth 1.0a provider (X Ads) calls
+    out at this step, for its request token.
     """
 
     from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
@@ -78,6 +82,11 @@ def start_authorization(
             f"This deployment has no OAuth credentials for {connector_key}. "
             f"Set {provider.client_id_env} and {provider.client_secret_env}.",
         )
+    if provider.is_oauth1:
+        return _start_oauth1(
+            provider, connector_key=connector_key, redirect_uri=redirect_uri,
+            organisation=organisation, data_source=data_source,
+            return_to=return_to, http_post=http_post)
 
     instance = _validated_instance(provider, connector_key, instance)
     authorization_url, scope = (
@@ -118,6 +127,49 @@ def start_authorization(
     return {
         "authorization_url": f"{authorization_url}?{urlencode(params)}",
         "state": state,
+    }
+
+
+def _start_oauth1(provider, *, connector_key, redirect_uri, organisation,
+                  data_source, return_to, http_post) -> Dict[str, Any]:
+    """Begin an OAuth 1.0a flow (X Ads): fetch a request token first.
+
+    OAuth 1.0a has no `state`; the request token plays that part. The provider
+    echoes it back as `oauth_token` on the callback, so the flow's state row is
+    keyed by it. Its secret, needed to sign the exchange, is held where a PKCE
+    verifier would be — like the verifier it is short-lived, deleted once the
+    flow completes, and useless without our consumer secret.
+    """
+    from terno_dbi.connectors.api.auth import oauth1
+    from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
+    from terno_dbi.core.models import ConnectorOAuthState
+
+    try:
+        token, secret = oauth1.fetch_request_token(
+            provider, redirect_uri, http_post=http_post)
+    except Exception as exc:   # noqa: BLE001
+        logger.warning("Request token failed for %s (callback=%r): %s",
+                       connector_key, redirect_uri, exc)
+        raise ApiError(
+            ErrorCode.UPSTREAM_ERROR,
+            f"Could not start the connection with {connector_key}. Check that "
+            f"{redirect_uri} is a callback URL on the app, then try again.",
+        )
+
+    ConnectorOAuthState.objects.create(
+        state=token,
+        connector_key=connector_key,
+        code_verifier=secret,
+        redirect_uri=redirect_uri,
+        organisation=organisation,
+        data_source=data_source,
+        return_to=return_to,
+        expires_at=timezone.now() + timedelta(minutes=STATE_TTL_MINUTES),
+    )
+    return {
+        "authorization_url":
+            f"{provider.authorization_url}?{urlencode({'oauth_token': token})}",
+        "state": token,
     }
 
 
@@ -324,6 +376,9 @@ def _store_tokens(data_source, token_response: Dict[str, Any],
         bundle["ACCESS_TOKEN"] = token_response["access_token"]
     if token_response.get("refresh_token"):
         bundle["REFRESH_TOKEN"] = token_response["refresh_token"]
+    # OAuth 1.0a (X Ads) signs every request with the token's secret too.
+    if token_response.get("access_token_secret"):
+        bundle["ACCESS_TOKEN_SECRET"] = token_response["access_token_secret"]
     if token_response.get("scope"):
         bundle["GRANTED_SCOPES"] = token_response["scope"]
     if token_response.get("instance_url"):
@@ -364,9 +419,10 @@ def complete_authorization(
     Creates the `DataSource` on a first connect, or updates the one referenced by
     the state on a reconnect. `callback_params` is the redirect's query string,
     read only by a provider that names its regional server there (Zoho).
+
+    For an OAuth 1.0a provider (X Ads), `state` is the request token and `code`
+    the `oauth_verifier`.
     """
-    # Resolved at call time (not as a default arg) so tests can monkeypatch it.
-    http_post = http_post or _default_post
     from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
     from terno_dbi.connectors.api.auth.providers import get_provider
     from terno_dbi.core.models import ConnectorCatalog, ConnectorOAuthState, DataSource
@@ -379,6 +435,48 @@ def complete_authorization(
         )
 
     provider = get_provider(st.connector_key, st.login_method)
+    if provider.is_oauth1:
+        token_response, instance = _exchange_oauth1(st, provider, code, http_post), ""
+    else:
+        # Resolved at call time (not as a default arg) so tests can monkeypatch it.
+        token_response, instance = _exchange_code(
+            st, provider, code, http_post or _default_post, callback_params)
+
+    data_source = st.data_source
+    if data_source is None:
+        catalog = ConnectorCatalog.objects.filter(key=st.connector_key).first()
+        # Reuse an existing datasource for this connector so reconnecting does not
+        # create duplicates. Create a new datasource only when none exists.
+        data_source = (
+            DataSource.objects.filter(
+                organisation=st.organisation, catalog=catalog,
+            ).order_by("id").first()
+            if catalog else None
+        )
+        if data_source is None:
+            data_source = DataSource.objects.create(
+                display_name=_unique_name(catalog, st.organisation),
+                type=st.connector_key,
+                connection_str="",
+                organisation=st.organisation,
+                catalog=catalog,
+                auth_status=DataSource.AuthStatus.NOT_AUTHENTICATED,
+            )
+
+    _store_tokens(data_source, token_response, instance=instance,
+                  login_method=st.login_method)
+    st.delete()
+    return data_source
+
+
+def _exchange_code(st, provider, code, http_post, callback_params):
+    """Swap an OAuth 2.0 authorization code for tokens.
+
+    Returns `(token_response, instance)` — the instance being the host the
+    token URL was filled from, for a provider whose URLs are templated.
+    """
+    from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
+
     exchange = {
         "grant_type": "authorization_code",
         "code": code,
@@ -408,32 +506,26 @@ def complete_authorization(
 
     token_response = _post_process(
         st.connector_key, provider, token_response, login_method=st.login_method)
+    return token_response, instance
 
-    data_source = st.data_source
-    if data_source is None:
-        catalog = ConnectorCatalog.objects.filter(key=st.connector_key).first()
-        # Reuse an existing datasource for this connector so reconnecting does not
-        # create duplicates. Create a new datasource only when none exists.
-        data_source = (
-            DataSource.objects.filter(
-                organisation=st.organisation, catalog=catalog,
-            ).order_by("id").first()
-            if catalog else None
+
+def _exchange_oauth1(st, provider, verifier, http_post):
+    """Swap an approved OAuth 1.0a request token for the user's access token.
+
+    The state row is keyed by the request token and holds its secret.
+    """
+    from terno_dbi.connectors.api.auth import oauth1
+    from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
+
+    try:
+        return oauth1.fetch_access_token(
+            provider, st.state, st.code_verifier, verifier, http_post=http_post)
+    except Exception as exc:   # noqa: BLE001
+        logger.warning("Token exchange failed for %s: %s", st.connector_key, exc)
+        raise ApiError(
+            ErrorCode.UPSTREAM_ERROR,
+            "Could not complete the connection with the provider. Try again.",
         )
-        if data_source is None:
-            data_source = DataSource.objects.create(
-                display_name=_unique_name(catalog, st.organisation),
-                type=st.connector_key,
-                connection_str="",
-                organisation=st.organisation,
-                catalog=catalog,
-                auth_status=DataSource.AuthStatus.NOT_AUTHENTICATED,
-            )
-
-    _store_tokens(data_source, token_response, instance=instance,
-                  login_method=st.login_method)
-    st.delete()
-    return data_source
 
 _SALESFORCE_ID_URL_RE = re.compile(
     r"^https://[a-z0-9.-]+\.salesforce\.com/id/[A-Za-z0-9]+/[A-Za-z0-9]+$")

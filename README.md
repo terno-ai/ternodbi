@@ -193,9 +193,9 @@ Besides databases, TernoDBI connects to business tools and queries them through 
 
 | Category | Sources |
 | :--- | :--- |
-| Advertising | Google Ads, Meta Ads, LinkedIn Ads, Microsoft Ads, Amazon Ads, TikTok Ads |
+| Advertising | Google Ads, Meta Ads, LinkedIn Ads, Microsoft Ads, Amazon Ads, TikTok Ads, X Ads |
 | Analytics | Google Analytics 4, Google Search Console, YouTube |
-| Social | Instagram Insights, Instagram Public Data |
+| Social | Instagram Insights, Instagram Public Data, X Analytics |
 | CRM | HubSpot, Salesforce, Pipedrive, Zoho CRM |
 | Commerce | Shopify |
 | Documents | Google Sheets, Google Drive |
@@ -211,6 +211,8 @@ Besides databases, TernoDBI connects to business tools and queries them through 
 | Microsoft Advertising | `TERNO_MICROSOFT_ADS_CLIENT_ID`, `TERNO_MICROSOFT_ADS_CLIENT_SECRET` |
 | Amazon Ads | `TERNO_AMAZON_ADS_CLIENT_ID`, `TERNO_AMAZON_ADS_CLIENT_SECRET` |
 | TikTok Ads | `TERNO_TIKTOK_APP_ID`, `TERNO_TIKTOK_APP_SECRET` |
+| X Analytics (OAuth 2.0 client) | `TERNO_X_CLIENT_ID`, `TERNO_X_CLIENT_SECRET` |
+| X Ads (OAuth 1.0a consumer keys) | `TERNO_X_CONSUMER_KEY`, `TERNO_X_CONSUMER_SECRET` |
 | HubSpot | `TERNO_HUBSPOT_CLIENT_ID`, `TERNO_HUBSPOT_CLIENT_SECRET` |
 | Salesforce | `TERNO_SALESFORCE_CLIENT_ID`, `TERNO_SALESFORCE_CLIENT_SECRET` |
 | Pipedrive | `TERNO_PIPEDRIVE_CLIENT_ID`, `TERNO_PIPEDRIVE_CLIENT_SECRET` |

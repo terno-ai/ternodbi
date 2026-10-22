@@ -200,6 +200,32 @@ def test_callback_accepts_tiktoks_auth_code(org, monkeypatch):
 
 
 @pytest.mark.django_db
+def test_callback_accepts_oauth1_token_and_verifier(org, monkeypatch):
+    seen = {}
+
+    def fake_complete(**kw):
+        seen.update(kw)
+        return _DS()
+
+    monkeypatch.setattr(
+        "terno_dbi.connectors.api.auth.oauth.complete_authorization", fake_complete)
+    resp = web.oauth_callback(RequestFactory().get(
+        "/cb?oauth_token=req-tok&oauth_verifier=v1"))
+    assert resp.status_code == 200
+    assert (seen["state"], seen["code"]) == ("req-tok", "v1")
+
+
+@pytest.mark.django_db
+def test_callback_reports_an_oauth1_denial(org, monkeypatch):
+    monkeypatch.setattr(
+        "terno_dbi.connectors.api.auth.oauth.complete_authorization",
+        lambda **kw: pytest.fail("a denial must not complete"))
+    resp = web.oauth_callback(RequestFactory().get("/cb?denied=req-tok"))
+    assert resp.status_code == 400
+    assert b"declined" in resp.content
+
+
+@pytest.mark.django_db
 def test_callback_without_return_to_returns_json(org, monkeypatch):
     monkeypatch.setattr(
         "terno_dbi.connectors.api.auth.oauth.complete_authorization",

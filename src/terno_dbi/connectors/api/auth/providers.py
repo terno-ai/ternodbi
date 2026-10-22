@@ -51,11 +51,21 @@ class OAuthProvider:
     # `secret` and `auth_code`, answered inside a `{code, message, data}`
     # envelope rather than as a bare OAuth token response.
     token_json_envelope: bool = False
+    # When set, the provider speaks OAuth 1.0a (X Ads) and this is its
+    # request-token URL; see `oauth1`. `authorization_url` is then where the
+    # user approves the request token and `token_url` swaps it for the user's
+    # access token. The client id and secret are the app's consumer key and
+    # secret, and `scope` and `use_pkce` are unused.
+    request_token_url: str = ""
 
     @property
     def uses_instance(self) -> bool:
         """True when `token_url` is an `{instance}` template."""
         return self.requires_instance or bool(self.callback_instance_param)
+
+    @property
+    def is_oauth1(self) -> bool:
+        return bool(self.request_token_url)
 
     def client_id(self) -> str:
         return os.getenv(self.client_id_env, "").strip()
@@ -299,6 +309,46 @@ _TIKTOK = OAuthProvider(
 )
 
 
+_X = OAuthProvider(
+    name="x",
+    authorization_url="https://x.com/i/oauth2/authorize",
+    token_url="https://api.x.com/2/oauth2/token",
+    # Reads: the user's profile and posts (with the owner-only metrics on
+    # them). Writes are requested up front so write features need no
+    # reconnect: post, reply, repost and delete (`tweet.write`), hide replies
+    # (`tweet.moderate.write`), like (`like.write`) and upload a post's images
+    # or video (`media.write`). DMs, follows, lists, blocks and mutes are left
+    # out. `offline.access` issues the refresh token; the access token lasts
+    # two hours.
+    scope="tweet.read users.read offline.access tweet.write "
+          "tweet.moderate.write like.write media.write",
+    client_id_env="TERNO_X_CLIENT_ID",
+    client_secret_env="TERNO_X_CLIENT_SECRET",
+    use_pkce=True,
+    # A confidential client authenticates the exchange and every refresh with
+    # HTTP Basic.
+    token_auth_basic=True,
+)
+
+
+_X_ADS = OAuthProvider(
+    name="x_ads",
+    # The X Ads API takes only OAuth 1.0a, with the app's consumer keys (the
+    # "API Key and Secret" in the X developer portal) rather than its OAuth 2.0
+    # client. OAuth 1.0a has no scopes: the token gets read and write access
+    # (see `oauth1.fetch_request_token`), capped by the app's own permission
+    # setting, so the app must be set to "Read and write". The user's access
+    # token and secret do not expire.
+    authorization_url="https://api.x.com/oauth/authorize",
+    token_url="https://api.x.com/oauth/access_token",
+    request_token_url="https://api.x.com/oauth/request_token",
+    scope="",
+    client_id_env="TERNO_X_CONSUMER_KEY",
+    client_secret_env="TERNO_X_CONSUMER_SECRET",
+    use_pkce=False,
+)
+
+
 def _google_with_scope(scope: str) -> OAuthProvider:
     from dataclasses import replace
     return replace(_GOOGLE, scope=f"openid email {scope}")
@@ -334,6 +384,8 @@ _PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
     "instagram_public": _INSTAGRAM,
     "linkedin_ads": _LINKEDIN,
     "tiktok_ads": _TIKTOK,
+    "x_analytics": _X,
+    "x_ads": _X_ADS,
     "salesforce": _SALESFORCE,
     "microsoft_ads": _MICROSOFT,
     "dynamics365": _DYNAMICS365,

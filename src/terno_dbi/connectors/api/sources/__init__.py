@@ -25,6 +25,12 @@ from terno_dbi.connectors.api.sources.meta_ads import (
 from terno_dbi.connectors.api.sources.tiktok_ads import (
     TikTokAdsConnector, make_tiktok_ads_connector,
 )
+from terno_dbi.connectors.api.sources.x_ads import (
+    XAdsConnector, make_x_ads_connector,
+)
+from terno_dbi.connectors.api.sources.x_analytics import (
+    XAnalyticsConnector, make_x_analytics_connector,
+)
 from terno_dbi.connectors.api.sources.facebook_pages import (
     FacebookPagesConnector, make_facebook_pages_connector,
 )
@@ -56,6 +62,8 @@ __all__ = [
     "LinkedInAdsConnector", "make_linkedin_ads_connector",
     "MetaAdsConnector", "make_meta_ads_connector",
     "TikTokAdsConnector", "make_tiktok_ads_connector",
+    "XAdsConnector", "make_x_ads_connector",
+    "XAnalyticsConnector", "make_x_analytics_connector",
     "FacebookPagesConnector", "make_facebook_pages_connector",
     "InstagramInsightsConnector", "make_instagram_insights_connector",
     "InstagramPublicConnector", "make_instagram_public_connector",

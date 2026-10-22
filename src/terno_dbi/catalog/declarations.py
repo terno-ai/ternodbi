@@ -514,6 +514,36 @@ _APIS: List[ConnectorSpec] = [
         default_enabled=True,   # Business Verification + App Review pending
     ),
     ConnectorSpec(
+        key="x_analytics",
+        display_name="X Analytics",
+        provider="X",
+        category="Social",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Your own X (Twitter) account's performance — followers and "
+                    "post counts, per-post impressions, likes, reposts, "
+                    "replies, bookmarks, link and profile clicks — and the "
+                    "posts that mention you.",
+        scopes_label="X read and write access (profile, posts, replies, likes)",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=True,
+        account_label_singular="X account",
+        account_label_plural="X accounts",
+        report_types=[
+            ReportType("Posts", "Posts (published by the account)"),
+            ReportType("Mentions", "Posts mentioning the account"),
+            ReportType("Profile", "Account profile (followers, posts, …)",
+                       is_date_range_required=False),
+        ],
+        default_report_type="Posts",
+        # X limits each user token per 15-minute window, and its plans bill or
+        # cap post reads per month; a 100-post page is one request.
+        rate_limit_per_second=1,
+        rate_limit_per_day=5000,
+        default_enabled=False,   # enable once the X app has a paid API plan
+    ),
+    ConnectorSpec(
         key="google_ads",
         display_name="Google Ads",
         provider="Google",
@@ -854,6 +884,41 @@ _APIS: List[ConnectorSpec] = [
         rate_limit_per_second=10,
         rate_limit_per_day=50000,
         default_enabled=False,   # enable once a TikTok for Business app is set up
+    ),
+    ConnectorSpec(
+        key="x_ads",
+        display_name="X Ads",
+        provider="X",
+        category="Advertising",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Campaign, ad group and promoted-post performance from X "
+                    "(Twitter) ad accounts — spend, impressions, engagements, "
+                    "clicks, video views and conversions.",
+        scopes_label="X Ads read and write access (ad accounts, campaigns, analytics)",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=True,
+        account_label_singular="Ad account",
+        account_label_plural="Ad accounts",
+        report_types=[
+            ReportType(
+                "Performance", "Ad performance",
+                settings=[ReportSetting(
+                    "placement", label="Placement", required=False,
+                    help_text="ALL_ON_TWITTER (default) for X itself, or "
+                              "PUBLISHER_NETWORK for X's partner apps.")],
+            ),
+            ReportType("Campaigns", "Campaigns", is_date_range_required=False),
+            ReportType("LineItems", "Ad groups (line items)",
+                       is_date_range_required=False),
+            ReportType("PromotedTweets", "Promoted posts",
+                       is_date_range_required=False),
+        ],
+        default_report_type="Performance",
+        rate_limit_per_second=5,
+        rate_limit_per_day=50000,
+        default_enabled=False,   # enable once the X app has Ads API access
     ),
     ConnectorSpec(
         key="salesforce",

@@ -184,7 +184,10 @@ def connect(request):
 
 
 def oauth_callback(request):
-    """The provider redirects here with `code` (or `auth_code`) and `state`."""
+    """The provider redirects here with `code` (or `auth_code`) and `state`.
+
+    An OAuth 1.0a provider sends `oauth_token` and `oauth_verifier` instead.
+    """
     from terno_dbi.connectors.api.model.errors import ApiError
     from terno_dbi.connectors.api.auth.oauth import complete_authorization
     from terno_dbi.core.models import ConnectorOAuthState
@@ -200,9 +203,15 @@ def oauth_callback(request):
                    + (f" ({aadsts})" if aadsts else ""))
         return HttpResponse(message, status=400)
 
-    state = request.GET.get("state", "")
+    # OAuth 1.0a (X Ads) reports a refusal as `denied`, and in place of `state`
+    # and `code` returns the request token and `oauth_verifier`.
+    if request.GET.get("denied"):
+        return HttpResponse("Authorization was declined.", status=400)
+
+    state = request.GET.get("state") or request.GET.get("oauth_token", "")
     # TikTok names the code `auth_code`.
-    code = request.GET.get("code") or request.GET.get("auth_code", "")
+    code = (request.GET.get("code") or request.GET.get("auth_code")
+            or request.GET.get("oauth_verifier", ""))
     if not (state and code):
         return HttpResponseBadRequest("Missing state or code.")
 

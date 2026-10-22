@@ -60,6 +60,8 @@ def _register_api_connectors():
     from terno_dbi.connectors.api.sources.linkedin_ads import make_linkedin_ads_connector
     from terno_dbi.connectors.api.sources.meta_ads import make_meta_ads_connector
     from terno_dbi.connectors.api.sources.tiktok_ads import make_tiktok_ads_connector
+    from terno_dbi.connectors.api.sources.x_ads import make_x_ads_connector
+    from terno_dbi.connectors.api.sources.x_analytics import make_x_analytics_connector
     from terno_dbi.connectors.api.sources.facebook_pages import (
         make_facebook_pages_connector,
     )
@@ -90,6 +92,8 @@ def _register_api_connectors():
     registry.register("instagram_public", make_instagram_public_connector)
     registry.register("linkedin_ads", make_linkedin_ads_connector)
     registry.register("tiktok_ads", make_tiktok_ads_connector)
+    registry.register("x_ads", make_x_ads_connector)
+    registry.register("x_analytics", make_x_analytics_connector)
     registry.register("salesforce", make_salesforce_connector)
     registry.register("youtube", make_youtube_connector)
     registry.register("microsoft_ads", make_microsoft_ads_connector)
