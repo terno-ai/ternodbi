@@ -826,6 +826,61 @@ _APIS: List[ConnectorSpec] = [
         default_enabled=True,    # Shopify app configured
     ),
     ConnectorSpec(
+        key="stripe",
+        display_name="Stripe",
+        provider="Stripe",
+        category="Payments",
+        family=Family.API,
+        auth_type=AuthType.OAUTH,
+        description="Charges, balance transactions, refunds, disputes, payouts, "
+                    "customers, invoices and subscriptions from a Stripe "
+                    "account — revenue, fees, MRR and churn — plus creating "
+                    "and updating customers, refunds and subscription "
+                    "cancellations.",
+        scopes_label="Stripe read and write access to the connected account "
+                     "(payments, customers, billing); the connector creates "
+                     "and updates customers, refunds charges and cancels or "
+                     "reactivates subscriptions, and never deletes",
+        has_account_list=True,
+        has_fields=True,
+        is_date_range_required=True,
+        # A connection reaches exactly one Stripe account, but the account
+        # machinery is still what the allowlist, write opt-in and currency
+        # guard hang off.
+        account_label_singular="Stripe account",
+        account_label_plural="Stripe accounts",
+        report_types=[
+            ReportType("Charges", "Charges (payments)"),
+            ReportType("BalanceTransactions", "Balance transactions"),
+            ReportType("Refunds", "Refunds"),
+            ReportType("Disputes", "Disputes"),
+            ReportType("Payouts", "Payouts"),
+            ReportType("Customers", "Customers"),
+            ReportType("Invoices", "Invoices"),
+            ReportType(
+                "Subscriptions", "Subscriptions (created in the range)",
+                settings=[ReportSetting(
+                    "status", label="Status", required=False,
+                    help_text="Only subscriptions in this status: active, "
+                              "past_due, unpaid, canceled, incomplete, "
+                              "incomplete_expired, trialing, paused or ended. "
+                              "Defaults to all.")],
+            ),
+            ReportType("ActiveSubscriptions",
+                       "Active subscriptions (current MRR)",
+                       is_date_range_required=False),
+            ReportType("Products", "Products", is_date_range_required=False),
+            ReportType("Prices", "Prices", is_date_range_required=False),
+        ],
+        default_report_type="Charges",
+        # Stripe allows 100 requests a second in live mode and 25 in test mode
+        # per account, shared with every other integration, and has no daily
+        # quota. A 10,000-row report is 100 list pages.
+        rate_limit_per_second=10,
+        rate_limit_per_day=50000,
+        default_enabled=False,   # enable once a Stripe Connect platform is set up
+    ),
+    ConnectorSpec(
         key="linkedin_ads",
         display_name="LinkedIn Ads",
         provider="LinkedIn",

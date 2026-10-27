@@ -77,6 +77,7 @@ def _register_api_connectors():
     from terno_dbi.connectors.api.sources.hubspot import make_hubspot_connector
     from terno_dbi.connectors.api.sources.amazon_ads import make_amazon_ads_connector
     from terno_dbi.connectors.api.sources.shopify import make_shopify_connector
+    from terno_dbi.connectors.api.sources.stripe import make_stripe_connector
     from terno_dbi.connectors.api.sources.zoho_crm import make_zoho_crm_connector
     from terno_dbi.connectors.api.sources.pipedrive import make_pipedrive_connector
     from terno_dbi.connectors.api.sources.dynamics365 import make_dynamics365_connector
@@ -100,6 +101,7 @@ def _register_api_connectors():
     registry.register("hubspot", make_hubspot_connector)
     registry.register("amazon_ads", make_amazon_ads_connector)
     registry.register("shopify", make_shopify_connector)
+    registry.register("stripe", make_stripe_connector)
     registry.register("zoho_crm", make_zoho_crm_connector)
     registry.register("pipedrive", make_pipedrive_connector)
     registry.register("dynamics365", make_dynamics365_connector)

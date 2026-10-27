@@ -349,6 +349,25 @@ _X_ADS = OAuthProvider(
 )
 
 
+_STRIPE = OAuthProvider(
+    name="stripe",
+    authorization_url="https://connect.stripe.com/oauth/authorize",
+    token_url="https://connect.stripe.com/oauth/token",
+    # Stripe Connect OAuth. `read_write` covers the reports and the connector's
+    # writes — creating and updating customers, refunds, cancelling and
+    # reactivating subscriptions; `read_only` is reserved for Stripe
+    # extensions. The client id is the platform's `ca_…` id and the secret is
+    # the platform's own secret key, which Stripe takes as `client_secret` on
+    # the exchange and the connector sends with every API request, naming the
+    # connected account in a `Stripe-Account` header. Nothing expires; the
+    # account can revoke access from its Dashboard.
+    scope="read_write",
+    client_id_env="TERNO_STRIPE_CLIENT_ID",
+    client_secret_env="TERNO_STRIPE_SECRET_KEY",
+    use_pkce=False,
+)
+
+
 def _google_with_scope(scope: str) -> OAuthProvider:
     from dataclasses import replace
     return replace(_GOOGLE, scope=f"openid email {scope}")
@@ -392,6 +411,7 @@ _PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
     "hubspot": _HUBSPOT,
     "amazon_ads": _AMAZON_ADS,
     "shopify": _SHOPIFY,
+    "stripe": _STRIPE,
     "zoho_crm": _ZOHO,
     "pipedrive": _PIPEDRIVE,
 }

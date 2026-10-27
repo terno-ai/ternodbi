@@ -564,6 +564,64 @@ class TestTikTokEnvelope:
 
 
 @pytest.mark.django_db
+class TestStripeConnect:
+    """Stripe Connect asks for `read_write` without PKCE, takes the platform's
+    secret key as the client secret, and names the connected account in the
+    token response. The per-account keys it also returns are never stored."""
+
+    @pytest.fixture(autouse=True)
+    def stripe_creds(self, monkeypatch):
+        monkeypatch.setenv("TERNO_STRIPE_CLIENT_ID", "ca_platform")
+        monkeypatch.setenv("TERNO_STRIPE_SECRET_KEY", "sk_test_platform")
+
+    def _start(self, org):
+        return oauth.start_authorization(
+            connector_key="stripe",
+            redirect_uri="https://acme.app.terno.ai/callback",
+            organisation=org,
+        )
+
+    def test_consent_asks_for_read_write(self, org, catalog):
+        from urllib.parse import urlparse, parse_qs
+
+        url = self._start(org)["authorization_url"]
+        assert url.startswith("https://connect.stripe.com/oauth/authorize?")
+        qs = parse_qs(urlparse(url).query)
+        assert qs["client_id"] == ["ca_platform"]
+        assert qs["scope"] == ["read_write"]
+        assert qs["response_type"] == ["code"]
+        assert "code_challenge" not in qs
+
+    def test_exchange_keeps_the_account_and_drops_its_keys(self, org, catalog):
+        started = self._start(org)
+        posted = {}
+
+        def fake_post(url, data, auth=None, as_json=False):
+            posted.update(url=url, data=data)
+            return {"access_token": "sk_test_connected", "livemode": False,
+                    "refresh_token": "rt_connected", "token_type": "bearer",
+                    "stripe_publishable_key": "pk_test_connected",
+                    "stripe_user_id": "acct_1Acme", "scope": "read_write"}
+
+        ds = oauth.complete_authorization(
+            state=started["state"], code="ac_123", http_post=fake_post)
+        assert posted["url"] == "https://connect.stripe.com/oauth/token"
+        assert posted["data"]["client_secret"] == "sk_test_platform"
+        assert posted["data"]["grant_type"] == "authorization_code"
+        assert posted["data"]["code"] == "ac_123"
+        assert "code_verifier" not in posted["data"]
+        bundle = secrets.decrypt_dict(ds.connection_json)
+        assert bundle["STRIPE_USER_ID"] == "acct_1Acme"
+        assert bundle["GRANTED_SCOPES"] == "read_write"
+        for kept_out in ("ACCESS_TOKEN", "REFRESH_TOKEN", "TOKEN_EXPIRES_AT"):
+            assert kept_out not in bundle
+        for secret in ("sk_test_connected", "rt_connected", "pk_test_connected"):
+            assert secret not in bundle.values()
+        assert ds.auth_status == DataSource.AuthStatus.CONNECTED
+        assert ds.type == "stripe"
+
+
+@pytest.mark.django_db
 class TestXAnalyticsOAuth2:
     """X's OAuth 2.0 is PKCE with a confidential client: the client secret goes
     only in an HTTP Basic header, on the exchange and on every refresh."""

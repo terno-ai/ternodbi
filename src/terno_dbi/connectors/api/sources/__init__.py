@@ -49,6 +49,9 @@ from terno_dbi.connectors.api.sources.dynamics365 import (
 from terno_dbi.connectors.api.sources.salesforce import (
     SalesforceConnector, make_salesforce_connector,
 )
+from terno_dbi.connectors.api.sources.stripe import (
+    StripeConnector, make_stripe_connector,
+)
 from terno_dbi.connectors.api.sources.youtube import (
     YouTubeConnector, make_youtube_connector,
 )
@@ -70,5 +73,6 @@ __all__ = [
     "MicrosoftAdsConnector", "make_microsoft_ads_connector",
     "Dynamics365Connector", "make_dynamics365_connector",
     "SalesforceConnector", "make_salesforce_connector",
+    "StripeConnector", "make_stripe_connector",
     "YouTubeConnector", "make_youtube_connector",
 ]

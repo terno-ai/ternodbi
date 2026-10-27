@@ -395,6 +395,10 @@ def _store_tokens(data_source, token_response: Dict[str, Any],
     # (www.zohoapis.eu, …), Pipedrive the company's own (acme.pipedrive.com).
     if token_response.get("api_domain"):
         bundle["API_DOMAIN"] = token_response["api_domain"]
+    # Stripe Connect names the connected account, which every request is made
+    # on behalf of.
+    if token_response.get("stripe_user_id"):
+        bundle["STRIPE_USER_ID"] = token_response["stripe_user_id"]
     expires_in = token_response.get("expires_in")
     if expires_in:
         bundle["TOKEN_EXPIRES_AT"] = str(time.time() + float(expires_in))
@@ -575,11 +579,20 @@ def _post_process(connector_key, provider, token_response, login_method=""):
       graph.instagram.com (its own 60-day token; no refresh token).
     - Meta / Facebook-Login Instagram: exchange via `fb_exchange_token`.
     - Salesforce: look up who connected.
+    - Stripe: drop the per-account keys.
     """
     if login_method == "instagram" or getattr(provider, "name", "") == "instagram_login":
         return _exchange_instagram_long_lived(provider, token_response)
     if connector_key == "salesforce":
         return _salesforce_identity(token_response)
+    if connector_key == "stripe":
+        # Stripe's access token is the connected account's own secret key, and
+        # is deprecated in favour of the platform key with a Stripe-Account
+        # header — which is all the connector uses. A credential that is never
+        # used is never stored.
+        return {k: v for k, v in token_response.items()
+                if k not in ("access_token", "refresh_token",
+                             "stripe_publishable_key")}
     if connector_key not in _META_KEYS:
         return token_response
     access = token_response.get("access_token")

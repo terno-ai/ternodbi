@@ -198,6 +198,7 @@ Besides databases, TernoDBI connects to business tools and queries them through 
 | Social | Instagram Insights, Instagram Public Data, X Analytics |
 | CRM | HubSpot, Salesforce, Pipedrive, Zoho CRM |
 | Commerce | Shopify |
+| Payments | Stripe |
 | Documents | Google Sheets, Google Drive |
 
 **Connecting a source.** An organisation admin opens `/connect?connector=<key>` (for example `google_ads`), signs in with the provider, and chooses which of their accounts TernoDBI may query. Tokens are stored encrypted and refreshed automatically. The server needs an OAuth app for each provider you enable:
@@ -218,6 +219,7 @@ Besides databases, TernoDBI connects to business tools and queries them through 
 | Pipedrive | `TERNO_PIPEDRIVE_CLIENT_ID`, `TERNO_PIPEDRIVE_CLIENT_SECRET` |
 | Zoho | `TERNO_ZOHO_CLIENT_ID`, `TERNO_ZOHO_CLIENT_SECRET` |
 | Shopify | `TERNO_SHOPIFY_CLIENT_ID`, `TERNO_SHOPIFY_CLIENT_SECRET` |
+| Stripe (Connect platform `ca_…` id and secret key) | `TERNO_STRIPE_CLIENT_ID`, `TERNO_STRIPE_SECRET_KEY` |
 
 Register `<your server>/connectors/oauth/callback/` as the redirect URI with each provider.
 
