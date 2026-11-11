@@ -34,7 +34,7 @@ Run it as a standalone **Model Context Protocol (MCP)** server — locally over 
    # Admin token (schema metadata, memory, organisation prompt)
    ternodbi manage issue_token --name "System Admin" --type admin --org default --user admin
    ```
-5. **Connect your MCP client** — see [TernoDBI as an MCP Server](#ternodbi-as-an-mcp-server).
+5. **Connect your MCP client** — see [TernoDBI as an MCP Server](#ternodbi-as-an-mcp-server). To skip self-hosting, use the hosted server instead: [Connect to mcp.terno.ai](#connect-to-the-hosted-server-mcpternoai).
 6. **Start chatting with your data.**
 
 
@@ -142,6 +142,49 @@ Queries use public (semantic) names and are rewritten by SQLShield for the calle
 | `update_org_prompt`, `edit_org_prompt` | Manage the organisation prompt |
 
 The server also provides prompts (`explore-datasources`, `build-a-query`, `schema-health`) and resources (`ternodbi://docs`, `ternodbi://changelog`). The API-connector tools are listed under [API Connectors](#api-connectors).
+
+### Connect to the hosted server (mcp.terno.ai)
+
+No install needed: point any MCP client that supports Streamable HTTP at the hosted server. The first time you connect, your client opens a browser to sign in with your Terno account and choose an organisation (OAuth 2.1); no API key is pasted anywhere.
+
+| Channel | URL |
+| :--- | :--- |
+| Preview (all tools, including API connectors) | `https://mcp.terno.ai/mcp/preview` |
+| Stable (released tools only) | `https://mcp.terno.ai/mcp` |
+
+It is also listed in the [official MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.terno-ai%2Fterno/versions/latest) as `io.github.terno-ai/terno`.
+
+**Claude Code**
+```bash
+claude mcp add --transport http terno https://mcp.terno.ai/mcp/preview
+```
+
+**Claude (Desktop or claude.ai)**: **Settings → Connectors → Add custom connector**, and paste `https://mcp.terno.ai/mcp/preview`.
+
+**VS Code (GitHub Copilot)**: add to `.vscode/mcp.json`:
+```json
+{
+  "servers": {
+    "terno": {
+      "type": "http",
+      "url": "https://mcp.terno.ai/mcp/preview"
+    }
+  }
+}
+```
+
+**Cursor**: add to `~/.cursor/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "terno": {
+      "url": "https://mcp.terno.ai/mcp/preview"
+    }
+  }
+}
+```
+
+Then ask: *"Show me the available datasources."*
 
 ### Local (stdio): connecting Claude Desktop
 
