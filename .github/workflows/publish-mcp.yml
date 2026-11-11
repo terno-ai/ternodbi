@@ -1,0 +1,30 @@
+# Publishes server.json to the official MCP Registry (registry.modelcontextprotocol.io),
+# which feeds GitHub's MCP Registry and VS Code's MCP gallery.
+#
+# GitHub OIDC proves this job runs in a terno-ai repo, which grants the
+# io.github.terno-ai/* namespace without needing an org Owner's token.
+# Bump "version" in server.json before each run; the registry rejects duplicates.
+name: Publish to MCP Registry
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+
+      - name: Log in to MCP Registry (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server.json
+        run: ./mcp-publisher publish
