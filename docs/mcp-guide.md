@@ -161,7 +161,7 @@ Over an OAuth connection, write needs two things at once:
 | | what it is | when it's decided |
 |---|---|---|
 | **scope** (`admin:write`, `admin:sync`) | what the *client* was granted at consent | frozen into the token when the user connects |
-| **Org Admin group** | what the *user* may do in this organisation | re-read from the database on **every request** |
+| **Org Admin role** (`core.use_dbi_admin_mode` on one of the user's groups *in this organisation*) | what the *user* may do in this organisation | re-read from the database on **every request** |
 
 Because only the second is live, the two directions are not symmetric:
 

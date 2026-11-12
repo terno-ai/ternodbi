@@ -10,6 +10,25 @@
 
 # Changelog
 
+## 1.0.37
+
+- Admin checks are per organisation. They read the permissions on the user's
+  groups in that organisation (`OrganisationUser.groups`) instead of the global
+  `user.groups` "Org Admin" group, which made an admin of one organisation an
+  admin of every organisation they joined. See `terno_dbi.core.org_permissions`.
+  - Connect and manage connector sources: the owner, a superuser, or
+    `core.add_datasource`.
+  - Write access over MCP/OAuth: a superuser or `core.use_dbi_admin_mode`
+    (new permission).
+- The connector account allowlist is matched against the caller's groups in
+  the datasource's organisation, not their global groups.
+- Migration: each member of the global "Org Admin" group (or
+  `TERNO_ORG_ADMIN_GROUP`) gets a "<org_id>:DBI Admin" group with both
+  permissions in every organisation they belong to, so existing admins stay
+  admins. The global group is left as it was and no longer grants anything.
+  `TERNO_ORG_ADMIN_GROUP` is read only by this migration.
+- `bootstrap_local` puts the admin group on the membership.
+
 ## 1.0.1
 
 - OAuth issuer moved to `https://mcp.terno.ai`. Client registration and token

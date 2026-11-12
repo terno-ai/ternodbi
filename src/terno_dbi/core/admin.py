@@ -450,8 +450,7 @@ def _can_write_org_memory(user):
 
     Deliberately a generic Django permission (``core.write_org_memory``)
     rather than a hardcoded group name — ternodbi ships standalone and must
-    not assume a host app's own group-naming convention (e.g. terno-ai's
-    global "Org Admin" group) exists. The host grants this permission to
+    not assume a host app's own group-naming convention exists. The host grants this permission to
     whichever group/role it wants; ternodbi only ever checks ``has_perm``.
     """
     return user.is_superuser or user.has_perm('core.write_org_memory')

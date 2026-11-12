@@ -129,8 +129,8 @@ async def list_tools() -> List[Tool]:
     tools = visible_tools(scopes, writable)
     if scopes is not None and not writable and (scopes & WRITE_SCOPES):
         logger.info(
-            "Withholding write tools: the grant carries %s but the user is no "
-            "longer an Org Admin.",
+            "Withholding write tools: the grant carries %s but the user no "
+            "longer holds core.use_dbi_admin_mode in this organisation.",
             " ".join(sorted(scopes & WRITE_SCOPES)),
         )
     logger.debug(
@@ -173,8 +173,8 @@ async def call_tool(name: str, arguments: Dict[str, Any]):
         withdrawn = bool(required and required in WRITE_SCOPES and required in scopes)
         if withdrawn:
             logger.warning(
-                "Refused %s: '%s' is in the grant but the user is no longer an "
-                "Org Admin.", name, required,
+                "Refused %s: '%s' is in the grant but the user no longer holds "
+                "core.use_dbi_admin_mode in this organisation.", name, required,
             )
             message = (
                 f"'{name}' needs write access. This connection was granted it, "

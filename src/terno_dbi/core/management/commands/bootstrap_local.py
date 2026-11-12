@@ -6,7 +6,7 @@ Idempotent: re-running reuses the existing user and organisation and issues a
 fresh token, so it is safe to run whenever you need a new one.
 """
 
-from django.contrib.auth.models import Group, User
+from django.contrib.auth.models import Group, Permission, User
 from django.core.management.base import BaseCommand
 
 
@@ -20,11 +20,11 @@ class Command(BaseCommand):
         parser.add_argument(
             "--read-only",
             action="store_true",
-            help="Issue a read-only token (no Org Admin group, query scopes only).",
+            help="Issue a read-only token (no admin group, query scopes only).",
         )
 
     def handle(self, *args, **options):
-        from terno_dbi.core.models import CoreOrganisation, OrganisationUser
+        from terno_dbi.core.models import CoreOrganisation, OrganisationGroup, OrganisationUser
         from terno_dbi.oauth.minting import (
             generate_oauth_access_token,
             mint_service_token_for_key,
@@ -53,12 +53,19 @@ class Command(BaseCommand):
         else:
             org = membership.organisation
 
-        # Write access needs the group as well as the scope — the token minter
-        # strips write scopes for a non-admin, which is the behaviour being
-        # demonstrated by --read-only.
+        # Write access needs the permission as well as the scope — the token
+        # minter strips write scopes for a non-admin. The admin group sits on
+        # the membership: roles are per organisation (see
+        # terno_dbi.core.org_permissions).
         if not options["read_only"]:
-            admin_group, _ = Group.objects.get_or_create(name="Org Admin")
-            user.groups.add(admin_group)
+            admin_group, created = Group.objects.get_or_create(name=f"{org.pk}:Org Admin")
+            if created:
+                admin_group.permissions.set(Permission.objects.filter(
+                    content_type__app_label="core",
+                    codename__in=["add_datasource", "use_dbi_admin_mode"],
+                ))
+            OrganisationGroup.objects.get_or_create(organisation=org, group=admin_group)
+            membership.groups.add(admin_group)
 
         scopes = ["query:read", "query:execute"]
         if not options["read_only"]:

@@ -68,7 +68,7 @@ class TestConnect:
 
     def test_non_admin_member_cannot_connect(self, member, settings):
         # Connecting is an admin action; a plain member (not owner, not in the
-        # Org Admin group) is forbidden — they query, they don't connect.
+        # admin group in this org) is forbidden — they query, they don't connect.
         settings.DEBUG = True
         plain = User.objects.create_user("plain", "p@x.com", "pw")
         OrganisationUser.objects.create(organisation=member["org"], user=plain)

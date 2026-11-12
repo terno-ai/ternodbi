@@ -27,15 +27,15 @@ REQUESTED = "query:read query:execute connector:write"
 
 @pytest.fixture
 def org_admin(db):
-    from django.contrib.auth.models import Group, User
+    from django.contrib.auth.models import User
 
-    from terno_dbi.core.models import CoreOrganisation, OrganisationUser
+    from terno_dbi.core.models import CoreOrganisation
+    from tests.unit._org_roles import make_org_admin
 
     owner = User.objects.create(username="flow-owner")
     org = CoreOrganisation.objects.create(name="Flow", subdomain="flow", owner=owner)
     user = User.objects.create(username="flow-admin")
-    user.groups.add(Group.objects.get_or_create(name="Org Admin")[0])
-    OrganisationUser.objects.create(user=user, organisation=org)
+    make_org_admin(user, org)
     return user, org
 
 

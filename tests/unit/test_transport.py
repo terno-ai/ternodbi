@@ -53,14 +53,10 @@ def test_transport_is_built_per_client_not_shared():
 
 @pytest.fixture
 def in_process_org(db):
-    from django.contrib.auth.models import Group, User
+    from django.contrib.auth.models import User
 
-    from terno_dbi.core.models import (
-        CoreOrganisation,
-        DataSource,
-        OrganisationUser,
-        Table,
-    )
+    from terno_dbi.core.models import CoreOrganisation, DataSource, Table
+    from tests.unit._org_roles import make_org_admin
     from terno_dbi.oauth.minting import (
         generate_oauth_access_token,
         mint_service_token_for_key,
@@ -71,9 +67,8 @@ def in_process_org(db):
     other = CoreOrganisation.objects.create(name="Globex", subdomain="tp-globex", owner=owner)
 
     user = User.objects.create(username="tp-ada")
-    # "Org Admin" on User.groups, matching terno-ai's create_org_admin_group.
-    user.groups.set([Group.objects.create(name="Org Admin")])
-    OrganisationUser.objects.create(user=user, organisation=org)
+    # Admin in this organisation: the admin group sits on the membership.
+    make_org_admin(user, org)
 
     ds = DataSource.objects.create(
         display_name="acme-db", type="sqlite",
