@@ -1222,3 +1222,45 @@ class TestWebhookUrlWithoutSlash:
                            HTTP_X_SHOPIFY_HMAC_SHA256=_sign_body(body))
         assert resp.status_code == 200
         assert not DataSource.objects.filter(pk=connected.pk).exists()
+
+
+@pytest.mark.django_db
+class TestSignedOutConnectLoginRedirect:
+    """A signed-out /connect must go to the connector login with `next` intact."""
+
+    def _signed_out_connect(self, params):
+        from terno_dbi.connectors.api import web
+        request = RequestFactory().get("/connect", params)
+        request.user = AnonymousUser()
+        return web.connect(request)
+
+    def test_hosted_uses_connector_login_and_keeps_every_param(
+            self, shopify_catalog, settings):
+        settings.TERNO_CONNECTOR_LOGIN_URL = "https://app.terno.ai/accounts/login/"
+        settings.LOGIN_URL = "https://app.terno.ai"
+        resp = self._signed_out_connect(
+            {"connector": "shopify", "shop": SHOP, "install": "1"})
+        assert resp.status_code == 302
+        assert resp.url.startswith("https://app.terno.ai/accounts/login/?next=")
+        assert set(_query(resp.url)) == {"next"}          # nothing split off
+        assert _connect_params(_next_of(resp.url)) == {
+            "connector": "shopify", "shop": SHOP, "install": "1"}
+
+    def test_next_is_accepted_by_the_login_carry_over(self, shopify_catalog, settings):
+        from terno_dbi.oauth.login_redirect import is_connector_next
+        settings.TERNO_CONNECTOR_LOGIN_URL = "https://app.terno.ai/accounts/login/"
+        resp = self._signed_out_connect(
+            {"connector": "shopify", "shop": SHOP, "install": "1"})
+        assert is_connector_next(_next_of(resp.url))
+
+    def test_standalone_falls_back_to_login_url(self, shopify_catalog, settings):
+        settings.TERNO_CONNECTOR_LOGIN_URL = ""
+        settings.LOGIN_URL = "/accounts/login/"
+        resp = self._signed_out_connect({"connector": "shopify", "shop": SHOP})
+        assert resp.url.startswith("/accounts/login/?next=")
+        assert _connect_params(_next_of(resp.url))["shop"] == SHOP
+
+    def test_login_url_with_query_gets_ampersand(self, shopify_catalog, settings):
+        settings.TERNO_CONNECTOR_LOGIN_URL = "https://app.terno.ai/accounts/login/?x=1"
+        resp = self._signed_out_connect({"connector": "shopify", "shop": SHOP})
+        assert resp.url.startswith("https://app.terno.ai/accounts/login/?x=1&next=")

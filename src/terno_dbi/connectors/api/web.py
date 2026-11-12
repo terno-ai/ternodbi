@@ -102,8 +102,19 @@ def _authorised_org(request):
 
 
 def _login_redirect(request):
-    login_url = getattr(settings, "LOGIN_URL", "/accounts/login/")
-    return redirect(f"{login_url}?next={request.get_full_path()}")
+    """Send a signed-out user to sign in, then back to this connect link.
+
+    Uses `TERNO_CONNECTOR_LOGIN_URL` when set, as the MCP authorize flow does:
+    on hosted Terno that login service resumes `next` on the user's
+    organisation host. `LOGIN_URL` there is the site root, which drops `next`.
+    `next` is URL-encoded so the connect link's own `&` parameters survive.
+    """
+    from urllib.parse import urlencode
+
+    login_url = (getattr(settings, "TERNO_CONNECTOR_LOGIN_URL", "")
+                 or getattr(settings, "LOGIN_URL", "/accounts/login/"))
+    sep = "&" if "?" in login_url else "?"
+    return redirect(f"{login_url}{sep}{urlencode({'next': request.get_full_path()})}")
 
 
 def _callback_uri(request) -> str:
