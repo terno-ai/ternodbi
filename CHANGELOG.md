@@ -10,6 +10,26 @@
 
 # Changelog
 
+## Unreleased
+
+- Shopify App Store install. `GET /connectors/shopify/install/` is the app URL:
+  it verifies Shopify's query signature, a timestamp under one hour old and a
+  `*.myshopify.com` shop, then sends the merchant straight to Shopify's consent
+  screen, before any Terno sign-in (App Store requirement 2.3.2). The callback
+  holds the token in the new `ShopifyPendingInstall` model (migration 0039) for
+  30 minutes, bound to the browser by a cookie, and sends the merchant to sign
+  in with `next=/connect?connector=shopify&shop=…&install=1`. That `/connect`
+  checks admin rights as usual and attaches the store to the organisation. The
+  merchant never types the store domain. `TERNO_SHOPIFY_INSTALL_RETURN_TO`
+  optionally sets where they land afterwards (default `/`).
+- `complete_authorization` now refuses an OAuth state with no organisation and
+  no datasource, so no datasource can be created outside an organisation.
+- `POST /connectors/shopify/webhooks/` takes signed Shopify webhooks; unsigned
+  requests get a 401. `app/uninstalled` removes the store's tokens and any
+  unclaimed install. `shop/redact` deletes the store's connections and any
+  unclaimed install. `customers/redact` deletes the store's stored query
+  results. `customers/data_request` is logged for manual follow-up.
+
 ## 1.0.1
 
 - OAuth issuer moved to `https://mcp.terno.ai`. Client registration and token

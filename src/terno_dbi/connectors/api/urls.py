@@ -10,13 +10,17 @@ canonical host.
 """
 
 from django.urls import path
-from . import web
+from . import shopify_app, web
 
 app_name = "connectors_api"
 
 urlpatterns = [
     path("connect", web.connect, name="connect"),
     path("connectors/oauth/callback/", web.oauth_callback, name="oauth_callback"),
+    path("connectors/shopify/install/", shopify_app.shopify_install,
+         name="shopify_install"),
+    path("connectors/shopify/webhooks/", shopify_app.shopify_webhook,
+         name="shopify_webhooks"),
     # Connector gallery (session-authenticated browser API).
     path("connectors/api/", web.list_api_connectors, name="list_api_connectors"),
     path("connectors/api/requests/", web.request_connector,

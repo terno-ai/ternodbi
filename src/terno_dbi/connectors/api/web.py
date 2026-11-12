@@ -28,6 +28,7 @@ from terno_dbi.connectors.api.management_service import (
     ConnectorNotConnected,
     ConnectorRateLimited,
 )
+from terno_dbi.connectors.api import shopify_app
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +157,10 @@ def connect(request):
     ):
         return_to = ""   # ignore an off-site return target
 
+    if connector_key == "shopify" and request.GET.get("install") == "1":
+        return shopify_app.claim_install(
+            request, org, request.GET.get("shop", ""), return_to=return_to)
+
     if catalog.auth_type == ConnectorCatalog.AuthType.MANUAL:
         # Credentials never pass through OAuth; the user fills the admin form.
         url = datasource_setup_url(org.subdomain)
@@ -217,6 +222,10 @@ def oauth_callback(request):
 
     # Look up the return target before the state is consumed.
     st = ConnectorOAuthState.objects.filter(state=state).first()
+
+    if shopify_app.is_install_state(st):
+        return shopify_app.complete_install(request, st, code)
+
     return_to = st.return_to if st else ""
     connector_key = st.connector_key if st else ""
 

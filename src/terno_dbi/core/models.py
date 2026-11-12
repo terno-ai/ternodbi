@@ -1162,3 +1162,32 @@ class ConnectorRequest(models.Model):
 
     def __str__(self):
         return f"{self.connector_name} ({self.email_snapshot or 'unknown'})"
+
+
+class ShopifyPendingInstall(models.Model):
+    """A Shopify store authorized from Shopify, waiting for its Terno organisation.
+
+    Shopify requires OAuth to run as soon as the app is installed, before the
+    merchant signs in to Terno, so the token arrives before Terno knows which
+    organisation it belongs to. It is held here until the same browser signs in
+    and claims it, then moved onto that organisation's datasource and this row
+    is deleted.
+
+    The browser holds the claim secret in a cookie. Only its SHA-256 is stored,
+    so a database read alone cannot claim a store. Rows expire quickly; expired
+    rows are removed on the next install or claim, and an uninstall or
+    shop/redact webhook removes the store's rows at once.
+    """
+
+    claim_hash = models.CharField(max_length=64, unique=True)
+    shop = models.CharField(max_length=255, db_index=True)
+    token_response = EncryptedJSONField(
+        help_text="The token response from Shopify, encrypted at rest.")
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        db_table = "terno_shopify_pending_install"
+
+    def __str__(self):
+        return f"pending Shopify install for {self.shop}"

@@ -27,6 +27,7 @@ from urllib.parse import urlencode
 from django.utils import timezone
 import requests
 from terno_dbi.services.secrets import decrypt_dict, encrypt_dict
+from terno_dbi.connectors.api.auth.providers import get_provider
 
 logger = logging.getLogger(__name__)
 
@@ -428,8 +429,7 @@ def complete_authorization(
     the `oauth_verifier`.
     """
     from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
-    from terno_dbi.connectors.api.auth.providers import get_provider
-    from terno_dbi.core.models import ConnectorCatalog, ConnectorOAuthState, DataSource
+    from terno_dbi.core.models import ConnectorOAuthState
 
     st = ConnectorOAuthState.objects.filter(state=state).first()
     if st is None or st.is_expired:
@@ -438,38 +438,60 @@ def complete_authorization(
             "This connect link has expired or was already used. Start again.",
         )
 
-    provider = get_provider(st.connector_key, st.login_method)
-    if provider.is_oauth1:
-        token_response, instance = _exchange_oauth1(st, provider, code, http_post), ""
-    else:
-        # Resolved at call time (not as a default arg) so tests can monkeypatch it.
-        token_response, instance = _exchange_code(
-            st, provider, code, http_post or _default_post, callback_params)
-
-    data_source = st.data_source
-    if data_source is None:
-        catalog = ConnectorCatalog.objects.filter(key=st.connector_key).first()
-        # Reuse an existing datasource for this connector so reconnecting does not
-        # create duplicates. Create a new datasource only when none exists.
-        data_source = (
-            DataSource.objects.filter(
-                organisation=st.organisation, catalog=catalog,
-            ).order_by("id").first()
-            if catalog else None
+    if st.organisation_id is None and st.data_source_id is None:
+        raise ApiError(
+            ErrorCode.UPSTREAM_ERROR,
+            "This connect link is not tied to an organisation. Start again.",
         )
-        if data_source is None:
-            data_source = DataSource.objects.create(
-                display_name=_unique_name(catalog, st.organisation),
-                type=st.connector_key,
-                connection_str="",
-                organisation=st.organisation,
-                catalog=catalog,
-                auth_status=DataSource.AuthStatus.NOT_AUTHENTICATED,
-            )
+
+    token_response, instance = exchange_code_for_state(
+        st, code, http_post=http_post, callback_params=callback_params)
+
+    data_source = st.data_source or connector_datasource(
+        st.organisation, st.connector_key)
 
     _store_tokens(data_source, token_response, instance=instance,
                   login_method=st.login_method)
     st.delete()
+    return data_source
+
+
+def exchange_code_for_state(st, code: str, *, http_post=None, callback_params=None):
+    """Swap `code` for tokens using the flow recorded in `st`.
+
+    Returns `(token_response, instance)`. Stores nothing and leaves `st` alone;
+    the caller decides where the tokens go and consumes the state.
+    """
+    provider = get_provider(st.connector_key, st.login_method)
+    if provider.is_oauth1:
+        return _exchange_oauth1(st, provider, code, http_post), ""
+    return _exchange_code(
+        st, provider, code, http_post or _default_post, callback_params)
+
+
+def connector_datasource(organisation, connector_key: str):
+    """The organisation's datasource for `connector_key`, created if missing.
+
+    Reconnecting reuses the existing datasource so it is not duplicated.
+    """
+    from terno_dbi.core.models import ConnectorCatalog, DataSource
+
+    catalog = ConnectorCatalog.objects.filter(key=connector_key).first()
+    data_source = (
+        DataSource.objects.filter(
+            organisation=organisation, catalog=catalog,
+        ).order_by("id").first()
+        if catalog else None
+    )
+    if data_source is None:
+        data_source = DataSource.objects.create(
+            display_name=_unique_name(catalog, organisation),
+            type=connector_key,
+            connection_str="",
+            organisation=organisation,
+            catalog=catalog,
+            auth_status=DataSource.AuthStatus.NOT_AUTHENTICATED,
+        )
     return data_source
 
 
