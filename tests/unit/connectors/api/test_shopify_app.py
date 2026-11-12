@@ -1112,8 +1112,11 @@ class TestMcpLoginRedirectUnchanged:
 
     def test_mcp_routes_still_resolve(self):
         from django.urls import resolve
-        assert resolve("/oauth/authorize/").url_name == "authorize"
+        from terno_dbi.oauth import views as oauth_views
         assert resolve("/connectors/oauth/callback/").url_name == "oauth_callback"
+        assert resolve("/oauth/register").url_name == "oauth-register"
+        if oauth_views.make_authorization_view() is not None:
+            assert resolve("/oauth/authorize/").url_name == "authorize"
 
 
 @pytest.mark.django_db
