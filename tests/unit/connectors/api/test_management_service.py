@@ -43,15 +43,11 @@ def member(org):
 
 @pytest.fixture
 def admin_member(org):
-    """A member in the configured Org Admin group."""
-    from django.conf import settings
-    from django.contrib.auth.models import Group, User
-    from terno_dbi.core.models import OrganisationUser
+    """A member whose group in this org holds the admin permissions."""
+    from django.contrib.auth.models import User
+    from tests.unit._org_roles import make_org_admin
     u = User.objects.create_user("ms-admin", "a@example.com", "pw")
-    OrganisationUser.objects.create(user=u, organisation=org)
-    group_name = getattr(settings, "TERNO_ORG_ADMIN_GROUP", "Org Admin")
-    group, _ = Group.objects.get_or_create(name=group_name)
-    u.groups.add(group)
+    make_org_admin(u, org)
     return u
 
 
@@ -99,6 +95,41 @@ def test_is_org_admin_superuser(org):
 @pytest.mark.django_db
 def test_is_org_admin_plain_member_false(member, org):
     assert svc.is_org_admin(member, org) is False
+
+
+@pytest.mark.django_db
+def test_is_org_admin_ignores_the_global_org_admin_group(member, org):
+    """Only groups on the membership count; the old global group grants nothing."""
+    from django.contrib.auth.models import Group
+    member.groups.add(Group.objects.get_or_create(name="Org Admin")[0])
+    assert svc.is_org_admin(member, org) is False
+
+
+@pytest.mark.django_db
+def test_is_org_admin_is_per_organisation(admin_member, org, owner):
+    """Admin in one org is a plain member in another."""
+    from terno_dbi.core.models import CoreOrganisation, OrganisationUser
+    other = CoreOrganisation.objects.create(name="Globex", subdomain="ms-globex", owner=owner)
+    OrganisationUser.objects.create(user=admin_member, organisation=other)
+    assert svc.is_org_admin(admin_member, org) is True
+    assert svc.is_org_admin(admin_member, other) is False
+
+
+@pytest.mark.django_db
+def test_is_org_admin_needs_add_datasource(member, org):
+    """A group in the org without `core.add_datasource` does not make an admin."""
+    from terno_dbi.core.models import OrganisationUser
+    from tests.unit._org_roles import admin_group
+    writer = admin_group(org, name="Writers", perms=("core.use_dbi_admin_mode",))
+    OrganisationUser.objects.get(user=member, organisation=org).groups.add(writer)
+    assert svc.is_org_admin(member, org) is False
+
+
+@pytest.mark.django_db
+def test_is_org_admin_inactive_user_false(admin_member, org):
+    admin_member.is_active = False
+    admin_member.save()
+    assert svc.is_org_admin(admin_member, org) is False
 
 
 # --- list_connectors ----------------------------------------------------------
@@ -163,6 +194,26 @@ def test_list_accounts_returns_rows_and_email(owner, org, ds, monkeypatch):
     assert out["count"] == 2
     assert out["email"] == "a@b.com"
     assert {r["account_id"] for r in out["accounts"]} == {"1", "2"}
+
+
+@pytest.mark.django_db
+def test_list_accounts_allowlist_uses_the_callers_groups_in_this_org(
+        admin_member, org, ds, monkeypatch):
+    """The account allowlist is matched against the caller's groups in the
+    datasource's organisation, not their global groups."""
+    from django.contrib.auth.models import Group
+    from terno_dbi.core.models import GroupAccountAllowlist, OrganisationUser
+    monkeypatch.setattr(svc.registry, "build_connector", lambda d: _FakeConnector())
+
+    in_org = Group.objects.create(name=f"{org.pk}:Analysts")
+    OrganisationUser.objects.get(user=admin_member, organisation=org).groups.add(in_org)
+    global_only = Group.objects.create(name="global-analysts")
+    admin_member.groups.add(global_only)
+    GroupAccountAllowlist.objects.create(group=in_org, data_source=ds, account_id="1")
+    GroupAccountAllowlist.objects.create(group=global_only, data_source=ds, account_id="2")
+
+    out = svc.list_accounts(admin_member, org, "google_ads")
+    assert {r["account_id"] for r in out["accounts"]} == {"1"}
 
 
 @pytest.mark.django_db

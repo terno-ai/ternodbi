@@ -13,11 +13,10 @@ from __future__ import annotations
 import logging
 import unicodedata
 
-from django.conf import settings
-
 from terno_dbi.services.secrets import decrypt_dict, encrypt_dict
 from terno_dbi.connectors.api import registry
 from terno_dbi.connectors.api.auth import account_selection, rbac
+from terno_dbi.core import org_permissions
 from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
@@ -56,17 +55,12 @@ def is_org_admin(user, org) -> bool:
 
     Connecting a source exposes the connector's data to the whole organisation on
     that user's provider credentials, so it is an admin action — mirroring how a
-    database source is added. The admin set is: a member of the configurable
-    "Org Admin" group (the same group that grants the agent its admin scope), the
-    organisation's owner, or a Django superuser. Querying a connected source
-    stays open to every member (narrowed only by the account allowlist).
+    database source is added. Allowed: the organisation's owner, a superuser, or a
+    member whose groups in this organisation hold ``core.add_datasource`` (see
+    `terno_dbi.core.org_permissions`). Querying a connected source stays open to
+    every member (narrowed only by the account allowlist).
     """
-    if getattr(user, "is_superuser", False):
-        return True
-    if getattr(org, "owner_id", None) == getattr(user, "id", None):
-        return True
-    group = getattr(settings, "TERNO_ORG_ADMIN_GROUP", "Org Admin")
-    return user.groups.filter(name=group).exists()
+    return org_permissions.can_manage_connectors(user, org)
 
 
 # --- connection-state helpers -------------------------------------------------
@@ -276,7 +270,7 @@ def list_accounts(user, org, connector_key) -> dict:
     except ApiError as exc:
         raise ConnectorBadRequest(exc.message)
 
-    permitted = rbac.permitted_accounts(ds, user.groups.all())
+    permitted = rbac.permitted_accounts(ds, org_permissions.membership_groups(user, ds.organisation_id))
     visible = rbac.filter_accounts(accounts, permitted)
     rows = account_selection.sync_account_selections(ds, visible)
     return {

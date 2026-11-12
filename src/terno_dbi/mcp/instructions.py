@@ -212,7 +212,8 @@ the requesting user the exact wording before writing it.
 
 Write access needs two things at once: the connection must have been granted
 write scopes at consent, and the user must be an **Org Admin** in this
-organisation *right now*. The first is fixed when the connection is made; the
+organisation *right now* (one of their groups there holds
+`core.use_dbi_admin_mode`). The first is fixed when the connection is made; the
 second is re-checked on every request. So the tools available to you can change
 mid-conversation without the user doing anything to the connection.
 

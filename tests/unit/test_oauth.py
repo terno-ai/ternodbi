@@ -20,6 +20,7 @@ from terno_dbi.oauth.metadata import (
     authorization_server_metadata,
     protected_resource_metadata,
 )
+from tests.unit._org_roles import admin_group
 from terno_dbi.oauth.scopes import (
     ADMIN_SYNC,
     ADMIN_WRITE,
@@ -487,18 +488,13 @@ def org_fixture(db):
     org = CoreOrganisation.objects.create(
         name="Acme", subdomain="acme-fixture", owner=owner
     )
-    admin_group = Group.objects.create(name="Org Admin")
     analysts = Group.objects.create(name="Analysts")
 
-    # Mirrors production wiring, which this fixture originally got wrong: terno-ai
-    # puts "Org Admin" on `User.groups` (`create_org_admin_group` does
-    # `owner.groups.add(...)`), while `OrganisationUser.groups` carries the
-    # per-org table-scoping groups. Putting the admin group on the membership
-    # here made every write test pass against a shape production never produces.
+    # Roles live on the membership: the admin is admin *in this organisation*
+    # because one of their groups here holds `core.use_dbi_admin_mode`.
     admin_user = User.objects.create(username="ada")
-    admin_user.groups.set([admin_group])
     membership = OrganisationUser.objects.create(user=admin_user, organisation=org)
-    membership.groups.set([analysts])
+    membership.groups.set([analysts, admin_group(org)])
 
     plain_user = User.objects.create(username="bob")
     plain_membership = OrganisationUser.objects.create(user=plain_user, organisation=org)
@@ -534,9 +530,9 @@ def test_groups_are_copied_for_read_parity(org_fixture):
     token = mint_service_token_for_key(
         key, org_fixture["admin"], org_fixture["org"], ["query:read"]
     )
-    # The per-org scoping groups, which is what `OrganisationUser.groups` holds.
-    # "Org Admin" is not among them by design — it lives on `User.groups`.
-    assert sorted(g.name for g in token.groups.all()) == ["Analysts"]
+    # Every group the user holds in this organisation, `OrganisationUser.groups`.
+    org = org_fixture["org"]
+    assert sorted(g.name for g in token.groups.all()) == [f"{org.pk}:Org Admin", "Analysts"]
 
 
 @pytest.mark.django_db
@@ -1167,24 +1163,16 @@ def test_terno_ai_sso_login_forwards_a_connector_authorize_path():
 
 
 @pytest.mark.django_db
-def test_write_gate_reads_the_group_terno_ai_actually_assigns(org_fixture):
-    """The write gate must read `User.groups`, not `OrganisationUser.groups`.
+def test_write_gate_reads_the_users_groups_in_that_organisation(org_fixture):
+    """Write access comes from `core.use_dbi_admin_mode` on the user's groups in
+    the token's organisation (`OrganisationUser.groups`).
 
-    terno-ai's `create_org_admin_group` receiver does
-    `instance.owner.groups.add(group)` on org creation, and both `terno/views.py`
-    and `terno/permissions.py` check `user.groups.filter(name="Org Admin")`. That
-    is the app's single global admin flag.
-
-    Reading the gate off `OrganisationUser.groups` instead made `can_write`
-    permanently False in production — nothing ever puts "Org Admin" there — so
-    `admin:write`/`admin:sync` were stripped from *every* token and the write half
-    of the connector was unreachable. It passed locally only because both the
-    fixture and `bootstrap_local` set the group in the same wrong place.
-    Observed on staging as `groups=[] can_write=False` for a fresh org owner.
+    The global `User.groups` "Org Admin" group no longer grants anything: it made
+    an admin of one organisation an admin of every organisation they joined.
     """
     from django.contrib.auth.models import Group, User
 
-    from terno_dbi.core.models import OrganisationUser
+    from terno_dbi.core.models import CoreOrganisation, OrganisationUser
     from terno_dbi.oauth.minting import (
         generate_oauth_access_token,
         mint_service_token_for_key,
@@ -1193,10 +1181,9 @@ def test_write_gate_reads_the_group_terno_ai_actually_assigns(org_fixture):
     )
 
     org = org_fixture["org"]
-    admin_group = Group.objects.get(name="Org Admin")
     requested = ["query:read", "admin:write", "admin:sync"]
 
-    # Global group -> write granted, at mint time and at request time.
+    # Admin group on the membership -> write granted, at mint and at request time.
     admin_membership = OrganisationUser.objects.get(user=org_fixture["admin"], organisation=org)
     assert user_can_write(admin_membership) is True
     token = mint_service_token_for_key(
@@ -1207,36 +1194,40 @@ def test_write_gate_reads_the_group_terno_ai_actually_assigns(org_fixture):
     assert summary["is_org_admin"] is True
     assert summary["can_write"] is True
 
-    # The membership m2m must NOT be a backdoor: it is for table scoping, and a
-    # user who only has "Org Admin" there is not an admin as far as the app is
-    # concerned, so the connector must not treat them as one.
-    impostor = User.objects.create(username="membership-only-admin")
-    impostor_membership = OrganisationUser.objects.create(user=impostor, organisation=org)
-    impostor_membership.groups.set([admin_group])
-    assert user_can_write(impostor_membership) is False
-
-    impostor_token = mint_service_token_for_key(
-        generate_oauth_access_token(), impostor, org, requested
+    # The old global group is not a backdoor.
+    legacy = User.objects.create(username="global-group-only")
+    legacy.groups.add(Group.objects.get_or_create(name="Org Admin")[0])
+    legacy_membership = OrganisationUser.objects.create(user=legacy, organisation=org)
+    assert user_can_write(legacy_membership) is False
+    legacy_token = mint_service_token_for_key(
+        generate_oauth_access_token(), legacy, org, requested
     )
-    assert not ({"admin:write", "admin:sync"} & set(impostor_token.scopes))
-    assert token_grant_summary(impostor_token)["can_write"] is False
+    assert not ({"admin:write", "admin:sync"} & set(legacy_token.scopes))
+    assert token_grant_summary(legacy_token)["can_write"] is False
+
+    # Admin in one organisation is a plain member in another.
+    other = CoreOrganisation.objects.create(
+        name="Other", subdomain="other-fixture", owner=org.owner)
+    other_membership = OrganisationUser.objects.create(user=org_fixture["admin"], organisation=other)
+    assert user_can_write(other_membership) is False
+    other_token = mint_service_token_for_key(
+        generate_oauth_access_token(), org_fixture["admin"], other, requested
+    )
+    assert not ({"admin:write", "admin:sync"} & set(other_token.scopes))
+    assert token_grant_summary(other_token)["can_write"] is False
 
 
-def test_bootstrap_local_grants_the_group_the_same_way_production_does():
-    """The local harness must not diverge from production wiring.
-
-    It previously did `membership.groups.add(admin_group)`, which granted write
-    locally while production granted none — the divergence that hid the write-gate
-    bug through every local test run.
-    """
+def test_bootstrap_local_grants_admin_on_the_membership():
+    """The local harness must grant admin the same way production does: a group
+    on the membership holding the admin permissions, not the global group."""
     from pathlib import Path
 
     cmd = Path(__file__).resolve().parents[2] / (
         "src/terno_dbi/core/management/commands/bootstrap_local.py"
     )
     src = cmd.read_text()
-    assert "user.groups.add(admin_group)" in src
-    assert "membership.groups.add(admin_group)" not in src
+    assert "membership.groups.add(admin_group)" in src
+    assert "user.groups.add(" not in src
 
 
 def test_completed_connect_does_not_leave_a_replayable_redirect():
@@ -1375,16 +1366,15 @@ def test_consent_screen_makes_no_external_requests():
 
 @pytest.fixture
 def connectable(db):
-    from django.contrib.auth.models import Group, User
+    from django.contrib.auth.models import User
 
     from terno_dbi.core.models import CoreOrganisation, OrganisationUser
 
     owner = User.objects.create(username="wa-owner")
     org = CoreOrganisation.objects.create(name="Acme", subdomain="wa-acme", owner=owner)
     user = User.objects.create(username="wa-user")
-    OrganisationUser.objects.create(user=user, organisation=org)
-    group, _ = Group.objects.get_or_create(name="Org Admin")
-    return {"org": org, "user": user, "group": group}
+    membership = OrganisationUser.objects.create(user=user, organisation=org)
+    return {"org": org, "user": user, "membership": membership, "group": admin_group(org)}
 
 
 _ALL_REQUESTED = ["query:read", "query:execute", "admin:read", "admin:write", "admin:sync"]
@@ -1428,7 +1418,7 @@ def test_write_case1_non_admin_never_receives_write(connectable):
 
 @pytest.mark.django_db
 def test_write_case2_admin_receives_write(connectable):
-    connectable["user"].groups.add(connectable["group"])
+    connectable["membership"].groups.add(connectable["group"])
     token = _mint(connectable["user"], connectable["org"])
 
     assert {ADMIN_WRITE, ADMIN_SYNC} <= set(token.scopes)
@@ -1445,11 +1435,11 @@ def test_write_case3_demotion_takes_effect_without_reconnecting(connectable):
     agree: showing a tool that can only ever fail wastes the model's turn and
     reports the wrong cause.
     """
-    connectable["user"].groups.add(connectable["group"])
+    connectable["membership"].groups.add(connectable["group"])
     token = _mint(connectable["user"], connectable["org"])
     assert "delete_datasource" in _tool_names(token)
 
-    connectable["user"].groups.remove(connectable["group"])
+    connectable["membership"].groups.remove(connectable["group"])
 
     assert {ADMIN_WRITE, ADMIN_SYNC} <= set(token.scopes), "scopes should be untouched"
     assert _per_request(token)["can_write"] is False
@@ -1469,7 +1459,7 @@ def test_write_case4_promotion_does_not_upgrade_a_live_connection(connectable):
     token = _mint(connectable["user"], connectable["org"])
     assert _per_request(token)["can_write"] is False
 
-    connectable["user"].groups.add(connectable["group"])
+    connectable["membership"].groups.add(connectable["group"])
 
     summary = _per_request(token)
     assert summary["is_org_admin"] is True
@@ -1489,9 +1479,9 @@ def test_withdrawn_write_is_reported_as_withdrawn_not_ungranted(connectable):
     from terno_dbi.mcp import merged_server
     from terno_dbi.mcp.context import request_credentials
 
-    connectable["user"].groups.add(connectable["group"])
+    connectable["membership"].groups.add(connectable["group"])
     token = _mint(connectable["user"], connectable["org"])
-    connectable["user"].groups.remove(connectable["group"])
+    connectable["membership"].groups.remove(connectable["group"])
 
     summary = _per_request(token)
     with request_credentials(

@@ -42,6 +42,7 @@ class CoreOrganisation(models.Model):
 
     class Meta:
         db_table = 'core_organisation'
+        permissions = [("use_dbi_admin_mode", "Can use DBI admin mode"),]
 
     @property
     def org_prompt_hash(self):

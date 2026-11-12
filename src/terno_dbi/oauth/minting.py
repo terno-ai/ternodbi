@@ -8,20 +8,20 @@ The user's organisation groups must be copied to the token to preserve the
 same table visibility as the web application. Without them, restricted tables
 may be hidden even though the user can access them through the web app.
 
-Write access requires both the OAuth scope and the user's organisation role.
-The scope controls what the client was granted, while the role controls what
-the user is allowed to do.
+Write access requires both the OAuth scope and the user's permission in the
+organisation (``core.use_dbi_admin_mode`` on one of their groups there, see
+`terno_dbi.core.org_permissions`). The scope controls what the client was
+granted, while the permission controls what the user is allowed to do.
 """
 
 import hashlib
 import logging
 import secrets
 from typing import Iterable, Tuple
+from terno_dbi.core import org_permissions
 from terno_dbi.oauth.scopes import WRITE_SCOPES, granted_scopes, scope_string
 
 logger = logging.getLogger(__name__)
-
-ORG_ADMIN_GROUP = "Org Admin"
 
 
 OAUTH_KEY_PREFIX = "dbi_oauth_"
@@ -41,7 +41,7 @@ def user_can_write(organisation_user) -> bool:
     user = getattr(organisation_user, "user", None)
     if user is None:
         return False
-    return user.groups.filter(name=ORG_ADMIN_GROUP).exists()
+    return org_permissions.can_write(user, organisation_user.organisation_id)
 
 
 def resolve_membership(user, organisation):
@@ -112,7 +112,8 @@ def token_grant_summary(token) -> dict:
     scopes = frozenset(token.scopes or [])
     is_org_admin = bool(
         token.created_for_id
-        and token.created_for.groups.filter(name=ORG_ADMIN_GROUP).exists()
+        and token.organisation_id
+        and org_permissions.can_write(token.created_for, token.organisation_id)
     )
     return {
         "scopes": scopes,
