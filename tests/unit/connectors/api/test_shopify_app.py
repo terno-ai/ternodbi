@@ -1199,3 +1199,26 @@ class TestEndToEnd:
             _authorize(client, token_exchange)     # the stub grants read_orders only
         assert "scopes not granted" in caplog.text
         assert "read_products" in caplog.text
+
+
+@pytest.mark.django_db
+class TestWebhookUrlWithoutSlash:
+    """Shopify saves webhook URIs without the trailing slash."""
+
+    def test_unsigned_is_401(self, client):
+        resp = client.post("/connectors/shopify/webhooks", data=b"{}",
+                           content_type="application/json",
+                           HTTP_X_SHOPIFY_TOPIC="shop/redact",
+                           HTTP_X_SHOPIFY_HMAC_SHA256="forged")
+        assert resp.status_code == 401
+
+    def test_signed_is_handled(self, client, connected):
+        from terno_dbi.core.models import DataSource
+        body = json.dumps(_shop_redact_payload()).encode()
+        resp = client.post("/connectors/shopify/webhooks", data=body,
+                           content_type="application/json",
+                           HTTP_X_SHOPIFY_TOPIC="shop/redact",
+                           HTTP_X_SHOPIFY_SHOP_DOMAIN=SHOP,
+                           HTTP_X_SHOPIFY_HMAC_SHA256=_sign_body(body))
+        assert resp.status_code == 200
+        assert not DataSource.objects.filter(pk=connected.pk).exists()

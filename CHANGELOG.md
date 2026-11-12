@@ -12,6 +12,9 @@
 
 ## Unreleased
 
+- Fixed: Shopify webhooks sent to `/connectors/shopify/webhooks` (no trailing
+  slash, which is how Shopify stores the URI) got a 403 instead of reaching the
+  handler. The slashless path is now routed too.
 - Shopify App Store install. `GET /connectors/shopify/install/` is the app URL:
   it verifies Shopify's query signature, a timestamp under one hour old and a
   `*.myshopify.com` shop, then sends the merchant straight to Shopify's consent

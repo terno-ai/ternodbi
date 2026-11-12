@@ -21,6 +21,8 @@ urlpatterns = [
          name="shopify_install"),
     path("connectors/shopify/webhooks/", shopify_app.shopify_webhook,
          name="shopify_webhooks"),
+    path("connectors/shopify/webhooks", shopify_app.shopify_webhook,
+         name="shopify_webhooks_noslash"),
     # Connector gallery (session-authenticated browser API).
     path("connectors/api/", web.list_api_connectors, name="list_api_connectors"),
     path("connectors/api/requests/", web.request_connector,
