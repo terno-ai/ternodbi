@@ -1,0 +1,1389 @@
+{
+ "_source": "TikTok API for Business v1.3 reference, business-api.tiktok.com/portal/docs, read 2026-11-12. Field names and required/conditional flags only.",
+ "endpoints": {
+  "ad/create/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "adgroup_id",
+    "creatives"
+   ],
+   "method": "POST",
+   "nested": {
+    "creatives": {
+     "conditional": [
+      "identity_authorized_bc_id",
+      "catalog_id",
+      "product_specific_type",
+      "item_group_ids",
+      "product_set_id",
+      "sku_ids",
+      "vehicle_ids",
+      "showcase_products",
+      "video_id",
+      "image_ids",
+      "end_card_cta",
+      "music_id",
+      "tiktok_item_id",
+      "ad_text",
+      "ad_texts",
+      "call_to_action",
+      "call_to_action_id",
+      "landing_page_url",
+      "page_id",
+      "tiktok_page_category",
+      "phone_region_code",
+      "phone_region_calling_code",
+      "phone_number",
+      "deeplink_format_type",
+      "shopping_ads_fallback_type",
+      "auto_message_id",
+      "disclaimer_text",
+      "disclaimer_clickable_texts",
+      "viewability_vast_url",
+      "brand_safety_vast_url",
+      "creative_type",
+      "app_name",
+      "display_name"
+     ],
+     "fields": [
+      "ad_name",
+      "identity_type",
+      "identity_id",
+      "identity_authorized_bc_id",
+      "catalog_id",
+      "product_specific_type",
+      "item_group_ids",
+      "product_set_id",
+      "sku_ids",
+      "vehicle_ids",
+      "showcase_products",
+      "ad_format",
+      "vertical_video_strategy",
+      "dynamic_format",
+      "video_id",
+      "image_ids",
+      "carousel_image_index",
+      "end_card_cta",
+      "product_display_field_list",
+      "auto_disclaimer_types",
+      "music_id",
+      "tiktok_item_id",
+      "promotional_music_disabled",
+      "item_duet_status",
+      "item_stitch_status",
+      "dark_post_status",
+      "shopping_ads_video_package_id",
+      "ad_text",
+      "ad_texts",
+      "call_to_action",
+      "call_to_action_id",
+      "card_id",
+      "landing_page_url",
+      "utm_params",
+      "page_id",
+      "cpp_url",
+      "tiktok_page_category",
+      "phone_region_code",
+      "phone_region_calling_code",
+      "phone_number",
+      "creative_auto_enhancement_strategy_list",
+      "deeplink",
+      "deeplink_type",
+      "deeplink_format_type",
+      "shopping_ads_deeplink_type",
+      "deeplink_utm_params",
+      "shopping_ads_fallback_type",
+      "fallback_type",
+      "dynamic_destination",
+      "instant_product_page_used",
+      "page_image_index",
+      "auto_message_id",
+      "aigc_disclosure_type",
+      "disclaimer_type",
+      "disclaimer_text",
+      "disclaimer_clickable_texts",
+      "tracking_pixel_id",
+      "tracking_app_id",
+      "tracking_offline_event_set_ids",
+      "tracking_message_event_set_id",
+      "viewability_postbid_partner",
+      "viewability_vast_url",
+      "brand_safety_postbid_partner",
+      "brand_safety_vast_url",
+      "impression_tracking_url",
+      "click_tracking_url",
+      "playable_url",
+      "operation_status",
+      "creative_type",
+      "video_view_tracking_url",
+      "app_name",
+      "display_name",
+      "avatar_icon_web_uri",
+      "creative_authorized",
+      "schedule_id"
+     ],
+     "required": [
+      "ad_name",
+      "identity_type",
+      "identity_id",
+      "ad_format"
+     ]
+    }
+   },
+   "required": [
+    "advertiser_id",
+    "adgroup_id",
+    "creatives"
+   ]
+  },
+  "ad/get/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "fields",
+    "exclude_field_types_in_response",
+    "filtering",
+    "page",
+    "page_size"
+   ],
+   "method": "GET",
+   "nested": {
+    "filtering": {
+     "conditional": [],
+     "fields": [
+      "campaign_automation_type",
+      "ad_ids_v2",
+      "campaign_ids",
+      "campaign_system_origins",
+      "adgroup_ids",
+      "ad_ids",
+      "primary_status",
+      "secondary_status",
+      "objective_type",
+      "buying_types",
+      "optimization_goal",
+      "creative_material_mode",
+      "destination",
+      "creation_filter_start_time",
+      "creation_filter_end_time",
+      "modified_after"
+     ],
+     "required": []
+    }
+   },
+   "required": [
+    "advertiser_id"
+   ]
+  },
+  "ad/status/update/": {
+   "conditional": [
+    "ad_ids",
+    "aco_ad_ids"
+   ],
+   "fields": [
+    "ad_ids",
+    "aco_ad_ids",
+    "advertiser_id",
+    "operation_status"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "operation_status"
+   ]
+  },
+  "ad/update/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "adgroup_id",
+    "patch_update",
+    "creatives"
+   ],
+   "method": "POST",
+   "nested": {
+    "creatives": {
+     "conditional": [
+      "ad_name",
+      "identity_id",
+      "identity_type",
+      "identity_authorized_bc_id",
+      "item_group_ids",
+      "product_set_id",
+      "sku_ids",
+      "ad_format",
+      "video_id",
+      "image_ids",
+      "tiktok_item_id",
+      "ad_text",
+      "ad_texts",
+      "call_to_action",
+      "call_to_action_id",
+      "landing_page_url",
+      "page_id",
+      "shopping_ads_fallback_type",
+      "disclaimer_text",
+      "disclaimer_clickable_texts",
+      "viewability_vast_url",
+      "brand_safety_vast_url",
+      "creative_type",
+      "app_name",
+      "display_name"
+     ],
+     "fields": [
+      "ad_id",
+      "ad_name",
+      "identity_id",
+      "identity_type",
+      "identity_authorized_bc_id",
+      "product_specific_type",
+      "item_group_ids",
+      "product_set_id",
+      "sku_ids",
+      "ad_format",
+      "vertical_video_strategy",
+      "dynamic_format",
+      "video_id",
+      "image_ids",
+      "carousel_image_index",
+      "end_card_cta",
+      "music_id",
+      "tiktok_item_id",
+      "promotional_music_disabled",
+      "item_duet_status",
+      "item_stitch_status",
+      "dark_post_status",
+      "shopping_ads_video_package_id",
+      "ad_text",
+      "ad_texts",
+      "call_to_action",
+      "call_to_action_id",
+      "card_id",
+      "landing_page_url",
+      "utm_params",
+      "page_id",
+      "cpp_url",
+      "deeplink",
+      "deeplink_type",
+      "shopping_ads_deeplink_type",
+      "deeplink_utm_params",
+      "shopping_ads_fallback_type",
+      "fallback_type",
+      "dynamic_destination",
+      "instant_product_page_used",
+      "page_image_index",
+      "aigc_disclosure_type",
+      "disclaimer_type",
+      "disclaimer_text",
+      "disclaimer_clickable_texts",
+      "tracking_pixel_id",
+      "tracking_app_id",
+      "tracking_offline_event_set_ids",
+      "vast_moat_enabled",
+      "viewability_postbid_partner",
+      "viewability_vast_url",
+      "brand_safety_postbid_partner",
+      "brand_safety_vast_url",
+      "impression_tracking_url",
+      "click_tracking_url",
+      "video_view_tracking_url",
+      "playable_url",
+      "creative_type",
+      "app_name",
+      "display_name",
+      "avatar_icon_web_uri",
+      "creative_authorized"
+     ],
+     "required": [
+      "ad_id"
+     ]
+    }
+   },
+   "required": [
+    "advertiser_id",
+    "adgroup_id",
+    "creatives"
+   ]
+  },
+  "adgroup/budget/update/": {
+   "conditional": [
+    "budget",
+    "scheduled_budget"
+   ],
+   "fields": [
+    "advertiser_id",
+    "budget",
+    "scheduled_budget"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id"
+   ]
+  },
+  "adgroup/create/": {
+   "conditional": [
+    "shopping_ads_type",
+    "identity_id",
+    "identity_type",
+    "identity_authorized_bc_id",
+    "product_source",
+    "catalog_id",
+    "catalog_authorized_bc_id",
+    "store_id",
+    "store_authorized_bc_id",
+    "promotion_type",
+    "messaging_app_type",
+    "messaging_app_account_id",
+    "phone_region_code",
+    "phone_region_calling_code",
+    "phone_number",
+    "promotion_website_type",
+    "app_id",
+    "pixel_id",
+    "optimization_event",
+    "app_config",
+    "deep_funnel_event_source",
+    "deep_funnel_event_source_id",
+    "deep_funnel_optimization_event",
+    "placements",
+    "search_keywords",
+    "shopping_ads_retargeting_type",
+    "shopping_ads_retargeting_actions_days",
+    "included_custom_actions",
+    "excluded_custom_actions",
+    "location_ids",
+    "zipcode_ids",
+    "operating_systems",
+    "ios14_targeting",
+    "min_ios_version",
+    "audience_type",
+    "brand_safety_partner",
+    "schedule_end_time",
+    "message_event_set_id",
+    "frequency",
+    "frequency_schedule",
+    "bid_type",
+    "bid_price",
+    "conversion_bid_price",
+    "deep_bid_type",
+    "roas_bid",
+    "bid_display_mode"
+   ],
+   "fields": [
+    "advertiser_id",
+    "campaign_id",
+    "adgroup_name",
+    "request_id",
+    "shopping_ads_type",
+    "identity_id",
+    "identity_type",
+    "identity_authorized_bc_id",
+    "product_source",
+    "catalog_id",
+    "catalog_authorized_bc_id",
+    "store_id",
+    "store_authorized_bc_id",
+    "promotion_type",
+    "promotion_target_type",
+    "messaging_app_type",
+    "messaging_app_account_id",
+    "phone_region_code",
+    "phone_region_calling_code",
+    "phone_number",
+    "promotion_website_type",
+    "app_id",
+    "pixel_id",
+    "optimization_event",
+    "custom_conversion_id",
+    "app_config",
+    "deep_funnel_optimization_status",
+    "deep_funnel_event_source",
+    "deep_funnel_event_source_id",
+    "deep_funnel_optimization_event",
+    "placement_type",
+    "placements",
+    "tiktok_subplacements",
+    "search_result_enabled",
+    "automated_keywords_enabled",
+    "search_keywords",
+    "comment_disabled",
+    "video_download_disabled",
+    "share_disabled",
+    "blocked_pangle_app_ids",
+    "saved_audience_id",
+    "auto_targeting_enabled",
+    "shopping_ads_retargeting_type",
+    "shopping_ads_retargeting_actions_days",
+    "included_custom_actions",
+    "excluded_custom_actions",
+    "shopping_ads_retargeting_custom_audience_relation",
+    "location_ids",
+    "zipcode_ids",
+    "languages",
+    "gender",
+    "age_groups",
+    "spending_power",
+    "household_income",
+    "audience_ids",
+    "smart_audience_enabled",
+    "excluded_audience_ids",
+    "interest_category_ids",
+    "interest_keyword_ids",
+    "purchase_intention_keyword_ids",
+    "actions",
+    "smart_interest_behavior_enabled",
+    "included_pangle_audience_package_ids",
+    "excluded_pangle_audience_package_ids",
+    "operating_systems",
+    "min_android_version",
+    "ios14_targeting",
+    "min_ios_version",
+    "device_model_ids",
+    "network_types",
+    "carrier_ids",
+    "isp_ids",
+    "device_price_ranges",
+    "targeting_expansion",
+    "audience_type",
+    "audience_rule",
+    "contextual_tag_ids",
+    "brand_safety_type",
+    "brand_safety_partner",
+    "category_exclusion_ids",
+    "vertical_sensitivity_id",
+    "budget_mode",
+    "budget",
+    "schedule_type",
+    "schedule_start_time",
+    "schedule_end_time",
+    "dayparting",
+    "optimization_goal",
+    "secondary_optimization_event",
+    "message_event_set_id",
+    "frequency",
+    "frequency_schedule",
+    "bid_type",
+    "bid_price",
+    "conversion_bid_price",
+    "deep_bid_type",
+    "roas_bid",
+    "vbo_window",
+    "bid_display_mode",
+    "next_day_retention",
+    "click_attribution_window",
+    "engaged_view_attribution_window",
+    "view_attribution_window",
+    "attribution_event_count",
+    "billing_event",
+    "pacing",
+    "statistic_type",
+    "is_hfss",
+    "is_lhf_compliance",
+    "operation_status",
+    "creative_material_mode",
+    "adgroup_app_profile_page_state"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "campaign_id",
+    "adgroup_name",
+    "budget_mode",
+    "budget",
+    "schedule_type",
+    "schedule_start_time",
+    "optimization_goal",
+    "billing_event",
+    "pacing"
+   ]
+  },
+  "adgroup/get/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "fields",
+    "exclude_field_types_in_response",
+    "filtering",
+    "page",
+    "page_size"
+   ],
+   "method": "GET",
+   "nested": {
+    "filtering": {
+     "conditional": [],
+     "fields": [
+      "campaign_automation_type",
+      "campaign_ids",
+      "campaign_system_origins",
+      "adgroup_ids",
+      "adgroup_name",
+      "primary_status",
+      "secondary_status",
+      "objective_type",
+      "buying_types",
+      "optimization_goal",
+      "promotion_type",
+      "bid_strategy",
+      "creative_material_mode",
+      "billing_events",
+      "creation_filter_start_time",
+      "creation_filter_end_time",
+      "split_test_enabled"
+     ],
+     "required": []
+    }
+   },
+   "required": [
+    "advertiser_id"
+   ]
+  },
+  "adgroup/status/update/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "adgroup_ids",
+    "operation_status",
+    "allow_partial_success"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "adgroup_ids",
+    "operation_status"
+   ]
+  },
+  "adgroup/update/": {
+   "conditional": [
+    "catalog_authorized_bc_id",
+    "deep_funnel_event_source",
+    "deep_funnel_event_source_id",
+    "deep_funnel_optimization_event",
+    "audience_type",
+    "shopping_ads_retargeting_actions_days",
+    "included_custom_actions",
+    "excluded_custom_actions",
+    "operating_systems",
+    "ios14_targeting",
+    "min_ios_version",
+    "schedule_start_time",
+    "schedule_end_time",
+    "deep_bid_type",
+    "roas_bid"
+   ],
+   "fields": [
+    "adgroup_id",
+    "advertiser_id",
+    "adgroup_name",
+    "catalog_authorized_bc_id",
+    "deep_funnel_optimization_status",
+    "deep_funnel_event_source",
+    "deep_funnel_event_source_id",
+    "deep_funnel_optimization_event",
+    "comment_disabled",
+    "share_disabled",
+    "blocked_pangle_app_ids",
+    "search_result_enabled",
+    "automated_keywords_enabled",
+    "search_keywords",
+    "audience_type",
+    "audience_rule",
+    "saved_audience_id",
+    "auto_targeting_enabled",
+    "shopping_ads_retargeting_type",
+    "shopping_ads_retargeting_actions_days",
+    "included_custom_actions",
+    "excluded_custom_actions",
+    "shopping_ads_retargeting_custom_audience_relation",
+    "location_ids",
+    "zipcode_ids",
+    "languages",
+    "gender",
+    "age_groups",
+    "exclude_age_under_eighteen",
+    "spending_power",
+    "household_income",
+    "audience_ids",
+    "smart_audience_enabled",
+    "excluded_audience_ids",
+    "interest_category_ids",
+    "interest_keyword_ids",
+    "purchase_intention_keyword_ids",
+    "actions",
+    "smart_interest_behavior_enabled",
+    "included_pangle_audience_package_ids",
+    "excluded_pangle_audience_package_ids",
+    "operating_systems",
+    "min_android_version",
+    "ios14_targeting",
+    "min_ios_version",
+    "device_model_ids",
+    "network_types",
+    "carrier_ids",
+    "isp_ids",
+    "device_price_ranges",
+    "targeting_expansion",
+    "contextual_tag_ids",
+    "brand_safety_type",
+    "category_exclusion_ids",
+    "vertical_sensitivity_id",
+    "budget",
+    "schedule_type",
+    "schedule_start_time",
+    "schedule_end_time",
+    "dayparting",
+    "frequency",
+    "frequency_schedule",
+    "secondary_optimization_event",
+    "bid_type",
+    "bid_price",
+    "conversion_bid_price",
+    "deep_bid_type",
+    "roas_bid",
+    "deep_cpa_bid",
+    "next_day_retention",
+    "pacing",
+    "is_hfss",
+    "is_lhf_compliance"
+   ],
+   "method": "POST",
+   "required": [
+    "adgroup_id",
+    "advertiser_id"
+   ]
+  },
+  "advertiser/info/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_ids",
+    "fields"
+   ],
+   "method": "GET",
+   "required": [
+    "advertiser_ids"
+   ]
+  },
+  "blockedword/create/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "blocked_words"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "blocked_words"
+   ]
+  },
+  "blockedword/delete/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "blocked_words"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "blocked_words"
+   ]
+  },
+  "campaign/create/": {
+   "conditional": [
+    "app_promotion_type",
+    "sales_destination",
+    "app_id",
+    "campaign_product_source",
+    "budget"
+   ],
+   "fields": [
+    "advertiser_id",
+    "objective_type",
+    "app_promotion_type",
+    "virtual_objective_type",
+    "sales_destination",
+    "is_search_campaign",
+    "campaign_type",
+    "app_id",
+    "is_advanced_dedicated_campaign",
+    "disable_skan_campaign",
+    "campaign_app_profile_page_state",
+    "rf_campaign_type",
+    "campaign_product_source",
+    "catalog_enabled",
+    "campaign_name",
+    "request_id",
+    "special_industries",
+    "budget_optimize_on",
+    "budget_mode",
+    "budget",
+    "rta_id",
+    "rta_bid_enabled",
+    "rta_product_selection_enabled",
+    "operation_status",
+    "postback_window_mode",
+    "po_number"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "objective_type",
+    "campaign_name"
+   ]
+  },
+  "campaign/get/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "fields",
+    "exclude_field_types_in_response",
+    "filtering",
+    "page",
+    "page_size"
+   ],
+   "method": "GET",
+   "nested": {
+    "filtering": {
+     "conditional": [],
+     "fields": [
+      "campaign_automation_type",
+      "campaign_ids",
+      "campaign_name",
+      "campaign_system_origins",
+      "primary_status",
+      "secondary_status",
+      "objective_type",
+      "sales_destination",
+      "buying_types",
+      "is_smart_performance_campaign",
+      "creative_campaign_type",
+      "split_test_enabled",
+      "campaign_product_source",
+      "optimization_goal",
+      "campaign_type",
+      "creation_filter_start_time",
+      "creation_filter_end_time",
+      "gmv_max_promotion_types",
+      "store_ids"
+     ],
+     "required": []
+    }
+   },
+   "required": [
+    "advertiser_id"
+   ]
+  },
+  "campaign/status/update/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "campaign_ids",
+    "operation_status",
+    "postback_window_mode"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "campaign_ids",
+    "operation_status"
+   ]
+  },
+  "campaign/update/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "campaign_id",
+    "campaign_name",
+    "special_industries",
+    "budget",
+    "po_number"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "campaign_id"
+   ]
+  },
+  "comment/delete/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "ad_id",
+    "tiktok_item_id",
+    "comment_id",
+    "identity_type",
+    "identity_id"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "ad_id",
+    "tiktok_item_id",
+    "comment_id",
+    "identity_type",
+    "identity_id"
+   ]
+  },
+  "comment/list/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "comment_type",
+    "search_field",
+    "search_value",
+    "sort_field",
+    "sort_type",
+    "start_time",
+    "end_time",
+    "page_size",
+    "page"
+   ],
+   "method": "GET",
+   "required": [
+    "advertiser_id",
+    "search_field",
+    "search_value",
+    "start_time",
+    "end_time"
+   ]
+  },
+  "comment/post/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "ad_id",
+    "tiktok_item_id",
+    "comment_id",
+    "comment_type",
+    "text",
+    "identity_type",
+    "identity_id"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "ad_id",
+    "tiktok_item_id",
+    "comment_id",
+    "comment_type",
+    "text",
+    "identity_type",
+    "identity_id"
+   ]
+  },
+  "comment/status/update/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "comment_ids",
+    "operation"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "comment_ids",
+    "operation"
+   ]
+  },
+  "dmp/custom_audience/create/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "custom_audience_name",
+    "audience_sub_type",
+    "file_paths",
+    "calculate_type",
+    "retention_in_days"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "custom_audience_name",
+    "file_paths",
+    "calculate_type"
+   ]
+  },
+  "dmp/custom_audience/delete/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "custom_audience_ids"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "custom_audience_ids"
+   ]
+  },
+  "dmp/custom_audience/file/upload/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "file",
+    "file_signature",
+    "calculate_type"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "file",
+    "file_signature",
+    "calculate_type"
+   ]
+  },
+  "dmp/custom_audience/get/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "custom_audience_ids",
+    "history_size"
+   ],
+   "method": "GET",
+   "required": [
+    "advertiser_id",
+    "custom_audience_ids"
+   ]
+  },
+  "dmp/custom_audience/list/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "custom_audience_ids",
+    "page",
+    "page_size"
+   ],
+   "method": "GET",
+   "required": [
+    "advertiser_id"
+   ]
+  },
+  "dmp/custom_audience/lookalike/create/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "custom_audience_name",
+    "audience_sub_type",
+    "lookalike_spec"
+   ],
+   "method": "POST",
+   "nested": {
+    "lookalike_spec": {
+     "conditional": [],
+     "fields": [
+      "source_audience_id",
+      "include_source",
+      "mobile_os",
+      "placements",
+      "location_ids",
+      "audience_size"
+     ],
+     "required": [
+      "source_audience_id",
+      "include_source",
+      "mobile_os",
+      "placements",
+      "location_ids",
+      "audience_size"
+     ]
+    }
+   },
+   "required": [
+    "advertiser_id",
+    "custom_audience_name",
+    "lookalike_spec"
+   ]
+  },
+  "dmp/custom_audience/rule/create/": {
+   "conditional": [
+    "identity_id",
+    "identity_type",
+    "identity_authorized_bc_id"
+   ],
+   "fields": [
+    "advertiser_id",
+    "custom_audience_name",
+    "audience_type",
+    "audience_sub_type",
+    "retention_in_days",
+    "is_auto_refresh",
+    "identity_id",
+    "identity_type",
+    "identity_authorized_bc_id",
+    "rule_spec"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "custom_audience_name",
+    "audience_type",
+    "rule_spec"
+   ]
+  },
+  "dmp/custom_audience/share/": {
+   "conditional": [],
+   "fields": [
+    "custom_audience_ids",
+    "shared_advertiser_ids",
+    "advertiser_id"
+   ],
+   "method": "POST",
+   "required": [
+    "custom_audience_ids",
+    "shared_advertiser_ids",
+    "advertiser_id"
+   ]
+  },
+  "dmp/custom_audience/update/": {
+   "conditional": [
+    "custom_audience_name",
+    "file_paths"
+   ],
+   "fields": [
+    "advertiser_id",
+    "custom_audience_id",
+    "custom_audience_name",
+    "audience_sub_type",
+    "file_paths",
+    "action"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "custom_audience_id"
+   ]
+  },
+  "file/image/ad/search/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "filtering",
+    "page",
+    "page_size"
+   ],
+   "method": "GET",
+   "required": [
+    "advertiser_id"
+   ]
+  },
+  "file/image/ad/upload/": {
+   "conditional": [
+    "image_file",
+    "image_signature",
+    "image_url",
+    "file_id",
+    "pre_review_info"
+   ],
+   "fields": [
+    "advertiser_id",
+    "file_name",
+    "upload_type",
+    "image_file",
+    "image_signature",
+    "image_url",
+    "file_id",
+    "pre_review_enabled",
+    "pre_review_info"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "upload_type"
+   ]
+  },
+  "file/video/ad/search/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "filtering",
+    "sort_field",
+    "page",
+    "page_size"
+   ],
+   "method": "GET",
+   "required": [
+    "advertiser_id"
+   ]
+  },
+  "file/video/ad/upload/": {
+   "conditional": [
+    "video_file",
+    "video_signature",
+    "video_url",
+    "file_id",
+    "video_id",
+    "pre_review_info"
+   ],
+   "fields": [
+    "advertiser_id",
+    "file_name",
+    "upload_type",
+    "video_file",
+    "video_signature",
+    "video_url",
+    "file_id",
+    "video_id",
+    "is_third_party",
+    "flaw_detect",
+    "auto_fix_enabled",
+    "auto_bind_enabled",
+    "pre_review_enabled",
+    "pre_review_info"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id"
+   ]
+  },
+  "identity/create/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "display_name",
+    "image_uri"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "display_name"
+   ]
+  },
+  "identity/get/": {
+   "conditional": [
+    "identity_authorized_bc_id"
+   ],
+   "fields": [
+    "advertiser_id",
+    "identity_type",
+    "identity_authorized_bc_id",
+    "filtering",
+    "page",
+    "page_size"
+   ],
+   "method": "GET",
+   "required": [
+    "advertiser_id"
+   ]
+  },
+  "oauth2/advertiser/get/": {
+   "conditional": [],
+   "fields": [
+    "app_id",
+    "secret"
+   ],
+   "method": "GET",
+   "required": [
+    "app_id",
+    "secret"
+   ]
+  },
+  "optimizer/rule/create/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "rules",
+    "lang"
+   ],
+   "method": "POST",
+   "nested": {
+    "rules": {
+     "conditional": [],
+     "fields": [
+      "apply_objects",
+      "conditions",
+      "actions",
+      "notification",
+      "rule_exec_info",
+      "tzone",
+      "name"
+     ],
+     "required": [
+      "apply_objects",
+      "conditions",
+      "actions",
+      "notification",
+      "rule_exec_info",
+      "name"
+     ]
+    }
+   },
+   "required": [
+    "advertiser_id"
+   ]
+  },
+  "optimizer/rule/list/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "filtering",
+    "tzone",
+    "page",
+    "page_size"
+   ],
+   "method": "GET",
+   "required": [
+    "advertiser_id"
+   ]
+  },
+  "optimizer/rule/update/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "rules",
+    "lang"
+   ],
+   "method": "POST",
+   "nested": {
+    "rules": {
+     "conditional": [],
+     "fields": [
+      "apply_objects",
+      "conditions",
+      "actions",
+      "notification",
+      "rule_exec_info",
+      "tzone",
+      "rule_id",
+      "name"
+     ],
+     "required": [
+      "apply_objects",
+      "conditions",
+      "actions",
+      "notification",
+      "rule_exec_info",
+      "rule_id",
+      "name"
+     ]
+    }
+   },
+   "required": [
+    "advertiser_id"
+   ]
+  },
+  "optimizer/rule/update/status/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "rule_ids",
+    "operate_type",
+    "lang"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "rule_ids",
+    "operate_type"
+   ]
+  },
+  "pixel/create/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "pixel_name",
+    "pixel_category"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "pixel_name"
+   ]
+  },
+  "pixel/list/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "code",
+    "pixel_id",
+    "name",
+    "order_by",
+    "filtering",
+    "page",
+    "page_size"
+   ],
+   "method": "GET",
+   "required": [
+    "advertiser_id"
+   ]
+  },
+  "pixel/update/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "pixel_name",
+    "pixel_id",
+    "advanced_matching_fields",
+    "automatic_advanced_matching_fields",
+    "enable_first_party_cookies",
+    "enable_expanded_data_sharing"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "pixel_name",
+    "pixel_id"
+   ]
+  },
+  "report/integrated/get/": {
+   "conditional": [
+    "advertiser_id",
+    "advertiser_ids",
+    "bc_id",
+    "data_level",
+    "start_date",
+    "end_date"
+   ],
+   "fields": [
+    "advertiser_id",
+    "advertiser_ids",
+    "bc_id",
+    "service_type",
+    "report_type",
+    "data_level",
+    "dimensions",
+    "metrics",
+    "enable_total_metrics",
+    "start_date",
+    "end_date",
+    "query_lifetime",
+    "multi_adv_report_in_utc_time",
+    "order_field",
+    "order_type",
+    "filtering",
+    "query_mode",
+    "page",
+    "page_size"
+   ],
+   "method": "GET",
+   "required": [
+    "report_type",
+    "dimensions"
+   ]
+  },
+  "tt_video/authorize/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "auth_code",
+    "original_post_auth_code"
+   ],
+   "method": "POST",
+   "required": [
+    "advertiser_id",
+    "auth_code"
+   ]
+  },
+  "tt_video/list/": {
+   "conditional": [],
+   "fields": [
+    "advertiser_id",
+    "item_types",
+    "keyword",
+    "page",
+    "page_size"
+   ],
+   "method": "GET",
+   "required": [
+    "advertiser_id"
+   ]
+  }
+ }
+}

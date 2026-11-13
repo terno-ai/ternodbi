@@ -297,9 +297,13 @@ _TIKTOK = OAuthProvider(
     token_url="https://business-api.tiktok.com/open_api/v1.3/oauth2/access_token/",
     # TikTok takes no scope at consent: the app's permissions are chosen on the
     # app in the TikTok API for Business portal — Ad Account Management (the
-    # advertiser list), Ads Management (the Campaigns/AdGroups/Ads reports) and
-    # Reporting. The token response lists the granted permission ids. The
-    # access token is long-term and comes with no refresh token.
+    # advertiser list), Ads Management (the Campaigns/AdGroups/Ads reports and
+    # their create/update/status writes) and Reporting; for the full write
+    # surface also Creative Management (images, videos, identities, Spark
+    # posts), Audience Management, Comment Management, Automated Rules and
+    # Pixel Management. A permission added later needs a reconnect. The token
+    # response lists the granted permission ids. The access token is
+    # long-term and comes with no refresh token.
     scope="",
     client_id_env="TERNO_TIKTOK_APP_ID",
     client_secret_env="TERNO_TIKTOK_APP_SECRET",

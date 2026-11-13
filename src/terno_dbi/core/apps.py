@@ -59,7 +59,7 @@ def _register_api_connectors():
     from terno_dbi.connectors.api.sources.google_sheets import make_google_sheets_connector
     from terno_dbi.connectors.api.sources.linkedin_ads import make_linkedin_ads_connector
     from terno_dbi.connectors.api.sources.meta_ads import make_meta_ads_connector
-    from terno_dbi.connectors.api.sources.tiktok_ads import make_tiktok_ads_connector
+    from terno_dbi.connectors.api.sources.tiktok.ads.connector import make_tiktok_ads_connector
     from terno_dbi.connectors.api.sources.x_ads import make_x_ads_connector
     from terno_dbi.connectors.api.sources.x_analytics import make_x_analytics_connector
     from terno_dbi.connectors.api.sources.facebook_pages import (

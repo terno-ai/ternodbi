@@ -21,6 +21,43 @@ from terno_dbi.catalog.spec import (
     ReportType,
 )
 
+
+_GMV_FILTER_HELP = {
+    "gmv_max_promotion_types": "PRODUCT and/or LIVE (comma-separated).",
+    "campaign_ids": "Comma-separated GMV Max campaign ids (max 100).",
+    "campaign_name": "Campaign name (fuzzy match).",
+    "campaign_statuses": "Comma-separated: STATUS_DELIVERY_OK, "
+                         "STATUS_DISABLE, STATUS_DELETE, STATUS_NOT_DELIVERY, "
+                         "STATUS_ALL.",
+    "item_group_ids": "Comma-separated product SPU ids (max 100).",
+    "creative_types": "One of ADS_AND_ORGANIC, ORGANIC, REMOVED "
+                      "(to be deprecated by TikTok).",
+    "creative_delivery_statuses": "Comma-separated: IN_QUEUE, LEARNING, "
+                                  "DELIVERING, NOT_DELIVERYING, "
+                                  "AUTHORIZATION_NEEDED, EXCLUDED, "
+                                  "UNAVAILABLE, REJECTED, NOT_ACTIVE.",
+    "search_word": "Video title, post id or account name (fuzzy match).",
+    "room_ids": "Comma-separated livestream room ids (max 100).",
+}
+
+
+def _tiktok_gmv_report(rid, label, required, optional, sortable):
+    """One TikTok GMV Max report level with its official filters."""
+    return ReportType(rid, label, settings=[
+        ReportSetting("store_id", label="TikTok Shop id",
+                      help_text="A shop from GmvMaxStores with "
+                                "is_gmv_max_available true."),
+        *[ReportSetting(k, label=k, required=k in required,
+                        help_text=_GMV_FILTER_HELP[k])
+          for k in (*required, *optional)],
+        *([ReportSetting("sort_field", label="Sort by", required=False,
+                         help_text="A metric TikTok sorts this level by "
+                                   "(cost, orders, gross_revenue, roi …)."),
+           ReportSetting("sort_type", label="Sort order", required=False,
+                         help_text="ASC or DESC (default).")]
+          if sortable else []),
+    ])
+
 # --------------------------------------------------------------------------
 # Shared form fragments
 # --------------------------------------------------------------------------
@@ -920,18 +957,153 @@ _APIS: List[ConnectorSpec] = [
         description="Campaign, ad group and ad performance from TikTok "
                     "advertiser accounts — spend, impressions, clicks, "
                     "conversions and video engagement, with age, gender, "
-                    "country and platform splits.",
-        scopes_label="TikTok Ads read access (ad accounts, ads, reporting)",
+                    "country and platform splits — plus full campaign "
+                    "management: campaigns, ad groups, ads, Upgraded Smart+, "
+                    "creatives, audiences, comments, automated rules and "
+                    "pixels.",
+        scopes_label="TikTok Ads read and write access (ad accounts, ads, "
+                     "creatives, audiences, comments, rules, pixels, reporting)",
         has_account_list=True,
         has_fields=True,
         is_date_range_required=True,
         account_label_singular="Advertiser",
         account_label_plural="Advertisers",
         report_types=[
-            ReportType("Performance", "Ad performance"),
+            ReportType(
+                "Performance", "Ad performance (basic & audience reports)",
+                settings=[
+                    ReportSetting("query_lifetime", label="Lifetime totals",
+                                  required=False,
+                                  help_text="\"true\" for lifetime metrics "
+                                            "(ignores the date range; no "
+                                            "date/hour split)."),
+                    ReportSetting("include_deleted", label="Include deleted",
+                                  required=False,
+                                  help_text="\"true\" to include deleted "
+                                            "campaigns/ad groups/ads "
+                                            "(TikTok STATUS_ALL)."),
+                    ReportSetting("async_report", label="Asynchronous",
+                                  required=False,
+                                  help_text="\"true\" to run it as a TikTok "
+                                            "async report task: no date-range "
+                                            "limit; slower."),
+                ]),
+            ReportType("PlayableAds", "Playable ad report"),
+            ReportType("DSA", "DSA (catalog) ad report"),
+            ReportType(
+                "BusinessCenter", "Business Center report",
+                settings=[ReportSetting(
+                    "bc_id", label="Business Center id",
+                    help_text="The Business Center whose ad accounts to "
+                              "report on.")]),
             ReportType("Campaigns", "Campaigns", is_date_range_required=False),
             ReportType("AdGroups", "Ad groups", is_date_range_required=False),
             ReportType("Ads", "Ads", is_date_range_required=False),
+            ReportType("Audiences", "Custom & lookalike audiences",
+                       is_date_range_required=False),
+            ReportType("Images", "Image library", is_date_range_required=False),
+            ReportType("Videos", "Video library", is_date_range_required=False),
+            ReportType("Identities", "Ad identities",
+                       is_date_range_required=False),
+            ReportType("SparkPosts", "Authorised Spark Ads posts",
+                       is_date_range_required=False),
+            ReportType("Pixels", "Pixels", is_date_range_required=False),
+            ReportType(
+                "Comments", "Comments on ads",
+                settings=[
+                    ReportSetting("adgroup_id", label="Ad group id",
+                                  help_text="TikTok lists comments one ad "
+                                            "group at a time."),
+                ]),
+            ReportType("AutomatedRules", "Automated rules",
+                       is_date_range_required=False),
+            ReportType("GmvMaxStores", "TikTok Shops for GMV Max",
+                       is_date_range_required=False),
+            ReportType(
+                "GmvMaxCampaigns", "GMV Max campaigns",
+                is_date_range_required=False,
+                settings=[
+                    ReportSetting("gmv_max_promotion_types",
+                                  label="Campaign types",
+                                  help_text="PRODUCT_GMV_MAX and/or "
+                                            "LIVE_GMV_MAX (comma-separated)."),
+                    *[ReportSetting(k, label=k, required=False,
+                                    help_text=h) for k, h in (
+                        ("store_ids", "Comma-separated shop ids (max 10)."),
+                        ("campaign_ids", "Comma-separated ids (max 100)."),
+                        ("campaign_name", "Campaign name."),
+                        ("primary_status", "STATUS_DELIVERY_OK, "
+                                           "STATUS_DISABLE or STATUS_DELETE."),
+                        ("creation_filter_start_time",
+                         "YYYY-MM-DD HH:MM:SS (UTC)."),
+                        ("creation_filter_end_time",
+                         "YYYY-MM-DD HH:MM:SS (UTC)."))],
+                ]),
+            # GMV Max report levels (tiktok.ads.gmv_max_spec.REPORTS; a test
+            # keeps these settings in step with it).
+            *[_tiktok_gmv_report(*r) for r in (
+                ('GmvMaxOverview', 'GMV Max overview (all GMV Max campaigns)',
+                 (), ('gmv_max_promotion_types',), False),
+                ('GmvMaxProductCampaigns', 'Product GMV Max — campaigns',
+                 (), ('campaign_ids', 'campaign_name', 'campaign_statuses'),
+                 True),
+                ('GmvMaxProducts', 'Product GMV Max — products',
+                 ('campaign_ids',), (), True),
+                ('GmvMaxCreatives', 'Product GMV Max — creatives',
+                 ('campaign_ids', 'item_group_ids'),
+                 ('creative_types', 'creative_delivery_statuses',
+                  'search_word'), True),
+                ('GmvMaxProductDurations',
+                 'Product GMV Max — optimization-mode durations',
+                 ('campaign_ids', 'item_group_ids'), (), True),
+                ('GmvMaxLiveCampaigns', 'LIVE GMV Max — campaigns',
+                 (), ('campaign_ids', 'campaign_name', 'campaign_statuses'),
+                 True),
+                ('GmvMaxLivestreams', 'LIVE GMV Max — livestreams',
+                 ('campaign_ids',), (), True),
+                ('GmvMaxLiveDurations',
+                 'LIVE GMV Max — optimization-mode durations',
+                 ('campaign_ids', 'room_ids'), (), True),
+            )],
+            ReportType("SmartPlusCampaigns", "Smart+ campaigns",
+                       is_date_range_required=False),
+            ReportType("SmartPlusAdGroups", "Smart+ ad groups",
+                       is_date_range_required=False),
+            ReportType("SmartPlusAds", "Smart+ ads",
+                       is_date_range_required=False),
+            ReportType("SmartPlusValueRuleSets", "Smart+ value rule sets",
+                       is_date_range_required=False),
+            ReportType(
+                "SmartPlusAdReview", "Smart+ ad review status",
+                is_date_range_required=False,
+                settings=[ReportSetting(
+                    "smart_plus_ad_ids", label="Smart+ ad ids",
+                    help_text="Comma-separated smart_plus_ad_id values.")]),
+            ReportType(
+                "SmartPlusMaterialReview", "Smart+ creative review status",
+                is_date_range_required=False,
+                settings=[ReportSetting(
+                    "ad_material_ids", label="Ad material ids",
+                    help_text="Comma-separated ad_material_id values (from "
+                              "a Smart+ ad's creative_list).")]),
+            ReportType(
+                "SmartPlusCopyTask", "Smart+ campaign copy task",
+                is_date_range_required=False,
+                settings=[ReportSetting(
+                    "task_id", label="Copy task id",
+                    help_text="task_id returned by smart_plus_copy_campaign.")]),
+            *[ReportType(
+                rid, label,
+                settings=[ReportSetting(k, label=k, required=False,
+                                        help_text="Optional comma-separated "
+                                                  "ids to filter by.")
+                          for k in ("campaign_ids", "adgroup_ids",
+                                    "smart_plus_ad_ids")])
+              for rid, label in (
+                  ("SmartPlusCreativeOverview",
+                   "Smart+ creative overview report"),
+                  ("SmartPlusCreativeBreakdown",
+                   "Smart+ creative breakdown report"))],
         ],
         default_report_type="Performance",
         # TikTok throttles each app per second and per day; a 30-day hourly

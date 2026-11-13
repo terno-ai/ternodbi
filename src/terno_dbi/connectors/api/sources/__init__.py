@@ -22,7 +22,7 @@ from terno_dbi.connectors.api.sources.linkedin_ads import (
 from terno_dbi.connectors.api.sources.meta_ads import (
     MetaAdsConnector, make_meta_ads_connector,
 )
-from terno_dbi.connectors.api.sources.tiktok_ads import (
+from terno_dbi.connectors.api.sources.tiktok.ads.connector import (
     TikTokAdsConnector, make_tiktok_ads_connector,
 )
 from terno_dbi.connectors.api.sources.x_ads import (
