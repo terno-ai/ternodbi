@@ -1,4 +1,4 @@
-<img width="2332" height="1276" alt="TernoDBI: a secure data layer between AI agents and your databases and business tools" src="https://github.com/user-attachments/assets/91bc17e5-39f5-4934-9ffb-27d8040a3185" />
+<img width="100%" alt="TernoDBI: a secure data layer between AI agents and your databases and business tools" src="https://github.com/user-attachments/assets/91bc17e5-39f5-4934-9ffb-27d8040a3185" />
 
 
 # TernoDBI: Database Intelligence Layer
