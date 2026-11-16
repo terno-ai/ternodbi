@@ -1110,7 +1110,7 @@ _APIS: List[ConnectorSpec] = [
         # report is 30 requests, so keep the per-second guard modest.
         rate_limit_per_second=10,
         rate_limit_per_day=50000,
-        default_enabled=False,   # enable once a TikTok for Business app is set up
+        default_enabled=True,
     ),
     ConnectorSpec(
         key="x_ads",
