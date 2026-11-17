@@ -18,6 +18,9 @@ from terno_dbi.connectors.api.model.base import ApiConnector
 from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode, invalid_field
 from terno_dbi.connectors.api.model.types import Account, Field, QueryResult, QuerySpec
 from terno_dbi.connectors.api.sources._multi import gather_accounts
+from terno_dbi.connectors.api.sources._google_errors import (
+    error_message, error_reason, scope_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +72,27 @@ def _default_http(method: str, url: str, token: str,
     )
     if resp.status_code == 401:
         raise _AuthError()
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        raise _ga4_error(resp)
     return resp.json()
+
+
+def _ga4_error(resp) -> ApiError:
+    """A missing scope asks for a reconnect; anything else names Google's reason."""
+    scoped = scope_error(resp, "Google Analytics")
+    if scoped is not None:
+        return scoped
+    reason, message = error_reason(resp), error_message(resp)
+    retriable = resp.status_code == 429 or resp.status_code >= 500
+    logger.warning("GA4 request failed: %s %s", resp.status_code, reason or "-")
+    label = f"{resp.status_code} {reason}".strip()
+    return ApiError(
+        ErrorCode.UPSTREAM_ERROR,
+        f"Google Analytics API error ({label}): {message or 'unknown error'}"
+        + (" Try again." if retriable else ""),
+        retriable=retriable,
+        details={"status": resp.status_code, "reason": reason},
+    )
 
 
 class _AuthError(Exception):
@@ -94,7 +116,8 @@ class GA4Connector(ApiConnector):
                 ErrorCode.AUTH_EXPIRED,
                 f"{self.key} access was rejected; reconnect the source.",
             )
-        except ApiError:
+        except ApiError as exc:
+            self.note_provider_error(exc)
             raise
         except Exception as exc:   # noqa: BLE001
             logger.warning("GA4 request failed: %s", exc)

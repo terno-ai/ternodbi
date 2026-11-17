@@ -201,3 +201,18 @@ __all__ = [
     "datasource_setup_url",
     "setup_handoff",
 ]
+
+
+def add_reconnect_url(error: dict, datasource) -> dict:
+    """Add `details.reconnect_url` to an error only a reconnect can fix, so a
+    caller can hand the user the link instead of retrying."""
+    from terno_dbi.connectors.api.model.errors import needs_reconnect
+
+    if not needs_reconnect(error.get("code", "")):
+        return error
+    org = getattr(datasource, "organisation", None)
+    url = connect_url(getattr(org, "subdomain", None),
+                      getattr(datasource, "catalog", None))
+    if url:
+        error.setdefault("details", {})["reconnect_url"] = url
+    return error

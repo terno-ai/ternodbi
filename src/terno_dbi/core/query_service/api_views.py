@@ -17,12 +17,14 @@ from django.views.decorators.http import require_http_methods
 from terno_dbi.connectors.api import registry
 from terno_dbi.connectors.api.auth import account_selection, rbac
 from terno_dbi.connectors.api.dates import get_today
+from terno_dbi.connectors.api.model.base import ensure_grants
 from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
 from terno_dbi.connectors.api.pipeline.jobs import enqueue_query, get_query_results
 from terno_dbi.connectors.api.pipeline.ratelimit import RateLimit
 from terno_dbi.connectors.api.model.types import Compare, DateRange, QuerySpec
 from terno_dbi.connectors.api.pipeline.dispatch import run_write_action
 from terno_dbi.core.query_service.views import _resolve_roles
+from terno_dbi.mcp.setup_link import add_reconnect_url
 from terno_dbi.decorators import require_scope, require_service_auth
 from terno_dbi.services.resolver import resolve_for_caller
 
@@ -79,8 +81,11 @@ def _resolve_api_datasource(request, identifier):
     return ds
 
 
-def _err(exc: ApiError, status=400):
-    return JsonResponse(exc.to_payload(), status=status)
+def _err(exc: ApiError, status=400, datasource=None):
+    payload = exc.to_payload()
+    if datasource is not None:
+        add_reconnect_url(payload["error"], datasource)
+    return JsonResponse(payload, status=status)
 
 
 @require_service_auth()
@@ -98,9 +103,10 @@ def api_list_accounts(request, datasource_identifier):
         return _err(exc, status=404)
     try:
         connector = registry.build_connector(ds)
+        ensure_grants(connector)
         accounts = connector.list_accounts()
     except ApiError as exc:
-        return _err(exc)
+        return _err(exc, datasource=ds)
 
     permitted = rbac.permitted_accounts(ds, _resolve_roles(request))
     visible = rbac.filter_accounts(accounts, permitted)
@@ -132,9 +138,10 @@ def api_list_fields(request, datasource_identifier):
     report_type = request.GET.get("report_type")
     try:
         connector = registry.build_connector(ds)
+        ensure_grants(connector)
         fields = connector.list_fields(report_type)
     except ApiError as exc:
-        return _err(exc)
+        return _err(exc, datasource=ds)
 
     # A source like GA4 returns hundreds of fields; filters keep the response
     # (and the agent's context) manageable.
@@ -256,7 +263,7 @@ def api_list_actions(request, datasource_identifier):
         connector = registry.build_connector(ds)
         actions = connector.list_actions()
     except ApiError as exc:
-        return _err(exc)
+        return _err(exc, datasource=ds)
     return JsonResponse({
         "status": "success",
         "actions": [a.as_dict() for a in actions],
@@ -306,7 +313,7 @@ def api_execute_action(request, datasource_identifier):
             _record_connector_write(request, ds, action, account, params,
                                     status="error", error=exc)
         http_status = 403 if exc.code == ErrorCode.ACCOUNT_FORBIDDEN else 400
-        return _err(exc, status=http_status)
+        return _err(exc, status=http_status, datasource=ds)
     if not dry_run:
         _record_connector_write(request, ds, action, account, params,
                                 status="success", result=result)

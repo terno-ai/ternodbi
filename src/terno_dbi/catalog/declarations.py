@@ -337,8 +337,8 @@ _APIS: List[ConnectorSpec] = [
         auth_type=AuthType.OAUTH,
         description="Channel and video performance, demographics, traffic "
                     "sources and ad performance for YouTube channels.",
-        scopes_label="YouTube Analytics (incl. revenue), channel and "
-                     "memberships read-only access",
+        scopes_label="YouTube Analytics (incl. revenue) and channel "
+                     "read-only access",
         has_account_list=True,
         has_fields=True,
         is_date_range_required=True,
@@ -363,7 +363,6 @@ _APIS: List[ConnectorSpec] = [
             ReportType("Device", "Devices"),
             ReportType("TrafficSources", "Traffic sources"),
             ReportType("Revenue", "Revenue (monetized channels)"),
-            ReportType("Members", "Channel members", is_date_range_required=False),
         ],
         default_report_type="ChannelTotals",
         rate_limit_per_second=50,

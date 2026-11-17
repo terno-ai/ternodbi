@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from terno_dbi.connectors.api.model.base import ApiConnector
 from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode, invalid_field
+from terno_dbi.connectors.api.sources._google_errors import scope_error
 from terno_dbi.connectors.api.model.types import Account, Field, QueryResult, QuerySpec
 from terno_dbi.connectors.api.sources._multi import gather_accounts
 
@@ -30,7 +31,6 @@ logger = logging.getLogger(__name__)
 _ANALYTICS_BASE = "https://youtubeanalytics.googleapis.com/v2/reports"
 _DATA_BASE = "https://www.googleapis.com/youtube/v3"
 _MONETARY_SCOPE = "https://www.googleapis.com/auth/yt-analytics-monetary.readonly"
-_MEMBERSHIPS_SCOPE = "https://www.googleapis.com/auth/youtube.channel-memberships.creator"
 
 
 # -- metric catalogue -------------------------------------------------------
@@ -103,19 +103,9 @@ class _Report:
     limited: bool = False                 # apply maxResults (top-N reports)
     filter_setting: Optional[str] = None  # settings key -> a required filter
     filter_dimension: Optional[str] = None
-    endpoint: str = "analytics"           # "analytics" or "members" (Data API)
 
     def catalogue(self) -> Dict[str, Field]:
         return {f.id: f for f in (*self.dimensions, *self.metrics)}
-
-
-_MEMBER_FIELDS = [
-    _dim("member_name", "Member", "The member's display name."),
-    _dim("member_channel_id", "Member channel ID"),
-    _dim("level", "Membership level", "The member's current tier."),
-    _dim("member_since", "Member since", "When they became a member."),
-    _dim("total_months", "Total months", "Total months at this level."),
-]
 
 
 _REPORTS: Dict[str, _Report] = {
@@ -156,12 +146,6 @@ _REPORTS: Dict[str, _Report] = {
         dimensions=[],
         metrics=[*_MONETARY_METRICS],
     ),
-    # Channel members: a Data API list, not an analytics report.
-    "Members": _Report(
-        dimensions=_MEMBER_FIELDS,
-        metrics=[],
-        endpoint="members",
-    ),
 }
 _DEFAULT_REPORT = "ChannelTotals"
 
@@ -190,6 +174,9 @@ def _default_http(method: str, url: str, token: str,
 
 def _yt_error(resp) -> ApiError:
     """Surface Google's real error reason instead of a generic message."""
+    scoped = scope_error(resp, "YouTube")
+    if scoped is not None:
+        return scoped
     message, reason = "", ""
     try:
         err = (resp.json() or {}).get("error", {})
@@ -227,7 +214,8 @@ class YouTubeConnector(ApiConnector):
                 ErrorCode.AUTH_EXPIRED,
                 f"{self.key} access was rejected; reconnect the source.",
             )
-        except ApiError:
+        except ApiError as exc:
+            self.note_provider_error(exc)
             raise
         except Exception as exc:   # noqa: BLE001
             logger.warning("YouTube request failed: %s", exc)
@@ -270,10 +258,6 @@ class YouTubeConnector(ApiConnector):
         unknown = [f for f in spec.fields if f not in catalogue]
         if unknown:
             raise invalid_field(unknown[0], list(catalogue.keys()))
-
-        if report.endpoint == "members":
-            self.require_scope(_MEMBERSHIPS_SCOPE, "The channel members report")
-            return self._run_members(spec)
 
         if spec.report_type == "Revenue":
             self.require_scope(_MONETARY_SCOPE, "The revenue report")
@@ -321,39 +305,6 @@ class YouTubeConnector(ApiConnector):
             rows=rows,
             row_count=len(rows),
             warnings=warnings,
-        )
-
-    def _run_members(self, spec: QuerySpec) -> QueryResult:
-        """`members.list` (Data API) — the caller's active channel members.
-
-        Unlike the analytics reports this is a list of the authenticated owner's
-        own channel members (there is no per-channel `ids` parameter and no date
-        range — membership is current state), so it makes a single call and
-        returns one row per member. Requires the
-        `youtube.channel-memberships.creator` scope and a channel with the
-        memberships program enabled.
-        """
-        data = self._call(
-            "GET", f"{_DATA_BASE}/members",
-            {"part": "snippet", "maxResults": min(spec.max_rows, 1000)})
-        rows = []
-        for item in data.get("items", []):
-            snippet = item.get("snippet") or {}
-            details = snippet.get("memberDetails") or {}
-            md = snippet.get("membershipsDetails") or {}
-            duration = md.get("membershipsDuration") or {}
-            rows.append({
-                "member_name": details.get("displayName"),
-                "member_channel_id": details.get("channelId"),
-                "level": md.get("highestAccessibleLevelDisplayName")
-                or md.get("highestAccessibleLevel"),
-                "member_since": duration.get("memberSince"),
-                "total_months": duration.get("totalDurationMonths"),
-            })
-        return QueryResult(
-            requested_field_ids=[f.id for f in _MEMBER_FIELDS],
-            rows=rows,
-            row_count=len(rows),
         )
 
 

@@ -19,11 +19,10 @@ from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
 from terno_dbi.connectors.api.pipeline.executor import get_executor
 from terno_dbi.connectors.api.pipeline.ratelimit import RateLimit
 from terno_dbi.connectors.api.model.types import QuerySpec
+from terno_dbi.mcp.setup_link import add_reconnect_url
 
 logger = logging.getLogger(__name__)
 
-# A connector factory is injected rather than imported, so this module stays
-# free of any concrete connector and its provider SDK.
 ConnectorFactory = Callable[[Any], ApiConnector]
 
 
@@ -92,7 +91,7 @@ def _execute_job(
         job.result = payload
         job.status = ApiQueryJob.Status.COMPLETED
     except ApiError as exc:
-        job.error = exc.to_payload()["error"]
+        job.error = add_reconnect_url(exc.to_payload()["error"], datasource)
         job.status = ApiQueryJob.Status.FAILED
     except Exception as exc:  # noqa: BLE001 - never let a provider bug hang a job
         logger.exception("Unexpected error running query job %s", job_id)

@@ -43,6 +43,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from terno_dbi.connectors.api.model.base import ApiConnector
 from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode, invalid_field
+from terno_dbi.connectors.api.sources._google_errors import scope_error
 from terno_dbi.connectors.api.model.types import Account, Field, QueryResult, QuerySpec
 from terno_dbi.connectors.api.sources._multi import gather_accounts
 
@@ -308,6 +309,9 @@ def _drive_error(resp, params: Optional[Dict[str, Any]] = None) -> ApiError:
     clause, caller settings and a date window, so seeing the final string is
     the only way to tell which layer produced the bad syntax.
     """
+    scoped = scope_error(resp, "Google Drive")
+    if scoped is not None:
+        return scoped
     message, reason, location = "", "", ""
     try:
         err = (resp.json() or {}).get("error", {})
@@ -403,7 +407,8 @@ class GoogleDriveConnector(ApiConnector):
                 ErrorCode.AUTH_EXPIRED,
                 f"{self.key} access was rejected; reconnect the source.",
             )
-        except ApiError:
+        except ApiError as exc:
+            self.note_provider_error(exc)
             raise
         except Exception as exc:   # noqa: BLE001
             logger.warning("Drive request failed: %s", exc)

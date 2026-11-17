@@ -25,6 +25,7 @@ from terno_dbi.connectors.api.model.types import (
     QueryResult,
     QuerySpec,
 )
+from terno_dbi.connectors.api.auth.grants import parse_scopes
 
 logger = logging.getLogger(__name__)
 
@@ -174,16 +175,45 @@ class ApiConnector(ABC):
         "do not block": only an explicitly-present set that omits a scope is
         evidence the user declined it.
         """
+
         try:
-            raw = self._tokens().get("GRANTED_SCOPES") or ""
+            return parse_scopes(self._tokens().get("GRANTED_SCOPES"))
         except ApiError:
             return set()
-        return {s for s in raw.replace(",", " ").split() if s}
+
+    def ensure_required_grants(self) -> None:
+        """Raise a reconnect error if the user did not grant a scope the
+        connector cannot work without, and mark the source as needing one.
+
+        Silent when the grant is unknown or the provider does not enforce it.
+        """
+        from terno_dbi.connectors.api.auth.grants import grant_problem
+        from terno_dbi.connectors.api.auth.oauth import mark_expired
+
+        try:
+            bundle = self._tokens()
+        except ApiError:
+            return
+        message = grant_problem(self.key, bundle)
+        if not message:
+            return
+        if getattr(self.datasource, "pk", None):   # a stored source, not a test stub
+            mark_expired(self.datasource, message)
+        raise ApiError(ErrorCode.AUTH_EXPIRED, message, retriable=False)
+
+    def note_provider_error(self, exc: ApiError) -> None:
+        """Mark the source as needing a reconnect when the provider refused a
+        call for a scope the token lacks, so the app offers one."""
+        if not (exc.details or {}).get("scope_insufficient"):
+            return
+        if getattr(self.datasource, "pk", None):   # a stored source, not a test stub
+            from terno_dbi.connectors.api.auth.oauth import mark_expired
+            mark_expired(self.datasource, exc.message)
 
     def require_scope(self, scope: str, feature: str) -> None:
         """Raise a clear error if the user demonstrably declined `scope`.
 
-        Used by optional features (e.g. YouTube revenue/members) so a declined
+        Used by optional features (e.g. YouTube revenue) so a declined
         permission surfaces as an actionable message rather than a provider 403.
         Silent when the granted set is unknown — see `granted_scopes`.
         """
@@ -198,4 +228,11 @@ class ApiConnector(ABC):
             )
 
 
-__all__ = ["ApiConnector"]
+def ensure_grants(connector) -> None:
+    """`connector.ensure_required_grants()`, for connectors that have it."""
+    check = getattr(connector, "ensure_required_grants", None)
+    if check is not None:
+        check()
+
+
+__all__ = ["ApiConnector", "ensure_grants"]

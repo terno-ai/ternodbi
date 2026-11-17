@@ -25,6 +25,7 @@ from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional
 from terno_dbi.connectors.api.model.base import ApiConnector
 from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode, invalid_field
+from terno_dbi.connectors.api.sources._google_errors import scope_error
 from terno_dbi.connectors.api.model.types import (
     Account,
     Action,
@@ -374,6 +375,9 @@ def _ads_error(resp) -> ApiError:
     version. Only 429/5xx are retriable; a 4xx here is a config/permission issue
     that retrying will not fix.
     """
+    scoped = scope_error(resp, "Google Ads")
+    if scoped is not None:
+        return scoped
     status = resp.status_code
     code_name, message, field_path = "", "", ""
     try:
@@ -979,7 +983,8 @@ class GoogleAdsConnector(ApiConnector):
                 ErrorCode.AUTH_EXPIRED,
                 f"{self.key} access was rejected; reconnect the source.",
             )
-        except ApiError:
+        except ApiError as exc:
+            self.note_provider_error(exc)
             raise
         except Exception as exc:   # noqa: BLE001
             logger.warning("Google Ads request failed: %s", exc)

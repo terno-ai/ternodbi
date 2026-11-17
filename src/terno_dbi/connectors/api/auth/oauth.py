@@ -27,6 +27,7 @@ from urllib.parse import urlencode
 from django.utils import timezone
 import requests
 from terno_dbi.services.secrets import decrypt_dict, encrypt_dict
+from terno_dbi.connectors.api.auth.grants import grant_problem
 from terno_dbi.connectors.api.auth.providers import get_provider
 
 logger = logging.getLogger(__name__)
@@ -361,7 +362,8 @@ def _connected_email(token_response: Dict[str, Any]) -> str:
 
 
 def _store_tokens(data_source, token_response: Dict[str, Any],
-                  instance: str = "", login_method: str = "") -> None:
+                  instance: str = "", login_method: str = "",
+                  fresh_grant: bool = False) -> None:
     """Encrypt and persist the token bundle onto the datasource.
 
     Preserves an existing refresh token when the provider omits one on refresh
@@ -372,6 +374,14 @@ def _store_tokens(data_source, token_response: Dict[str, Any],
     from terno_dbi.core.models import DataSource
     existing = decrypt_dict(data_source.connection_json) or {}
     bundle: Dict[str, Any] = dict(existing)
+    if fresh_grant:
+        bundle.pop("GRANTED_SCOPES", None)
+        bundle.pop("LOGIN_METHOD", None)
+        provider = get_provider(getattr(data_source, "type", ""), login_method)
+        if provider is not None and provider.scope:
+            bundle["REQUESTED_SCOPES"] = (
+                provider.scope.format(instance=instance)
+                if provider.requires_instance else provider.scope)
 
     if token_response.get("access_token"):
         bundle["ACCESS_TOKEN"] = token_response["access_token"]
@@ -405,8 +415,13 @@ def _store_tokens(data_source, token_response: Dict[str, Any],
         bundle["TOKEN_EXPIRES_AT"] = str(time.time() + float(expires_in))
 
     data_source.connection_json = encrypt_dict(bundle)
-    data_source.auth_status = DataSource.AuthStatus.CONNECTED
-    data_source.auth_error = ""
+    missing_message = grant_problem(getattr(data_source, "type", ""), bundle)
+    if missing_message:
+        data_source.auth_status = DataSource.AuthStatus.EXPIRED
+        data_source.auth_error = missing_message
+    else:
+        data_source.auth_status = DataSource.AuthStatus.CONNECTED
+        data_source.auth_error = ""
     data_source.save(update_fields=[
         "connection_json", "auth_status", "auth_error",
     ])
@@ -451,7 +466,7 @@ def complete_authorization(
         st.organisation, st.connector_key)
 
     _store_tokens(data_source, token_response, instance=instance,
-                  login_method=st.login_method)
+                  login_method=st.login_method, fresh_grant=True)
     st.delete()
     return data_source
 
@@ -604,7 +619,12 @@ def _post_process(connector_key, provider, token_response, login_method=""):
     - Stripe: drop the per-account keys.
     """
     if login_method == "instagram" or getattr(provider, "name", "") == "instagram_login":
-        return _exchange_instagram_long_lived(provider, token_response)
+        return _instagram_login_grants(
+            _exchange_instagram_long_lived(provider, token_response))
+    if connector_key in _META_KEYS:
+        return _meta_grants(_exchange_meta_long_lived(provider, token_response))
+    if getattr(provider, "name", "") == "meta":
+        return _meta_grants(token_response)
     if connector_key == "salesforce":
         return _salesforce_identity(token_response)
     if connector_key == "stripe":
@@ -615,8 +635,56 @@ def _post_process(connector_key, provider, token_response, login_method=""):
         return {k: v for k, v in token_response.items()
                 if k not in ("access_token", "refresh_token",
                              "stripe_publishable_key")}
-    if connector_key not in _META_KEYS:
+    return token_response
+
+
+_META_GRAPH = "https://graph.facebook.com/v25.0"
+
+
+def _safe_error(exc: Exception) -> str:
+    """Describe a failed request without its URL, which can carry a token or
+    the client secret in the query string."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return f"{type(exc).__name__}" + (f" (HTTP {status})" if status else "")
+
+
+def _meta_grants(token_response):
+    """Record which permissions the user kept, from `/me/permissions`.
+
+    Meta's token responses carry no scope, and its dialog lets the user switch
+    permissions off. A failed lookup leaves the grant unknown, which never
+    blocks the connection.
+    """
+    access = token_response.get("access_token")
+    if not access or token_response.get("scope"):
         return token_response
+    try:
+        resp = requests.get(f"{_META_GRAPH}/me/permissions",
+                            headers={"Authorization": f"Bearer {access}"},
+                            timeout=15)
+        resp.raise_for_status()
+        granted = [p.get("permission") for p in resp.json().get("data", [])
+                   if p.get("status") == "granted" and p.get("permission")]
+    except Exception as exc:   # noqa: BLE001
+        logger.warning("Meta permissions lookup failed: %s", _safe_error(exc))
+        return token_response
+    if not granted:
+        return token_response
+    return {**token_response, "scope": ",".join(granted)}
+
+
+def _instagram_login_grants(token_response):
+    """Instagram Login reports the granted permissions as `permissions`."""
+    perms = token_response.get("permissions")
+    if not perms or token_response.get("scope"):
+        return token_response
+    if isinstance(perms, (list, tuple)):
+        perms = ",".join(str(p) for p in perms)
+    return {**token_response, "scope": str(perms)}
+
+
+def _exchange_meta_long_lived(provider, token_response):
+    """Swap a Facebook Login token for a long-lived one; keep it if that fails."""
     access = token_response.get("access_token")
     if not access:
         return token_response
@@ -634,7 +702,7 @@ def _post_process(connector_key, provider, token_response, login_method=""):
         resp.raise_for_status()
         return {**token_response, **resp.json()}
     except Exception as exc:
-        logger.warning("Meta long-lived exchange failed: %s", exc)
+        logger.warning("Meta long-lived exchange failed: %s", _safe_error(exc))
         return token_response
 
 
@@ -661,7 +729,7 @@ def _exchange_instagram_long_lived(provider, token_response):
         resp.raise_for_status()
         return {**token_response, **resp.json()}
     except Exception as exc:   # noqa: BLE001
-        logger.warning("Instagram long-lived exchange failed: %s", exc)
+        logger.warning("Instagram long-lived exchange failed: %s", _safe_error(exc))
         return token_response
 
 
@@ -703,7 +771,7 @@ def refresh_access_token(
     provider = get_provider(data_source.type)
 
     if not refresh_token or provider is None:
-        _mark_expired(data_source, "No refresh token; reconnect the source.")
+        mark_expired(data_source, "No refresh token; reconnect the source.")
         raise ApiError(ErrorCode.AUTH_EXPIRED,
                        f"{data_source.type} needs reconnecting.")
 
@@ -724,7 +792,7 @@ def refresh_access_token(
     try:
         token_response = _post_token(http_post, provider, token_url, body)
     except Exception as exc:   # noqa: BLE001
-        _mark_expired(data_source, "Token refresh failed; reconnect the source.")
+        mark_expired(data_source, "Token refresh failed; reconnect the source.")
         raise ApiError(ErrorCode.AUTH_EXPIRED,
                        f"{data_source.type} needs reconnecting.") from exc
 
@@ -745,7 +813,7 @@ def _refresh_instagram_login(data_source, tokens):
 
     access = tokens.get("ACCESS_TOKEN")
     if not access:
-        _mark_expired(data_source, "No Instagram token; reconnect the source.")
+        mark_expired(data_source, "No Instagram token; reconnect the source.")
         raise ApiError(ErrorCode.AUTH_EXPIRED,
                        f"{data_source.type} needs reconnecting.")
     try:
@@ -757,7 +825,7 @@ def _refresh_instagram_login(data_source, tokens):
         resp.raise_for_status()
         token_response = resp.json()
     except Exception as exc:   # noqa: BLE001
-        _mark_expired(data_source, "Instagram token refresh failed; reconnect.")
+        mark_expired(data_source, "Instagram token refresh failed; reconnect.")
         raise ApiError(ErrorCode.AUTH_EXPIRED,
                        f"{data_source.type} needs reconnecting.") from exc
 
@@ -765,7 +833,7 @@ def _refresh_instagram_login(data_source, tokens):
     return decrypt_dict(data_source.connection_json)
 
 
-def _mark_expired(data_source, message: str) -> None:
+def mark_expired(data_source, message: str) -> None:
     from terno_dbi.core.models import DataSource
     data_source.auth_status = DataSource.AuthStatus.EXPIRED
     data_source.auth_error = message
@@ -796,6 +864,7 @@ def make_ensure_token(data_source) -> Callable[[], None]:
 __all__ = [
     "complete_authorization",
     "make_ensure_token",
+    "mark_expired",
     "needs_instance",
     "refresh_access_token",
     "start_authorization",

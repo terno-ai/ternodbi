@@ -25,38 +25,16 @@ class OAuthProvider:
     client_secret_env: str
     use_pkce: bool = True
     extra_authorize_params: Dict[str, str] = field(default_factory=dict)
-    # Extra fields added to the token-exchange (and refresh) POST body. Shopify
-    # uses `expiring=1` here to request an expiring offline token — non-expiring
-    # offline tokens are no longer accepted by the Admin API.
     extra_token_params: Dict[str, str] = field(default_factory=dict)
-    # When True, `authorization_url`, `token_url` and `scope` are templates
-    # containing `{instance}` (Shopify's per-store domain, a Salesforce My
-    # Domain, a Dynamics 365 environment host) that the flow fills in from a
-    # host the user supplies before connecting.
     requires_instance: bool = False
-    # When set, the provider names the user's regional server only at the
-    # callback, in this query parameter (Zoho's `accounts-server`). `token_url`
-    # is then an `{instance}` template filled from that host, which must be one
-    # of `callback_instances` — it arrives in the browser redirect, so it is
-    # untrusted, and the token POST carries our client secret.
     callback_instance_param: str = ""
     callback_instances: FrozenSet[str] = frozenset()
-    # When True, the token exchange and refresh authenticate the client with an
-    # HTTP Basic header rather than `client_id`/`client_secret` in the body
-    # (Pipedrive accepts the body form but advises against it).
     token_auth_basic: bool = False
-    # The consent URL's name for the client id. TikTok's portal takes `app_id`.
     client_id_param: str = "client_id"
-    # When True, the token exchange is TikTok's: a JSON body of `app_id`,
-    # `secret` and `auth_code`, answered inside a `{code, message, data}`
-    # envelope rather than as a bare OAuth token response.
     token_json_envelope: bool = False
-    # When set, the provider speaks OAuth 1.0a (X Ads) and this is its
-    # request-token URL; see `oauth1`. `authorization_url` is then where the
-    # user approves the request token and `token_url` swaps it for the user's
-    # access token. The client id and secret are the app's consumer key and
-    # secret, and `scope` and `use_pkce` are unused.
     request_token_url: str = ""
+    enforce_grants: bool = False
+    optional_scopes: FrozenSet[str] = frozenset()
 
     @property
     def uses_instance(self) -> bool:
@@ -95,6 +73,7 @@ _GOOGLE = OAuthProvider(
         "access_type": "offline",
         "prompt": "consent",
     },
+    enforce_grants=True,
 )
 
 _LINKEDIN = OAuthProvider(
@@ -117,6 +96,9 @@ _META = OAuthProvider(
     client_id_env="TERNO_META_APP_ID",
     client_secret_env="TERNO_META_APP_SECRET",
     use_pkce=False,   # Meta's flow is not PKCE
+    # Offer permissions the user declined last time again.
+    extra_authorize_params={"auth_type": "rerequest"},
+    enforce_grants=True,
 )
 
 _FACEBOOK_PAGES = OAuthProvider(
@@ -128,6 +110,9 @@ _FACEBOOK_PAGES = OAuthProvider(
     client_id_env="TERNO_META_APP_ID",
     client_secret_env="TERNO_META_APP_SECRET",
     use_pkce=False,
+    extra_authorize_params={"auth_type": "rerequest"},
+    enforce_grants=True,
+    optional_scopes=frozenset({"pages_read_user_content", "business_management"}),
 )
 
 _INSTAGRAM = OAuthProvider(
@@ -141,6 +126,13 @@ _INSTAGRAM = OAuthProvider(
     client_id_env="TERNO_META_APP_ID",
     client_secret_env="TERNO_META_APP_SECRET",
     use_pkce=False,
+    extra_authorize_params={"auth_type": "rerequest"},
+    enforce_grants=True,
+    optional_scopes=frozenset({
+        "pages_read_engagement", "business_management",
+        "instagram_content_publish", "instagram_manage_comments",
+        "instagram_manage_engagement",
+    }),
 )
 
 _INSTAGRAM_LOGIN = OAuthProvider(
@@ -152,6 +144,11 @@ _INSTAGRAM_LOGIN = OAuthProvider(
     client_id_env="TERNO_INSTAGRAM_APP_ID",
     client_secret_env="TERNO_INSTAGRAM_APP_SECRET",
     use_pkce=False,
+    enforce_grants=True,
+    optional_scopes=frozenset({
+        "instagram_business_content_publish",
+        "instagram_business_manage_comments",
+    }),
 )
 
 
@@ -225,7 +222,6 @@ _DYNAMICS365 = OAuthProvider(
 
 _SHOPIFY = OAuthProvider(
     name="shopify",
-    # Per-store URLs: {instance} is filled with '<store>.myshopify.com'.
     authorization_url="https://{instance}/admin/oauth/authorize",
     token_url="https://{instance}/admin/oauth/access_token",
     scope="read_orders,read_all_orders,read_products,read_customers,"
@@ -372,9 +368,17 @@ _STRIPE = OAuthProvider(
 )
 
 
-def _google_with_scope(scope: str) -> OAuthProvider:
+def _google_with_scope(scope: str, optional: FrozenSet[str] = frozenset()) -> OAuthProvider:
     from dataclasses import replace
-    return replace(_GOOGLE, scope=f"openid email {scope}")
+    return replace(_GOOGLE, scope=f"openid email {scope}", optional_scopes=optional)
+
+
+def _instagram_public() -> OAuthProvider:
+    """Public-account lookups need only the profile and the linked Page."""
+    from dataclasses import replace
+    required = {"instagram_basic", "pages_show_list"}
+    requested = {s for s in _INSTAGRAM.scope.split(",") if s} - {"public_profile"}
+    return replace(_INSTAGRAM, optional_scopes=frozenset(requested - required))
 
 
 # Provider per connector key. Scope is the connector's own — read-only wherever
@@ -386,7 +390,10 @@ _PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
     "youtube": _google_with_scope(
         "https://www.googleapis.com/auth/yt-analytics.readonly "
         "https://www.googleapis.com/auth/yt-analytics-monetary.readonly "
-        "https://www.googleapis.com/auth/youtube.readonly"),
+        "https://www.googleapis.com/auth/youtube.readonly",
+        # Only the revenue report needs it.
+        optional=frozenset({
+            "https://www.googleapis.com/auth/yt-analytics-monetary.readonly"})),
     "google_search_console": _google_with_scope(
         "https://www.googleapis.com/auth/webmasters.readonly"),
     "google_ads": _google_with_scope(
@@ -404,7 +411,7 @@ _PROVIDERS: Dict[str, Union[OAuthProvider, Callable[[], OAuthProvider]]] = {
     "meta_ads": _META,
     "facebook_pages": _FACEBOOK_PAGES,
     "instagram_insights": _INSTAGRAM,
-    "instagram_public": _INSTAGRAM,
+    "instagram_public": _instagram_public(),
     "linkedin_ads": _LINKEDIN,
     "tiktok_ads": _TIKTOK,
     "x_analytics": _X,

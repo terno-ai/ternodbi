@@ -436,7 +436,7 @@ def claim_install(request, organisation, shop: str, return_to: str = "") -> Http
         if str(existing.get("INSTANCE") or "").strip().lower() != shop:
             # Another store's tokens must not survive into this one's bundle.
             data_source.connection_json = encrypt_dict({})
-        _store_tokens(data_source, token_response, instance=shop)
+        _store_tokens(data_source, token_response, instance=shop, fresh_grant=True)
         pending.delete()
 
     _delete_expired_pending()

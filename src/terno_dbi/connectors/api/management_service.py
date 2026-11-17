@@ -29,7 +29,27 @@ logger = logging.getLogger(__name__)
 # --- typed errors ----------------------------------------------------------
 
 class ConnectorManagementError(Exception):
-    """Base class for an expected connector-management failure."""
+    """Base class for an expected connector-management failure.
+
+    `code` carries the connector `ErrorCode` when one caused it, so callers can
+    tell "reconnect" apart from "try again".
+    """
+
+    def __init__(self, message: str = "", code: str = ""):
+        super().__init__(message)
+        self.code = code
+
+    @property
+    def reconnect(self) -> bool:
+        from terno_dbi.connectors.api.model.errors import needs_reconnect
+        return needs_reconnect(self.code)
+
+    def error_fields(self) -> dict:
+        """`code` and `reconnect` for an error response body, when known."""
+        fields = {"code": self.code} if self.code else {}
+        if self.reconnect:
+            fields["reconnect"] = True
+        return fields
 
 
 class ConnectorPermissionDenied(ConnectorManagementError):
@@ -79,14 +99,19 @@ def _connector_status(ds) -> str:
     }.get(ds.auth_status, "not_connected")
 
 
-def _connected_email(ds) -> str:
+def _bundle(ds) -> dict:
+    """The source's decrypted token bundle, or {} when absent or unreadable."""
+    if ds is None:
+        return {}
     try:
         bundle = decrypt_dict(ds.connection_json) or {}
     except Exception:   # noqa: BLE001
-        return ""
-    if not isinstance(bundle, dict):
-        return ""
-    return bundle.get("CONNECTED_EMAIL", "") or ""
+        return {}
+    return bundle if isinstance(bundle, dict) else {}
+
+
+def _connected_email(ds) -> str:
+    return _bundle(ds).get("CONNECTED_EMAIL", "") or ""
 
 
 def _get_login_customer_id(ds) -> str:
@@ -131,6 +156,15 @@ def _connected_datasource(org, connector_key):
     return rows[0]
 
 
+def _missing_permissions(ds, bundle: dict) -> list:
+    """Consent-screen labels of required permissions the user did not grant."""
+    from terno_dbi.connectors.api.auth.grants import missing_scopes, scope_label
+
+    if ds is None:
+        return []
+    return [scope_label(s) for s in missing_scopes(ds.type, bundle)]
+
+
 def _connector_cards(org) -> list:
     """A card per offered API connector, carrying this org's connection state.
 
@@ -168,6 +202,7 @@ def _connector_cards(org) -> list:
         ds = ds_by_key.get(cat.key)
         connected = ds is not None and _connector_status(ds) == "connected"
         counts = counts_by_ds.get(ds.id) if ds else None
+        bundle = _bundle(ds)
         cards.append({
             "key": cat.key,
             "name": cat.name,
@@ -181,9 +216,10 @@ def _connector_cards(org) -> list:
             "enabled": bool(getattr(ds, "enabled", True)) if ds else True,
             "last_error": (getattr(ds, "auth_error", "") if ds else "") or "",
             # Connection identity + account state, only meaningful when connected.
-            "connected_email": _connected_email(ds) if connected else "",
+            "connected_email": (bundle.get("CONNECTED_EMAIL", "") or "") if connected else "",
             "enabled_account_count": (counts["enabled"] if counts else 0),
             "writes_enabled_count": (counts["writable"] if counts else 0),
+            "missing_permissions": _missing_permissions(ds, bundle),
         })
     return cards
 
@@ -261,14 +297,16 @@ def list_accounts(user, org, connector_key) -> dict:
     ``enabled`` flag, refreshing the cached set from the provider. Drives the
     account-picker modal, so it returns *all* accounts, not only enabled ones.
     """
+    from terno_dbi.connectors.api.model.base import ensure_grants
     from terno_dbi.connectors.api.model.errors import ApiError
 
     ds = _require_managed_ds(user, org, connector_key)
     try:
         connector = registry.build_connector(ds)
+        ensure_grants(connector)
         accounts = connector.list_accounts()
     except ApiError as exc:
-        raise ConnectorBadRequest(exc.message)
+        raise ConnectorBadRequest(exc.message, code=exc.code)
 
     permitted = rbac.permitted_accounts(ds, org_permissions.membership_groups(user, ds.organisation_id))
     visible = rbac.filter_accounts(accounts, permitted)

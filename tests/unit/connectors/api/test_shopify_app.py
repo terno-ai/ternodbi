@@ -216,8 +216,10 @@ def token_exchange(monkeypatch):
 
     def fake_post(url, data, auth=None, as_json=False):
         calls.append({"url": url, "data": dict(data)})
+        scope = ("openid email https://www.googleapis.com/auth/adwords"
+                 if "googleapis.com" in url else "read_orders")
         return {"access_token": "shpat_new", "refresh_token": "shprt_new",
-                "scope": "read_orders", "expires_in": 3600}
+                "scope": scope, "expires_in": 3600}
 
     monkeypatch.setattr("terno_dbi.connectors.api.auth.oauth._default_post", fake_post)
     return calls

@@ -35,6 +35,13 @@ class ErrorCode:
     # Codes whose cause is transient — retrying later may succeed.
     _RETRIABLE = frozenset({RATE_LIMITED, UPSTREAM_ERROR, TIMEOUT})
 
+    _RECONNECT = frozenset({AUTH_EXPIRED, AUTH_REVOKED})
+
+
+def needs_reconnect(code: str) -> bool:
+    """Whether an error with this code can only be fixed by reconnecting."""
+    return code in ErrorCode._RECONNECT
+
 
 class ApiError(Exception):
     """A connector failure with a stable code.
@@ -121,4 +128,5 @@ __all__ = [
     "invalid_field",
     "invalid_setting",
     "missing_setting",
+    "needs_reconnect",
 ]

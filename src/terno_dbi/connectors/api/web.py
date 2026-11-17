@@ -66,6 +66,30 @@ _AADSTS_ERRORS = {
 }
 
 
+_DECLINED = ("Access was declined. Connect again and allow the "
+             "permissions on the provider's screen.")
+
+REASON_DECLINED = "declined"
+REASON_MISSING_PERMISSION = "missing_permission"
+REASON_LINK_EXPIRED = "link_expired"
+REASON_FAILED = "failed"
+_PROVIDER_CODE_RE = re.compile(r"[A-Za-z0-9_.-]{1,40}")
+
+
+def _back_to_app(return_to: str, connector_key: str, reason: str, message: str):
+    """Send the user back to the page they connected from, with the reason.
+
+    Without a page to return to (an MCP or desktop link), show the message.
+    """
+    if not return_to:
+        return HttpResponse(escape(message), status=400)
+    from urllib.parse import urlencode
+    sep = "&" if "?" in return_to else "?"
+    params = {"connector_error": connector_key or "unknown",
+              "reason": reason if _PROVIDER_CODE_RE.fullmatch(reason) else REASON_FAILED}
+    return redirect(f"{return_to}{sep}{urlencode(params)}")
+
+
 def _org_from_subdomain(request):
     """Resolve the organisation named by the request host's first label.
 
@@ -209,42 +233,57 @@ def oauth_callback(request):
     from terno_dbi.core.models import ConnectorOAuthState
 
     error = request.GET.get("error")
+    # OAuth 1.0a (X Ads) reports a refusal as `denied` (the request token), and
+    # in place of `state` and `code` returns it as `oauth_token`.
+    denied = request.GET.get("denied", "")
+    state = (request.GET.get("state") or request.GET.get("oauth_token", "")
+             or denied)
+    # Look up the return target before the state is consumed.
+    st = ConnectorOAuthState.objects.filter(state=state).first() if state else None
+    return_to = st.return_to if st else ""
+    connector_key = st.connector_key if st else ""
+
     if error:
         description = request.GET.get("error_description", "")[:1000]
         logger.warning("Connector OAuth declined: %s - %s", error, description)
         match = _AADSTS_RE.search(description)
         aadsts = match.group(0) if match else ""
         message = (_AADSTS_ERRORS.get(aadsts) or _CALLBACK_ERRORS.get(error)
-                   or f"Authorization was declined: {escape(error)}"
-                   + (f" ({aadsts})" if aadsts else ""))
-        return HttpResponse(message, status=400)
+                   or (_DECLINED if error == "access_denied" else
+                       f"Authorization was declined: {error[:100]}"
+                       + (f" ({aadsts})" if aadsts else "")))
+        # A provider-specific cause (AADSTS code, Zoho's `no_org`) goes back
+        # as its code; the app explains the ones it knows.
+        reason = (REASON_DECLINED if error == "access_denied"
+                  else aadsts or error)
+        return _back_to_app(return_to, connector_key, reason, message)
 
-    # OAuth 1.0a (X Ads) reports a refusal as `denied`, and in place of `state`
-    # and `code` returns the request token and `oauth_verifier`.
-    if request.GET.get("denied"):
-        return HttpResponse("Authorization was declined.", status=400)
+    if denied:
+        return _back_to_app(return_to, connector_key, REASON_DECLINED, _DECLINED)
 
-    state = request.GET.get("state") or request.GET.get("oauth_token", "")
     # TikTok names the code `auth_code`.
     code = (request.GET.get("code") or request.GET.get("auth_code")
             or request.GET.get("oauth_verifier", ""))
     if not (state and code):
         return HttpResponseBadRequest("Missing state or code.")
 
-    # Look up the return target before the state is consumed.
-    st = ConnectorOAuthState.objects.filter(state=state).first()
-
     if shopify_app.is_install_state(st):
         return shopify_app.complete_install(request, st, code)
-
-    return_to = st.return_to if st else ""
-    connector_key = st.connector_key if st else ""
 
     try:
         data_source = complete_authorization(
             state=state, code=code, callback_params=request.GET)
     except ApiError as exc:
-        return HttpResponse(exc.message, status=400)
+        expired = st is None or st.is_expired
+        return _back_to_app(
+            return_to, connector_key,
+            REASON_LINK_EXPIRED if expired else REASON_FAILED, exc.message)
+
+    if getattr(data_source, "needs_reconnect", False):
+        # Connected, but a required permission was left unticked. The app reads
+        # which one from the source itself.
+        return _back_to_app(return_to, connector_key,
+                            REASON_MISSING_PERMISSION, data_source.auth_error)
 
     if return_to:
         from urllib.parse import quote
@@ -371,7 +410,7 @@ def _management_error_response(exc):
     if isinstance(exc, ConnectorRateLimited):
         return JsonResponse({"error": str(exc)}, status=429)
     # ConnectorBadRequest or any other expected management error.
-    return JsonResponse({"error": str(exc)}, status=400)
+    return JsonResponse({"error": str(exc), **exc.error_fields()}, status=400)
 
 
 __all__ = [

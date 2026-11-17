@@ -29,7 +29,7 @@ import logging
 from typing import Any, Dict, Iterable, Optional
 from dataclasses import replace
 from terno_dbi.connectors.api.pipeline import cache as result_cache
-from terno_dbi.connectors.api.model.base import ApiConnector
+from terno_dbi.connectors.api.model.base import ApiConnector, ensure_grants as _ensure_grants
 from terno_dbi.connectors.api.pipeline.compare import add_comparison, resolve_compare_range
 from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode
 from terno_dbi.connectors.api.pipeline.ratelimit import RateLimit, check_rate_limit
@@ -191,6 +191,7 @@ def run_query(
 
     # 1. authorise — before anything else touches the account.
     _authorise_accounts(spec, permitted_accounts)
+    _ensure_grants(connector)
 
     # 2. rate limit — a storm must not even reach the cache.
     if rate_limit is not None:
@@ -290,6 +291,7 @@ def run_write_action(
     authorised here, never inside the connector — mirroring `_authorise_accounts`.
     """
     authorise_write_account(connector.datasource, account)
+    _ensure_grants(connector)
     result = connector.execute_action(action_id, account, params or {},
                                       dry_run=dry_run)
     payload = result.as_dict()

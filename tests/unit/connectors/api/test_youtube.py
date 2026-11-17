@@ -21,7 +21,6 @@ class _Catalog:
         {"id": "VideoTotals", "settings": [
             {"setting_id": "video_id", "required": True, "label": "Video ID"}]},
         {"id": "Revenue", "settings": []},
-        {"id": "Members", "settings": []},
     ]
     has_report_types = True
 
@@ -242,62 +241,8 @@ class TestRevenue:
         }
 
 
-class TestMembers:
-    MEMBERS = {
-        "items": [
-            {"snippet": {
-                "memberDetails": {"displayName": "Alice", "channelId": "UCa"},
-                "membershipsDetails": {
-                    "highestAccessibleLevelDisplayName": "Gold",
-                    "membershipsDuration": {"memberSince": "2025-01-01T00:00:00Z",
-                                            "totalDurationMonths": 8},
-                }}},
-            {"snippet": {
-                "memberDetails": {"displayName": "Bob", "channelId": "UCb"},
-                "membershipsDetails": {
-                    "highestAccessibleLevelDisplayName": "Silver",
-                    "membershipsDuration": {"memberSince": "2026-06-01T00:00:00Z",
-                                            "totalDurationMonths": 3},
-                }}},
-        ],
-    }
-
-    def _spec(self):
-        return QuerySpec(
-            accounts=["UC_channel_1"], fields=[],
-            date_range=DateRange("2026-08-01", "2026-08-31"),
-            report_type="Members",
-        )
-
-    def test_members_hit_the_data_api_not_analytics(self):
-        seen = {}
-
-        def http(method, url, token, body=None):
-            seen["url"] = url
-            return self.MEMBERS
-
-        conn = YouTubeConnector(_DS(), http=http)
-        conn.query(self._spec())
-        assert "/members" in seen["url"]
-
-    def test_members_are_parsed(self):
-        conn = _connector({("GET", "/members"): self.MEMBERS})
-        result = conn.query(self._spec())
-        assert result.row_count == 2
-        assert result.rows[0] == {
-            "member_name": "Alice", "member_channel_id": "UCa",
-            "level": "Gold", "member_since": "2025-01-01T00:00:00Z",
-            "total_months": 8,
-        }
-
-    def test_members_fields_listed(self):
-        conn = _connector({})
-        ids = {f.id for f in conn.list_fields("Members")}
-        assert "member_name" in ids and "level" in ids
-
-
 class TestDeclinedScopes:
-    """A user can decline the monetary / memberships scopes on Google's granular
+    """A user can decline the monetary scope on Google's granular
     consent screen. Those reports must then fail with an actionable message, not
     an opaque provider 403 — but only when we actually know the scope was
     declined."""
@@ -324,13 +269,6 @@ class TestDeclinedScopes:
         assert "revenue" in exc.value.message.lower()
         assert "reconnect" in exc.value.message.lower()
 
-    def test_members_blocked_when_memberships_scope_declined(self):
-        granted = "https://www.googleapis.com/auth/yt-analytics.readonly"
-        conn = YouTubeConnector(self._ds(granted), http=lambda *a, **k: {})
-        with pytest.raises(ApiError) as exc:
-            conn.query(self._spec("Members"))
-        assert "member" in exc.value.message.lower()
-
     def test_not_blocked_when_scopes_unknown(self):
         # No GRANTED_SCOPES recorded (older connection): must not false-block —
         # let the call proceed and rely on provider error surfacing.
@@ -340,7 +278,7 @@ class TestDeclinedScopes:
             connection_json = {"ACCESS_TOKEN": "tok"}   # no GRANTED_SCOPES
         conn = YouTubeConnector(_D(), http=lambda *a, **k: {"rows": []})
         # Reaches the API (returns empty) rather than raising a scope error.
-        result = conn.query(self._spec("Members"))
+        result = conn.query(self._spec("Revenue"))
         assert result.row_count == 0
 
     def test_allowed_when_scope_present(self):

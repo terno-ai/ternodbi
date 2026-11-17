@@ -10,6 +10,43 @@
 
 # Changelog
 
+## Unreleased
+
+- Partial OAuth grants are detected. Google, Meta and Instagram Login let the
+  user untick single permissions; a connection missing one its connector needs
+  is stored as needing a reconnect (`auth_status=expired`) with `auth_error`
+  naming the permission, instead of as connected. Permissions only some
+  features use (YouTube revenue, Instagram publishing/comments, Pages extras)
+  do not block. See `terno_dbi.connectors.api.auth.grants`.
+  - Meta grants are read from `/me/permissions`; Instagram Login's from the
+    token response. Meta re-offers declined permissions (`auth_type=rerequest`).
+  - Account listing, field listing and queries on such a source fail with
+    `AUTH_EXPIRED` (`retriable: false`) before calling the provider.
+  - Every `AUTH_EXPIRED`/`AUTH_REVOKED` error from the API query endpoints
+    (sync calls and query jobs) carries `details.reconnect_url`, so a caller
+    can hand the user the link instead of retrying.
+  - Connector cards carry `missing_permissions` (consent-screen labels). The
+    browser accounts endpoint adds `code` and `reconnect: true` to errors that
+    only a reconnect fixes.
+  - A Google 403 for an insufficient scope is `AUTH_EXPIRED`; other Google 403s
+    name Google's reason.
+  - `manage.py audit_connector_grants [--apply]` finds (and marks) connected
+    sources whose stored grant lacks a required permission.
+- The OAuth callback returns the user to `return_to` on failure with
+  `connector_error=<key>&reason=<code>` (`declined`, `missing_permission`,
+  `link_expired`, `failed`, or a provider code such as `no_org`). Without
+  `return_to` it shows the message as before.
+- Upgrade note: a connection is judged against what its own consent asked
+  for (`REQUESTED_SCOPES`, recorded from this version). Sources connected
+  earlier are marked only when they hold none of the connector's required
+  scopes, so a connector that has since asked for more (Sheets moved from
+  `drive.metadata.readonly` to `drive.readonly`) is not reported as declined.
+  Run `audit_connector_grants` without `--apply` first to see what it would
+  mark. A Google 403 for a missing scope marks the source as needing a
+  reconnect. Write actions check grants too.
+- YouTube: the `Members` report is removed. Its scope was never requested, so
+  it could not run.
+
 ## 1.0.37
 
 - Admin checks are per organisation. They read the permissions on the user's
