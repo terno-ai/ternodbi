@@ -180,6 +180,195 @@ class TestRunReport:
         assert "Amazon report failed" in exc.value.message
 
 
+class _Clock:
+    """A fake monotonic clock that only moves when the connector sleeps."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = []
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def _resp(status, payload=None, headers=None):
+    class _R:
+        status_code = status
+        text = json.dumps(payload or {})
+        content = text.encode()
+
+        def json(self):
+            return payload or {}
+    r = _R()
+    r.headers = headers or {}
+    return r
+
+
+class TestReportWaiting:
+    def _spec(self, accounts=("111",)):
+        return QuerySpec(
+            accounts=list(accounts), fields=["campaignName", "clicks"],
+            date_range=DateRange("2026-08-01", "2026-08-31"),
+            report_type="spCampaigns",
+        )
+
+    def _connector(self, http, clock):
+        return AmazonAdsConnector(_DS(), http=http,
+                                  download=lambda u: _gzip_rows(REPORT_ROWS),
+                                  sleep=clock.sleep, clock=clock)
+
+    def _http(self, *, on_status, on_create=None):
+        def http(method, url, headers, body=None):
+            if "/v2/profiles" in url:
+                if "advertising-api.amazon.com" in url:
+                    return PROFILES_NA
+                if "advertising-api-eu" in url:
+                    return PROFILES_EU
+                return []
+            if method == "POST":
+                if on_create:
+                    return on_create(headers["Amazon-Advertising-API-Scope"])
+                return {"reportId": f"r-{headers['Amazon-Advertising-API-Scope']}"}
+            return on_status(url.rsplit("/", 1)[-1])
+        return http
+
+    def test_times_out_with_a_retriable_error_naming_the_report(self, monkeypatch):
+        monkeypatch.setenv("TERNO_AMAZON_ADS_REPORT_WAIT_SECONDS", "60")
+        clock = _Clock()
+        conn = self._connector(self._http(on_status=lambda rid: {"status": "PENDING"}),
+                               clock)
+        with pytest.raises(ApiError) as exc:
+            conn.query(self._spec())
+        err = exc.value
+        assert err.code == ErrorCode.TIMEOUT and err.retriable
+        assert err.retry_after_seconds == 60
+        assert err.details == {"profile": "111", "report_id": "r-111"}
+        assert clock.now == pytest.approx(60)       # never sleeps past the budget
+
+    def test_polling_backs_off_to_a_cap(self, monkeypatch):
+        monkeypatch.setenv("TERNO_AMAZON_ADS_REPORT_WAIT_SECONDS", "120")
+        clock = _Clock()
+        conn = self._connector(self._http(on_status=lambda rid: {"status": "PENDING"}),
+                               clock)
+        with pytest.raises(ApiError):
+            conn.query(self._spec())
+        assert clock.sleeps[:5] == pytest.approx([2.0, 3.0, 4.5, 6.75, 10.125])
+        assert max(clock.sleeps) == 15.0
+
+    def test_duplicate_request_resumes_the_existing_report(self):
+        from terno_dbi.connectors.api.sources.amazon_ads import _DuplicateReport
+        clock = _Clock()
+        polled = []
+
+        def on_create(scope):
+            raise _DuplicateReport("existing-report")
+
+        def on_status(report_id):
+            polled.append(report_id)
+            return {"status": "COMPLETED", "url": "https://s3/r.gz"}
+
+        conn = self._connector(self._http(on_status=on_status, on_create=on_create),
+                               clock)
+        result = conn.query(self._spec())
+        assert polled == ["existing-report"]
+        assert result.row_count == 2
+
+    def test_throttled_status_checks_keep_waiting(self):
+        clock = _Clock()
+        calls = []
+
+        def on_status(report_id):
+            calls.append(report_id)
+            if len(calls) == 1:
+                raise ApiError(ErrorCode.RATE_LIMITED, "slow down")
+            return {"status": "COMPLETED", "url": "https://s3/r.gz"}
+
+        conn = self._connector(self._http(on_status=on_status), clock)
+        assert conn.query(self._spec()).row_count == 2
+        assert len(calls) == 2
+
+    def test_slow_profile_is_a_warning_when_others_finish(self, monkeypatch):
+        monkeypatch.setenv("TERNO_AMAZON_ADS_REPORT_WAIT_SECONDS", "30")
+        clock = _Clock()
+
+        def on_status(report_id):
+            if report_id == "r-111":
+                return {"status": "COMPLETED", "url": "https://s3/r.gz"}
+            return {"status": "PROCESSING"}
+
+        conn = self._connector(self._http(on_status=on_status), clock)
+        result = conn.query(self._spec(accounts=("111", "222")))
+        assert {r["_account"] for r in result.rows} == {"111"}
+        assert len(result.warnings) == 1
+        assert "222" in result.warnings[0] and "still generating" in result.warnings[0]
+
+    def test_profiles_are_reported_on_concurrently(self):
+        import threading
+        barrier = threading.Barrier(2, timeout=5)
+
+        def on_create(scope):
+            barrier.wait()          # deadlocks if profiles ran one by one
+            return {"reportId": f"r-{scope}"}
+
+        conn = AmazonAdsConnector(
+            _DS(), http=self._http(
+                on_status=lambda rid: {"status": "COMPLETED", "url": "u"},
+                on_create=on_create),
+            download=lambda u: _gzip_rows(REPORT_ROWS), sleep=lambda *_a: None)
+        result = conn.query(self._spec(accounts=("111", "222")))
+        assert result.row_count == 4
+
+
+class TestReportWaitSetting:
+    def test_default_override_floor_and_garbage(self, monkeypatch):
+        from terno_dbi.connectors.api.sources.amazon_ads import _report_wait
+        monkeypatch.delenv("TERNO_AMAZON_ADS_REPORT_WAIT_SECONDS", raising=False)
+        assert _report_wait() == 180.0
+        monkeypatch.setenv("TERNO_AMAZON_ADS_REPORT_WAIT_SECONDS", "240")
+        assert _report_wait() == 240.0
+        monkeypatch.setenv("TERNO_AMAZON_ADS_REPORT_WAIT_SECONDS", "1")
+        assert _report_wait() == 10.0
+        monkeypatch.setenv("TERNO_AMAZON_ADS_REPORT_WAIT_SECONDS", "soon")
+        assert _report_wait() == 180.0
+
+
+class TestHttpErrors:
+    def test_duplicate_report_id_is_read_from_a_425(self):
+        from terno_dbi.connectors.api.sources.amazon_ads import _duplicate_report_id
+        rid = "0e8c1f5c-1d2b-4c3a-9f7e-123456789abc"
+        resp = _resp(425, {"code": "425",
+                           "detail": f"The Request is a duplicate of : {rid}"})
+        assert _duplicate_report_id(resp) == rid
+        assert _duplicate_report_id(_resp(425, {"detail": "Too early"})) is None
+
+    def test_default_http_raises_duplicate_on_425(self, monkeypatch):
+        import requests
+        from terno_dbi.connectors.api.sources.amazon_ads import (
+            _DuplicateReport, _default_http)
+        rid = "0e8c1f5c-1d2b-4c3a-9f7e-123456789abc"
+        monkeypatch.setattr(requests, "request", lambda *a, **k: _resp(
+            425, {"detail": f"The Request is a duplicate of : {rid}"}))
+        with pytest.raises(_DuplicateReport) as exc:
+            _default_http("POST", "https://x/reporting/reports", {}, {})
+        assert exc.value.report_id == rid
+
+    def test_429_is_rate_limited_with_retry_after(self):
+        from terno_dbi.connectors.api.sources.amazon_ads import _amazon_error
+        err = _amazon_error(_resp(429, {"message": "throttled"},
+                                  headers={"Retry-After": "7"}))
+        assert err.code == ErrorCode.RATE_LIMITED and err.retriable
+        assert err.retry_after_seconds == 7
+
+    def test_4xx_is_not_retriable_and_5xx_is(self):
+        from terno_dbi.connectors.api.sources.amazon_ads import _amazon_error
+        assert _amazon_error(_resp(400, {"details": "bad"})).retriable is False
+        assert _amazon_error(_resp(503, {})).retriable is True
+
+
 class TestAuthAndConfig:
     def test_missing_client_id_is_a_clear_config_error(self, monkeypatch):
         monkeypatch.delenv("TERNO_AMAZON_ADS_CLIENT_ID", raising=False)

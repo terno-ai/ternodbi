@@ -266,6 +266,8 @@ Besides databases, TernoDBI connects to business tools and queries them through 
 
 Register `<your server>/connectors/oauth/callback/` as the redirect URI with each provider.
 
+Amazon Ads builds reports asynchronously and can take minutes. A query waits up to `TERNO_AMAZON_ADS_REPORT_WAIT_SECONDS` (default 180) and then returns a retriable `TIMEOUT`; running the same query again resumes the report Amazon is already building. Keep the value below your client's request timeout.
+
 **Querying.** Agents use `list_accounts` (only the accounts the admin allowed), `list_fields` (dimensions and metrics), `data_query` (returns a `query_id`) and `get_query_results`. Requests are rate-limited per organisation and source.
 
 **Write actions.** Some sources support changes such as pausing a campaign (`list_actions`, `execute_action`). Every write needs all of: the `connector:write` scope, the Org Admin role, and writes enabled on that specific account (off by default). `dry_run` validates with the provider without applying, and every real write is recorded in an audit log.
