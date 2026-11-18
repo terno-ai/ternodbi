@@ -11,7 +11,10 @@ from every other connector here:
   type (Amazon has no field-metadata endpoint). `_run` creates a report
   (`POST /reporting/reports`), polls `GET /reporting/reports/{id}` until it is
   COMPLETED, downloads the gzipped-JSON result from a presigned URL, and maps it
-  back to the requested columns.
+  back to the requested columns. Reports can take minutes, so a query waits a
+  bounded time and then fails with a retriable TIMEOUT; re-running the same
+  query resumes the pending report, because Amazon answers a repeated request
+  with 425 and the id of the report it is already building.
 - **Money is already in the account currency** (a float), not micros.
 - Every call carries the Login-with-Amazon client id in
   `Amazon-Advertising-API-ClientId`, alongside the OAuth bearer token.
@@ -26,6 +29,7 @@ import gzip
 import json
 import logging
 import os
+import re
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -46,10 +50,20 @@ _REGIONS: Dict[str, str] = {
     "FE": "https://advertising-api-fe.amazon.com",
 }
 
-# Async report polling budget. Amazon reports usually complete in well under a
-# minute; bounded so a stuck report surfaces a retriable timeout, not a hang.
-_POLL_INTERVAL_S = 5
-_POLL_ATTEMPTS = 24   # ~2 minutes
+_REPORT_WAIT_ENV = "TERNO_AMAZON_ADS_REPORT_WAIT_SECONDS"
+_DEFAULT_REPORT_WAIT_S = 180.0
+_MIN_REPORT_WAIT_S = 10.0
+
+# Status polling backs off from a quick first check to a slower steady pace.
+_POLL_FIRST_S = 2.0
+_POLL_MAX_S = 15.0
+_POLL_BACKOFF = 1.5
+
+# Profiles are reported on concurrently, each with its own report job.
+_MAX_PARALLEL_PROFILES = 8
+
+_UUID_RE = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
 
 # --------------------------------------------------------------------------
@@ -211,6 +225,10 @@ def _default_http(method: str, url: str, headers: Dict[str, str],
                             timeout=60)
     if resp.status_code == 401:
         raise _AuthError()
+    if resp.status_code == 425:
+        report_id = _duplicate_report_id(resp)
+        if report_id:
+            raise _DuplicateReport(report_id)
     if resp.status_code >= 400:
         raise _amazon_error(resp)
     return resp.json() if resp.content else {}
@@ -224,33 +242,60 @@ def _default_download(url: str) -> bytes:
     return resp.content
 
 
-def _amazon_error(resp) -> ApiError:
+def _error_text(resp) -> str:
     try:
         body = resp.json() or {}
-        msg = (body.get("details") or body.get("message")
-               or body.get("code") or "")
+        return str(body.get("detail") or body.get("details")
+                   or body.get("message") or body.get("code") or "")
     except ValueError:
-        msg = (resp.text or "")[:200]
-    return ApiError(
-        ErrorCode.UPSTREAM_ERROR,
-        f"Amazon Ads API error ({resp.status_code}): {msg or 'unknown error'}",
-        retriable=resp.status_code == 429 or resp.status_code >= 500,
-    )
+        return (resp.text or "")[:200]
+
+
+def _duplicate_report_id(resp) -> Optional[str]:
+    """The existing report's id from a 425 "duplicate of : <id>" response."""
+    text = _error_text(resp)
+    if "duplicate" not in text.lower():
+        return None
+    match = _UUID_RE.search(text)
+    return match.group(0) if match else None
+
+
+def _amazon_error(resp) -> ApiError:
+    msg = _error_text(resp)
+    message = f"Amazon Ads API error ({resp.status_code}): {msg or 'unknown error'}"
+    if resp.status_code == 429:
+        retry_after = (resp.headers or {}).get("Retry-After", "")
+        return ApiError(
+            ErrorCode.RATE_LIMITED, message,
+            retry_after_seconds=int(retry_after) if str(retry_after).isdigit() else None,
+        )
+    return ApiError(ErrorCode.UPSTREAM_ERROR, message,
+                    retriable=resp.status_code >= 500)
 
 
 class _AuthError(Exception):
     """Internal marker for a 401 from Amazon, mapped to AUTH_EXPIRED."""
 
 
+class _DuplicateReport(Exception):
+    """A 425 on report creation: the same report is already being built."""
+
+    def __init__(self, report_id: str):
+        super().__init__(report_id)
+        self.report_id = report_id
+
+
 class AmazonAdsConnector(ApiConnector):
     def __init__(self, datasource, http: Optional[Callable] = None,
                  download: Optional[Callable] = None,
                  token_refresher: Optional[Callable] = None,
-                 sleep: Optional[Callable] = None):
+                 sleep: Optional[Callable] = None,
+                 clock: Optional[Callable[[], float]] = None):
         super().__init__(datasource, token_refresher=token_refresher)
         self._http = http or _default_http
         self._download = download or _default_download
         self._sleep = sleep or time.sleep
+        self._clock = clock or time.monotonic
         self._profile_region: Dict[str, str] = {}   # profileId -> base URL
 
     # -- transport ----------------------------------------------------------
@@ -288,7 +333,7 @@ class AmazonAdsConnector(ApiConnector):
                 ErrorCode.AUTH_EXPIRED,
                 f"{self.key} access was rejected; reconnect the source.",
             )
-        except ApiError:
+        except (ApiError, _DuplicateReport):
             raise
         except Exception as exc:   # noqa: BLE001
             logger.warning("Amazon Ads request failed: %s", exc)
@@ -381,20 +426,22 @@ class AmazonAdsConnector(ApiConnector):
 
         multi = len(spec.accounts) > 1
 
+        # Resolve shared state once before the workers start: the region of
+        # every profile and a fresh token, so threads never refresh it at once.
+        if any(a not in self._profile_region for a in spec.accounts):
+            self.list_accounts()
+        self.access_token()
+        deadline = self._clock() + _report_wait()
+
         def fetch(account):
             base = self._base_for(account)
-            created = self._call(
-                "POST", f"{base}/reporting/reports",
-                scope=account, content_type=_V3_REPORT_CT, body=body)
-            report_id = created.get("reportId") or created.get("reportId".lower())
-            if not report_id:
-                raise ApiError(ErrorCode.UPSTREAM_ERROR,
-                               "Amazon did not return a report id.")
-            url = self._poll(base, account, report_id)
+            report_id = self._create_report(base, account, body)
+            url = self._poll(base, account, report_id, deadline)
             raw = self._download(url)
             return _parse_report(raw, requested, catalogue, account, multi=multi)
 
-        rows, warnings = gather_accounts(spec.accounts, fetch)
+        rows, warnings = gather_accounts(
+            spec.accounts, fetch, max_workers=_MAX_PARALLEL_PROFILES)
 
         return QueryResult(
             requested_field_ids=requested,
@@ -403,26 +450,75 @@ class AmazonAdsConnector(ApiConnector):
             warnings=warnings,
         )
 
-    def _poll(self, base: str, scope: str, report_id: str) -> str:
-        """Poll a report to completion and return its download URL."""
-        for _ in range(_POLL_ATTEMPTS):
-            st = self._call(
-                "GET", f"{base}/reporting/reports/{report_id}", scope=scope)
+    def _create_report(self, base: str, profile: str, body: Dict) -> str:
+        """Request a report, or reuse the identical one Amazon is already building."""
+        try:
+            created = self._call(
+                "POST", f"{base}/reporting/reports",
+                scope=profile, content_type=_V3_REPORT_CT, body=body)
+        except _DuplicateReport as dup:
+            logger.info("Amazon Ads report %s resumed for profile %s",
+                        dup.report_id, profile)
+            return dup.report_id
+        report_id = (created or {}).get("reportId")
+        if not report_id:
+            raise ApiError(ErrorCode.UPSTREAM_ERROR,
+                           "Amazon did not return a report id.")
+        logger.info("Amazon Ads report %s requested for profile %s",
+                    report_id, profile)
+        return report_id
+
+    def _poll(self, base: str, profile: str, report_id: str,
+              deadline: float) -> str:
+        """Poll a report until it completes or `deadline` passes; return its URL."""
+        interval = _POLL_FIRST_S
+        while True:
+            try:
+                st = self._call(
+                    "GET", f"{base}/reporting/reports/{report_id}", scope=profile)
+            except ApiError as exc:
+                if exc.code != ErrorCode.RATE_LIMITED:
+                    raise
+                st = {}       # throttled: keep waiting, the report is unaffected
             status = str(st.get("status") or "").upper()
             if status in ("COMPLETED", "SUCCESS"):
                 url = st.get("url") or st.get("location")
                 if url:
+                    logger.info("Amazon Ads report %s completed for profile %s",
+                                report_id, profile)
                     return url
                 raise ApiError(ErrorCode.UPSTREAM_ERROR,
                                "Amazon report completed without a download URL.")
             if status in ("FAILED", "FAILURE", "CANCELLED"):
-                detail = st.get("statusDetails") or status
+                detail = st.get("failureReason") or st.get("statusDetails") or status
                 raise ApiError(ErrorCode.UPSTREAM_ERROR,
                                f"Amazon report failed: {detail}", retriable=True)
-            self._sleep(_POLL_INTERVAL_S)
-        raise ApiError(ErrorCode.TIMEOUT,
-                       "Amazon report did not finish in time; retry the query.",
-                       retriable=True)
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                logger.warning("Amazon Ads report %s still %s for profile %s",
+                               report_id, status or "pending", profile)
+                raise ApiError(
+                    ErrorCode.TIMEOUT,
+                    f"Amazon is still generating the report for profile {profile}. "
+                    "Run the same query again in a minute; it picks up the "
+                    "report already in progress.",
+                    retriable=True,
+                    retry_after_seconds=60,
+                    details={"profile": profile, "report_id": report_id},
+                )
+            self._sleep(min(interval, remaining))
+            interval = min(interval * _POLL_BACKOFF, _POLL_MAX_S)
+
+
+def _report_wait() -> float:
+    """Seconds a query waits for its reports (env override, with a floor)."""
+    raw = os.getenv(_REPORT_WAIT_ENV, "").strip()
+    try:
+        value = float(raw) if raw else _DEFAULT_REPORT_WAIT_S
+    except ValueError:
+        logger.warning("Ignoring invalid %s=%r", _REPORT_WAIT_ENV, raw)
+        value = _DEFAULT_REPORT_WAIT_S
+    return max(value, _MIN_REPORT_WAIT_S)
 
 
 def _parse_report(raw: bytes, requested, catalogue, account, *,
