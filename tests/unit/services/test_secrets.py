@@ -37,10 +37,11 @@ class TestDictEnvelope:
 
 class TestStringEnvelope:
     def test_round_trip(self):
-        ct = secrets.encrypt_str("postgresql://u:pw@h/db")
+        plain = "postgresql://u:S3cretPassw0rdMarker@h/db"
+        ct = secrets.encrypt_str(plain)
         assert secrets.is_encrypted_str(ct)
-        assert "pw" not in ct
-        assert secrets.decrypt_str(ct) == "postgresql://u:pw@h/db"
+        assert "S3cretPassw0rdMarker" not in ct
+        assert secrets.decrypt_str(ct) == plain
 
     def test_legacy_plaintext_is_passed_through(self):
         assert secrets.decrypt_str("postgresql://plain") == "postgresql://plain"
