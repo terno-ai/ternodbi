@@ -52,6 +52,14 @@ def _client_id(monkeypatch):
     monkeypatch.setenv("TERNO_AMAZON_ADS_CLIENT_ID", "amzn-client")
 
 
+@pytest.fixture(autouse=True)
+def _fresh_cache():
+    from django.core.cache import cache
+    cache.clear()
+    yield
+    cache.clear()
+
+
 def _gzip_rows(rows):
     return gzip.compress(json.dumps(rows).encode("utf-8"))
 
@@ -117,10 +125,33 @@ class TestListFields:
         conn = _connector()
         camp = {f.id: f for f in conn.list_fields("spCampaigns")}
         assert camp["cost"].is_monetary is True
-        assert camp["acosClicks7d"].is_non_aggregatable is True
+        assert camp["acosClicks14d"].is_non_aggregatable is True
         assert camp["clicks"].kind == "metric"
         st = {f.id for f in conn.list_fields("spSearchTerm")}
         assert "searchTerm" in st and "searchTerm" not in camp
+        assert {"acosClicks7d", "acosClicks14d"} <= st
+
+    def test_campaign_columns_are_ones_amazon_accepts(self):
+        # From Amazon's 400 reply listing the allowed spCampaigns columns.
+        allowed = set("""
+            attributedSalesSameSku1d date campaignBiddingStrategy roasClicks14d
+            unitsSoldClicks1d endDate attributedSalesSameSku7d
+            attributedSalesSameSku14d royaltyQualifiedBorrows sales1d sales7d
+            addToList attributedSalesSameSku30d purchasesSameSku14d
+            kindleEditionNormalizedPagesRoyalties14d purchasesSameSku1d spend
+            unitsSoldSameSku1d purchases1d purchasesSameSku7d unitsSoldSameSku7d
+            purchases7d unitsSoldSameSku30d cost costPerClick unitsSoldClicks14d
+            retailer sales14d sales30d clickThroughRate impressions
+            kindleEditionNormalizedPagesRead14d purchasesSameSku30d purchases14d
+            unitsSoldClicks30d qualifiedBorrows acosClicks14d purchases30d clicks
+            startDate unitsSoldClicks7d unitsSoldSameSku14d
+            campaignRuleBasedBudgetAmount campaignBudgetCurrencyCode campaignId
+            campaignApplicableBudgetRuleId campaignBudgetType
+            topOfSearchImpressionShare campaignStatus campaignName
+            campaignApplicableBudgetRuleName campaignBudgetAmount
+        """.split())
+        ids = {f.id for f in _connector().list_fields("spCampaigns")}
+        assert ids <= allowed, ids - allowed
 
 
 class TestRunReport:
@@ -245,7 +276,7 @@ class TestReportWaiting:
             conn.query(self._spec())
         err = exc.value
         assert err.code == ErrorCode.TIMEOUT and err.retriable
-        assert err.retry_after_seconds == 60
+        assert err.retry_after_seconds == 120
         assert err.details == {"profile": "111", "report_id": "r-111"}
         assert clock.now == pytest.approx(60)       # never sleeps past the budget
 
@@ -398,3 +429,87 @@ class TestRegistration:
         from terno_dbi.connectors.api.sources.amazon_ads import make_amazon_ads_connector
         conn = make_amazon_ads_connector(_DS())
         assert conn._token_refresher is not None
+
+
+class TestReportReuse:
+    """Re-running a query picks up the report it already requested."""
+
+    def _spec(self, end="2026-08-31"):
+        return QuerySpec(
+            accounts=["111"], fields=["campaignName", "clicks"],
+            date_range=DateRange("2026-08-01", end),
+            report_type="spCampaigns",
+        )
+
+    def _connector(self, statuses, created, ds=None, monkeypatch=None):
+        """`statuses` maps report id -> status payload; POSTs mint r1, r2, ..."""
+        def http(method, url, headers, body=None):
+            if "/v2/profiles" in url:
+                return PROFILES_NA if "advertising-api.amazon.com" in url else []
+            if method == "POST":
+                created.append(f"r{len(created) + 1}")
+                return {"reportId": created[-1]}
+            return statuses(url.rsplit("/", 1)[-1])
+        clock = _Clock()
+        return AmazonAdsConnector(ds or _DS(), http=http,
+                                  download=lambda u: _gzip_rows(REPORT_ROWS),
+                                  sleep=clock.sleep, clock=clock)
+
+    def test_rerun_after_timeout_reuses_the_report(self, monkeypatch):
+        monkeypatch.setenv("TERNO_AMAZON_ADS_REPORT_WAIT_SECONDS", "30")
+        created, ready = [], {"now": False}
+
+        def statuses(rid):
+            if ready["now"]:
+                return {"status": "COMPLETED", "url": "https://s3/r.gz"}
+            return {"status": "PENDING"}
+
+        with pytest.raises(ApiError) as exc:
+            self._connector(statuses, created).query(self._spec())
+        assert exc.value.code == ErrorCode.TIMEOUT
+
+        ready["now"] = True
+        result = self._connector(statuses, created).query(self._spec())
+        assert result.row_count == 2
+        assert created == ["r1"]            # no second report requested
+
+    def test_finished_report_is_reused(self):
+        created = []
+        done = lambda rid: {"status": "COMPLETED", "url": "https://s3/r.gz"}  # noqa: E731
+        self._connector(done, created).query(self._spec())
+        self._connector(done, created).query(self._spec())
+        assert created == ["r1"]
+
+    def test_failed_report_is_replaced(self, monkeypatch):
+        monkeypatch.setenv("TERNO_AMAZON_ADS_REPORT_WAIT_SECONDS", "30")
+        created = []
+        with pytest.raises(ApiError):
+            self._connector(lambda rid: {"status": "PENDING"}, created).query(
+                self._spec())
+
+        def statuses(rid):
+            if rid == "r1":
+                return {"status": "FAILED", "failureReason": "expired"}
+            return {"status": "COMPLETED", "url": "https://s3/r.gz"}
+
+        result = self._connector(statuses, created).query(self._spec())
+        assert result.row_count == 2
+        assert created == ["r1", "r2"]
+
+    def test_reports_are_not_shared_between_datasources(self):
+        class _DS2(_DS):
+            pk = 2
+        created = []
+        done = lambda rid: {"status": "COMPLETED", "url": "https://s3/r.gz"}  # noqa: E731
+        self._connector(done, created).query(self._spec())
+        self._connector(done, created, ds=_DS2()).query(self._spec())
+        assert created == ["r1", "r2"]
+
+    def test_reuse_window_is_shorter_when_the_range_includes_today(self):
+        from datetime import date, timedelta
+
+        from terno_dbi.connectors.api.sources.amazon_ads import _reuse_seconds
+        today = date.today()
+        assert _reuse_seconds({"endDate": today.isoformat()}) == 3600
+        past = (today - timedelta(days=1)).isoformat()
+        assert _reuse_seconds({"endDate": past}) == 12 * 3600

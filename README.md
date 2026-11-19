@@ -266,7 +266,7 @@ Besides databases, TernoDBI connects to business tools and queries them through 
 
 Register `<your server>/connectors/oauth/callback/` as the redirect URI with each provider.
 
-Amazon Ads builds reports asynchronously and can take minutes. A query waits up to `TERNO_AMAZON_ADS_REPORT_WAIT_SECONDS` (default 180) and then returns a retriable `TIMEOUT`; running the same query again resumes the report Amazon is already building. Keep the value below your client's request timeout.
+Amazon Ads builds reports asynchronously, which can take from minutes to over half an hour. A query waits up to `TERNO_AMAZON_ADS_REPORT_WAIT_SECONDS` (default 180) and then returns a retriable `TIMEOUT`; running the same query again picks up that report instead of requesting a new one. Report ids are kept in the Django cache, so use a shared cache (such as Redis) when running more than one process. Keep the value below your client's request timeout.
 
 **Querying.** Agents use `list_accounts` (only the accounts the admin allowed), `list_fields` (dimensions and metrics), `data_query` (returns a `query_id`) and `get_query_results`. Requests are rate-limited per organisation and source.
 
