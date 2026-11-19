@@ -11,10 +11,11 @@ from every other connector here:
   type (Amazon has no field-metadata endpoint). `_run` creates a report
   (`POST /reporting/reports`), polls `GET /reporting/reports/{id}` until it is
   COMPLETED, downloads the gzipped-JSON result from a presigned URL, and maps it
-  back to the requested columns. Reports can take minutes, so a query waits a
-  bounded time and then fails with a retriable TIMEOUT; re-running the same
-  query resumes the pending report, because Amazon answers a repeated request
-  with 425 and the id of the report it is already building.
+  back to the requested columns. Reports can take from minutes to over half an
+  hour, so a query waits a bounded time and then fails with a retriable
+  TIMEOUT. The report id is remembered per profile and request, so re-running
+  the same query picks up that report (pending or finished) instead of starting
+  a new one; Amazon only deduplicates requests while a report is in progress.
 - **Money is already in the account currency** (a float), not micros.
 - Every call carries the Login-with-Amazon client id in
   `Amazon-Advertising-API-ClientId`, alongside the OAuth bearer token.
@@ -26,12 +27,16 @@ covered here.
 
 from __future__ import annotations
 import gzip
+import hashlib
 import json
 import logging
 import os
 import re
 import time
+from datetime import date
 from typing import Any, Callable, Dict, List, Optional
+
+from django.core.cache import cache
 
 from terno_dbi.connectors.api.model.base import ApiConnector
 from terno_dbi.connectors.api.model.errors import ApiError, ErrorCode, invalid_field
@@ -61,6 +66,14 @@ _POLL_BACKOFF = 1.5
 
 # Profiles are reported on concurrently, each with its own report job.
 _MAX_PARALLEL_PROFILES = 8
+
+# Suggested pause before re-running a query whose report isn't ready.
+_RETRY_AFTER_S = 120
+
+# How long a requested report is reused for the same query. A range that ends
+# before today never changes; one that includes today is refreshed hourly.
+_REUSE_CLOSED_RANGE_S = 12 * 3600
+_REUSE_OPEN_RANGE_S = 3600
 
 _UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
@@ -97,8 +110,17 @@ _SP_CORE_METRICS: List[Field] = [
     _m("purchases7d", "Purchases (7d)", data_type="integer"),
     _m("sales7d", "Sales (7d)", data_type="number", is_monetary=True),
     _m("unitsSoldClicks7d", "Units sold (7d)", data_type="integer"),
+]
+_ACOS_14D = _m("acosClicks14d", "ACOS (14d)", data_type="number",
+               is_non_aggregatable=True)
+_ROAS_14D = _m("roasClicks14d", "ROAS (14d)", data_type="number",
+               is_non_aggregatable=True)
+# The campaign report only has 14-day ACOS/ROAS; the others also have 7-day.
+_SP_RATIOS: List[Field] = [
     _m("acosClicks7d", "ACOS (7d)", data_type="number", is_non_aggregatable=True),
     _m("roasClicks7d", "ROAS (7d)", data_type="number", is_non_aggregatable=True),
+    _ACOS_14D,
+    _ROAS_14D,
 ]
 # Extra attribution windows, offered for completeness.
 _SP_WINDOWS: List[Field] = [
@@ -130,9 +152,14 @@ _REPORTS: Dict[str, _Report] = {
          _d("campaignId", "Campaign ID", data_type="string"),
          _d("campaignName", "Campaign"),
          _d("campaignStatus", "Campaign status"),
+         _d("campaignBudgetType", "Budget type"),
+         _d("campaignBudgetCurrencyCode", "Budget currency"),
+         _d("campaignBiddingStrategy", "Bidding strategy"),
          _m("campaignBudgetAmount", "Budget", data_type="number", is_monetary=True,
             is_non_aggregatable=True),
-         *_SP_CORE_METRICS, *_SP_WINDOWS]),
+         _m("topOfSearchImpressionShare", "Top-of-search impression share",
+            data_type="number", is_non_aggregatable=True),
+         *_SP_CORE_METRICS, _ACOS_14D, _ROAS_14D, *_SP_WINDOWS]),
     "spTargeting": _Report(
         "SPONSORED_PRODUCTS", "spTargeting", ["targeting"],
         [_DATE,
@@ -147,7 +174,7 @@ _REPORTS: Dict[str, _Report] = {
          _d("targeting", "Targeting expression"),
          _m("keywordBid", "Bid", data_type="number", is_monetary=True,
             is_non_aggregatable=True),
-         *_SP_CORE_METRICS]),
+         *_SP_CORE_METRICS, *_SP_RATIOS]),
     "spSearchTerm": _Report(
         "SPONSORED_PRODUCTS", "spSearchTerm", ["searchTerm"],
         [_DATE,
@@ -158,7 +185,7 @@ _REPORTS: Dict[str, _Report] = {
          _d("keyword", "Keyword"),
          _d("matchType", "Match type"),
          _d("searchTerm", "Search term"),
-         *_SP_CORE_METRICS]),
+         *_SP_CORE_METRICS, *_SP_RATIOS]),
     "spAdvertisedProduct": _Report(
         "SPONSORED_PRODUCTS", "spAdvertisedProduct", ["advertiser"],
         [_DATE,
@@ -167,7 +194,7 @@ _REPORTS: Dict[str, _Report] = {
          _d("adGroupId", "Ad group ID", data_type="string"),
          _d("advertisedAsin", "Advertised ASIN", data_type="string"),
          _d("advertisedSku", "Advertised SKU", data_type="string"),
-         *_SP_CORE_METRICS]),
+         *_SP_CORE_METRICS, *_SP_RATIOS]),
     "spPurchasedProduct": _Report(
         "SPONSORED_PRODUCTS", "spPurchasedProduct", ["asin"],
         [_DATE,
@@ -435,8 +462,7 @@ class AmazonAdsConnector(ApiConnector):
 
         def fetch(account):
             base = self._base_for(account)
-            report_id = self._create_report(base, account, body)
-            url = self._poll(base, account, report_id, deadline)
+            url = self._report_url(base, account, body, deadline)
             raw = self._download(url)
             return _parse_report(raw, requested, catalogue, account, multi=multi)
 
@@ -449,6 +475,40 @@ class AmazonAdsConnector(ApiConnector):
             row_count=len(rows),
             warnings=warnings,
         )
+
+    def _report_url(self, base: str, profile: str, body: Dict,
+                    deadline: float) -> str:
+        """Download URL for this request, reusing the report already requested
+        for it when there is one."""
+        key = self._report_key(profile, body)
+        report_id = cache.get(key)
+        if report_id:
+            logger.info("Amazon Ads report %s reused for profile %s",
+                        report_id, profile)
+            try:
+                return self._poll(base, profile, report_id, deadline)
+            except ApiError as exc:
+                if exc.code != ErrorCode.UPSTREAM_ERROR:
+                    raise
+                # Failed or no longer available: request a fresh one.
+                logger.info("Amazon Ads report %s dropped for profile %s: %s",
+                            report_id, profile, exc.message)
+                cache.delete(key)
+
+        report_id = self._create_report(base, profile, body)
+        cache.set(key, report_id, _reuse_seconds(body))
+        try:
+            return self._poll(base, profile, report_id, deadline)
+        except ApiError as exc:
+            if exc.code != ErrorCode.TIMEOUT:
+                cache.delete(key)
+            raise
+
+    def _report_key(self, profile: str, body: Dict) -> str:
+        ds = getattr(self.datasource, "pk", None)
+        digest = hashlib.sha256(
+            json.dumps(body, sort_keys=True).encode()).hexdigest()
+        return f"amazon_ads:report:{ds}:{profile}:{digest}"
 
     def _create_report(self, base: str, profile: str, body: Dict) -> str:
         """Request a report, or reuse the identical one Amazon is already building."""
@@ -499,15 +559,23 @@ class AmazonAdsConnector(ApiConnector):
                                report_id, status or "pending", profile)
                 raise ApiError(
                     ErrorCode.TIMEOUT,
-                    f"Amazon is still generating the report for profile {profile}. "
-                    "Run the same query again in a minute; it picks up the "
-                    "report already in progress.",
+                    f"Amazon is still generating the report for profile {profile}; "
+                    "this can take from a few minutes to over half an hour. Run "
+                    "the same query again later: it picks up this report instead "
+                    "of starting a new one. Don't wait for it in a loop.",
                     retriable=True,
-                    retry_after_seconds=60,
+                    retry_after_seconds=_RETRY_AFTER_S,
                     details={"profile": profile, "report_id": report_id},
                 )
             self._sleep(min(interval, remaining))
             interval = min(interval * _POLL_BACKOFF, _POLL_MAX_S)
+
+
+def _reuse_seconds(body: Dict) -> int:
+    """How long a report stays reusable: shorter while its range includes today."""
+    if str(body.get("endDate") or "") >= date.today().isoformat():
+        return _REUSE_OPEN_RANGE_S
+    return _REUSE_CLOSED_RANGE_S
 
 
 def _report_wait() -> float:
