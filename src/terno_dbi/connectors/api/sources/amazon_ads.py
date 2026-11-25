@@ -561,8 +561,8 @@ class AmazonAdsConnector(ApiConnector):
                     ErrorCode.TIMEOUT,
                     f"Amazon is still generating the report for profile {profile}; "
                     "this can take from a few minutes to over half an hour. Run "
-                    "the same query again later: it picks up this report instead "
-                    "of starting a new one. Don't wait for it in a loop.",
+                    "the same query again later: it picks up this report when it "
+                    "is ready instead of starting a new one.",
                     retriable=True,
                     retry_after_seconds=_RETRY_AFTER_S,
                     details={"profile": profile, "report_id": report_id},
