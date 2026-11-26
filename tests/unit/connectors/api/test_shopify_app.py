@@ -17,6 +17,7 @@ import pytest
 from django.contrib.auth.models import AnonymousUser
 from django.http import QueryDict
 from django.test import RequestFactory
+from django.utils import timezone
 
 from terno_dbi.connectors.api import shopify_app
 
@@ -578,6 +579,26 @@ class TestClaim:
         assert not ShopifyPendingInstall.objects.exists()
         assert resp.cookies[shopify_app.CLAIM_COOKIE]["max-age"] == 0
 
+    def test_claim_sends_installed_signal(self, authorized, org, django_capture_on_commit_callbacks):
+        from terno_dbi.connectors.api.signals import marketplace_app_installed
+        received = []
+
+        def handler(sender, organisation, marketplace, account, started_at, **kwargs):
+            received.append((organisation.pk, marketplace, account, started_at))
+
+        marketplace_app_installed.connect(handler)
+        try:
+            authorized._user = org.owner
+            before = timezone.now()
+            with django_capture_on_commit_callbacks(execute=True):
+                _claim(authorized, org.id)
+        finally:
+            marketplace_app_installed.disconnect(handler)
+        [(org_id, marketplace, account, started_at)] = received
+        assert (org_id, marketplace, account) == (org.pk, "shopify", SHOP)
+        # When the merchant approved the install, before they signed in.
+        assert started_at is not None and started_at <= before
+
     def test_return_to_is_honoured(self, authorized, org):
         authorized._user = org.owner
         resp = _claim(authorized, org.id, return_to="/chat")
@@ -886,6 +907,64 @@ class TestAppUninstalled:
         assert _post(client, "app/uninstalled", _uninstalled_payload()).status_code == 200
         assert "ACCESS_TOKEN" not in _bundle(connected)
         assert "ACCESS_TOKEN" not in _bundle(second)
+
+    def test_sends_uninstalled_signal_per_org(self, client, connected, shopify_catalog,
+                                              django_capture_on_commit_callbacks):
+        from django.contrib.auth.models import User
+        from terno_dbi.connectors.api.signals import marketplace_app_uninstalled
+        from terno_dbi.core.models import CoreOrganisation
+
+        owner = User.objects.create_user("other-owner", "x@example.com", "pw")
+        other_org = CoreOrganisation.objects.create(
+            name="Other", subdomain="shop-other", owner=owner)
+        _connection(other_org, shopify_catalog, SHOP, "Shopify other org")
+        received = []
+
+        def handler(sender, organisation, marketplace, account, **kwargs):
+            received.append((organisation.pk, marketplace, account))
+
+        marketplace_app_uninstalled.connect(handler)
+        try:
+            with django_capture_on_commit_callbacks(execute=True):
+                _post(client, "app/uninstalled", _uninstalled_payload())
+        finally:
+            marketplace_app_uninstalled.disconnect(handler)
+        assert sorted(received) == sorted([(connected.organisation_id, "shopify", SHOP),
+                                           (other_org.pk, "shopify", SHOP)])
+
+    def test_shop_redact_counts_as_uninstall(self, client, connected,
+                                             django_capture_on_commit_callbacks):
+        from terno_dbi.connectors.api.signals import marketplace_app_uninstalled
+        received = []
+
+        def handler(sender, organisation, marketplace, account, **kwargs):
+            received.append((organisation.pk, marketplace, account))
+
+        marketplace_app_uninstalled.connect(handler)
+        try:
+            with django_capture_on_commit_callbacks(execute=True):
+                _post(client, "shop/redact", _shop_redact_payload())
+        finally:
+            marketplace_app_uninstalled.disconnect(handler)
+        assert received == [(connected.organisation_id, "shopify", SHOP)]
+
+    def test_uninstall_without_a_connection_is_still_announced(
+            self, client, connected, django_capture_on_commit_callbacks):
+        # The connection was deleted before the store removed the app.
+        from terno_dbi.connectors.api.signals import marketplace_app_uninstalled
+        connected.delete()
+        received = []
+
+        def handler(sender, organisation, marketplace, account, **kwargs):
+            received.append((organisation, marketplace, account))
+
+        marketplace_app_uninstalled.connect(handler)
+        try:
+            with django_capture_on_commit_callbacks(execute=True):
+                _post(client, "shop/redact", _shop_redact_payload())
+        finally:
+            marketplace_app_uninstalled.disconnect(handler)
+        assert received == [(None, "shopify", SHOP)]
 
     def test_domain_match_is_case_insensitive(self, client, org, shopify_catalog):
         ds = _connection(org, shopify_catalog, "Acme-Store.myshopify.com", "Shopify")

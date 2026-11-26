@@ -8,3 +8,5 @@ from django.dispatch import Signal
 
 # Sent after a ConnectorRequest is committed. kwargs: `request` (the row).
 connector_requested = Signal()
+marketplace_app_installed = Signal()
+marketplace_app_uninstalled = Signal()
