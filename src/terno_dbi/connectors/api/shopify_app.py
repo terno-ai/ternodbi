@@ -409,6 +409,7 @@ def claim_install(request, organisation, shop: str, return_to: str = "") -> Http
     row is used once and deleted.
     """
     from terno_dbi.connectors.api.auth.oauth import _store_tokens, connector_datasource
+    from terno_dbi.connectors.api.signals import marketplace_app_installed
     from terno_dbi.core.models import ShopifyPendingInstall
     from terno_dbi.services.secrets import decrypt_dict, encrypt_dict
 
@@ -437,7 +438,11 @@ def claim_install(request, organisation, shop: str, return_to: str = "") -> Http
             # Another store's tokens must not survive into this one's bundle.
             data_source.connection_json = encrypt_dict({})
         _store_tokens(data_source, token_response, instance=shop, fresh_grant=True)
+        started_at = pending.created_at
         pending.delete()
+        transaction.on_commit(lambda: _send_logged(
+            marketplace_app_installed, organisation=organisation, account=shop,
+            started_at=started_at))
 
     _delete_expired_pending()
     logger.info("Shopify %s connected to organisation %s", shop, organisation.pk)
@@ -484,6 +489,24 @@ def datasources_for_shop(shop: str) -> list:
     return matches
 
 
+def _announce_uninstall(shop: str, rows) -> None:
+    """Tell the host, once the transaction commits, that `shop` removed the
+    app: once per organisation still connected to it, or once with no
+    organisation when none is (the connection was deleted or moved first)."""
+    from terno_dbi.connectors.api.signals import marketplace_app_uninstalled
+
+    organisations = {ds.organisation for ds in rows if ds.organisation_id} or {None}
+    for organisation in organisations:
+        transaction.on_commit(lambda org=organisation: _send_logged(
+            marketplace_app_uninstalled, organisation=org, account=shop))
+
+
+def _send_logged(signal, **kwargs) -> None:
+    for receiver, result in signal.send_robust(sender=None, marketplace=CONNECTOR_KEY, **kwargs):
+        if isinstance(result, Exception):
+            logger.error("Receiver %r failed for a Shopify app signal: %s", receiver, result)
+
+
 def _on_app_uninstalled(shop: str, payload: Mapping) -> None:
     from terno_dbi.core.models import DataSource, ShopifyPendingInstall
     from terno_dbi.services.secrets import encrypt_dict
@@ -499,6 +522,7 @@ def _on_app_uninstalled(shop: str, payload: Mapping) -> None:
             ds.auth_status = DataSource.AuthStatus.NOT_AUTHENTICATED
             ds.auth_error = UNINSTALLED_MESSAGE
             ds.save(update_fields=["connection_json", "auth_status", "auth_error"])
+        _announce_uninstall(shop, rows)
     logger.info("Shopify app/uninstalled for %s: cleared %d connection(s)",
                 shop, len(rows))
 
@@ -506,9 +530,14 @@ def _on_app_uninstalled(shop: str, payload: Mapping) -> None:
 def _on_shop_redact(shop: str, payload: Mapping) -> None:
     from terno_dbi.core.models import DataSource, ShopifyPendingInstall
 
-    ids = [ds.pk for ds in datasources_for_shop(shop)]
+    rows = datasources_for_shop(shop)
+    ids = [ds.pk for ds in rows]
     with transaction.atomic():
         ShopifyPendingInstall.objects.filter(shop=shop).delete()
+        # Sent 48 hours after an uninstall, so it is one too: the only one an
+        # app on the legacy install flow can receive (app/uninstalled can't be
+        # subscribed with it). Hosts treat a repeat as a no-op.
+        _announce_uninstall(shop, rows)
         deleted, _ = DataSource.objects.filter(pk__in=ids).delete()
     logger.info("Shopify shop/redact for %s: deleted %d connection(s) (%d rows in all)",
                 shop, len(ids), deleted)
