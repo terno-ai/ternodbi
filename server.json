@@ -6,7 +6,59 @@
     "url": "https://github.com/terno-ai/ternodbi",
     "source": "github"
   },
-  "version": "1.0.2",
+  "version": "1.0.38.2",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "terno-dbi",
+      "version": "1.0.38.2",
+      "runtimeHint": "uvx",
+      "runtimeArguments": [
+        {
+          "type": "positional",
+          "valueHint": "--from",
+          "value": "--from"
+        },
+        {
+          "type": "positional",
+          "valueHint": "package",
+          "value": "terno-dbi"
+        },
+        {
+          "type": "positional",
+          "valueHint": "entrypoint",
+          "value": "dbi-mcp"
+        }
+      ],
+      "packageArguments": [
+        {
+          "type": "positional",
+          "valueHint": "server",
+          "value": "query",
+          "description": "Tool registry to expose. 'query' is read-only; use 'admin' for schema, memory and organisation-prompt writes."
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "TERNODBI_API_URL",
+          "description": "Base URL of the TernoDBI server. Use http://127.0.0.1:8376 for a local 'ternodbi start'.",
+          "default": "http://127.0.0.1:8376",
+          "isRequired": true
+        },
+        {
+          "name": "TERNODBI_API_KEY",
+          "description": "Access token minted with 'ternodbi manage issue_token'. Use a query token for the read-only server and an admin token for the admin server.",
+          "placeholder": "dbi_query_...",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ],
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ],
   "remotes": [
     {
       "type": "streamable-http",
