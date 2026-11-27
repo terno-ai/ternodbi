@@ -12,6 +12,25 @@
 
 ## Unreleased
 
+- `/slack/claim` is accepted as a connector redirect target. A Slack install
+  started without a Terno session carries `next=/slack/claim/?token=...`
+  through sign-in; self-hosted deployments dropped it, so the user landed on
+  `/` and the install never finished. Hosted was unaffected, since the
+  provisioner's copy of this list already had the path.
+
+- `/api/query/health/` and `/api/query/info/` report the installed package
+  version instead of a hardcoded `1.0.0`, which had not moved since it was
+  written. Both read `terno_dbi.__version__`, which comes from package
+  metadata, so they cannot drift from `pyproject.toml`.
+- The MCP servers report their own version in `initialize`. With no `version=`
+  the SDK substitutes its own, so clients displayed the `mcp` library version
+  (`1.30.0`) as TernoDBI's. Affects `ternodbi-query`, `ternodbi-admin` and the
+  merged `terno` server.
+- TernoDBI can be installed from the MCP Registry as a local stdio server
+  (`uvx --from terno-dbi dbi-mcp query`). The registry entry previously listed
+  only the hosted endpoint, so there was no way to run it from the registry on
+  your own machine.
+
 - Partial OAuth grants are detected. Google, Meta and Instagram Login let the
   user untick single permissions; a connection missing one its connector needs
   is stored as needing a reconnect (`auth_status=expired`) with `auth_error`
