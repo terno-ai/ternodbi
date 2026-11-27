@@ -1183,7 +1183,7 @@ class TestMcpLoginRedirectUnchanged:
 
     def test_mcp_authorize_next_still_accepted(self):
         from terno_dbi.oauth.login_redirect import AUTHORIZE_PATHS, is_connector_next
-        assert AUTHORIZE_PATHS == ("/oauth/authorize", "/connect")
+        assert AUTHORIZE_PATHS == ("/oauth/authorize", "/connect", "/slack/claim")
         assert is_connector_next(
             "/oauth/authorize/?response_type=code&client_id=abc&scope=query%3Aread")
 

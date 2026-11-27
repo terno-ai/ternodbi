@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 SESSION_KEY = "terno_connector_next"
 
-AUTHORIZE_PATHS = ("/oauth/authorize", "/connect")
+AUTHORIZE_PATHS = ("/oauth/authorize", "/connect", "/slack/claim")
 
 
 def is_connector_next(url: str) -> bool:
