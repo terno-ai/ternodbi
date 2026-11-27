@@ -2,6 +2,7 @@ import sys
 import json
 import asyncio
 import logging
+from terno_dbi import __version__
 from typing import Any, Dict, List
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 server = Server(
     "ternodbi-query",
+    version=__version__,
     instructions=QUERY_INSTRUCTIONS,
 )
 

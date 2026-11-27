@@ -15,6 +15,7 @@ allow writes, so clients only see tools they can use.
 
 import asyncio
 import logging
+from terno_dbi import __version__
 import sys
 from typing import Any, Dict, List, Optional
 from mcp.server import Server
@@ -65,7 +66,11 @@ class _PerRequestToolServer(Server):
         return next((t for t in tools if t.name == tool_name), None)
 
 
-server = _PerRequestToolServer(SERVER_NAME, instructions=MERGED_INSTRUCTIONS)
+server = _PerRequestToolServer(
+    SERVER_NAME,
+    version=__version__,
+    instructions=MERGED_INSTRUCTIONS,
+)
 register_surface(server)
 
 

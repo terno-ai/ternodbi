@@ -1,6 +1,7 @@
 import logging
 from django.http import JsonResponse
 from django.shortcuts import render
+from terno_dbi import __version__
 from terno_dbi.connectors import ConnectorFactory
 from terno_dbi.core import conf
 from django.shortcuts import redirect
@@ -19,7 +20,7 @@ def health(request):
     return JsonResponse({
         "status": "ok",
         "service": "terno_dbi",
-        "version": "1.0.0",
+        "version": __version__,
     })
 
 
@@ -29,7 +30,7 @@ def info(request):
 
     return JsonResponse({
         "service": "terno_dbi",
-        "version": "1.0.0",
+        "version": __version__,
         "supported_databases": supported_dbs,
         "config": {
             "cache_timeout": conf.get("CACHE_TIMEOUT"),
